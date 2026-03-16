@@ -1,0 +1,111 @@
+<View>
+    <View style="display: flex; flex-direction: row; justify-content: space-between; gap: 20px; padding: 15px; border-radius: 5px; margin-bottom: 10px;">
+
+    <Image name="img-1" value="$img" zoom="true" zoomControl="true" rotateControl="true"/>
+    
+    <KeyPointLabels name="kp" toName="img-1" strokeWidth="3" maxUsages="1" unique="true" showInLine="false" opacity="0.5">
+        <View style="display: flex; flex-direction: row; justify-content: space-between; gap: 5px; padding: 5px; border-radius: 5px; margin-bottom: 5px;">
+
+        <View style="display: flex; flex-direction: column; justify-content: space-between; gap: 5px; box-shadow: 2px 2px 5px #999; padding: 15px; border-radius: 5px; margin-bottom: 5px;">
+
+          <View style="flex: 1; border-left: 1px solid #eee; padding-left: 15px;">
+            <Header value="Head" style="font-size: 14px; border-bottom: 1px solid #eee; padding-bottom: 5px;"/>
+            <View style="display: flex; flex-direction: column; justify-content: space-between;">
+              <Label value="top-head" background="#ff0000"/>
+              <Label value="head-left" background="#e1004b"/>
+              <Label value="head-right" background="#e14b00"/>
+              <Label value="neck" background="#c80000"/>
+            </View>
+           </View>
+
+          <View style="flex: 1; border-left: 1px solid #eee; padding-left: 15px;">
+            <Header value="Eyes" style="font-size: 14px; border-bottom: 1px solid #eee; padding-bottom: 5px;"/>
+            <View style="display: flex; flex-direction: column; justify-content: space-between;">
+            <Label value="eye-left" background="#c8c8dc"/>
+            <Label value="eye-right" background="#c8dcc8"/>
+            </View>
+           </View>
+          
+          <View style="flex: 1; border-left: 1px solid #eee; padding-left: 15px;">
+            <Header value="Left Antenna" style="font-size: 14px; border-bottom: 1px solid #eee; padding-bottom: 5px;"/>
+            <View style="display: flex; flex-direction: column; justify-content: space-between;">
+            <Label value="antenna-left-0" background="#00ffff"/>
+            <Label value="antenna-left-1" background="#96ffff"/>
+            <Label value="antenna-left-2" background="#c8ffff"/>
+            </View>
+          </View>
+
+          <View style="flex: 1; border-left: 1px solid #eee; padding-left: 15px;">
+            <Header value="Right Antenna" style="font-size: 14px; border-bottom: 1px solid #eee; padding-bottom: 5px;"/>
+            <View style="display: flex; flex-direction: column; justify-content: space-between;">
+            <Label value="antenna-right-0" background="#00ffc8"/>
+            <Label value="antenna-right-1" background="#96ffc8"/>
+            <Label value="antenna-right-2" background="#c8ffc8"/>
+            </View>
+          </View>
+
+          <View style="flex: 1; border-left: 1px solid #eee; padding-left: 15px;">
+            <Header value="Thorax" style="font-size: 14px; border-bottom: 1px solid #eee; padding-bottom: 5px;"/>
+            <View style="display: flex; flex-direction: column; justify-content: space-between;">
+            <Label value="prothorax-left" background="#ff9632"/>
+            <Label value="prothorax-right" background="#ffc800"/>
+            <Label value="petiole" background="#ffff00"/>
+            </View>
+          </View>
+        </View>
+
+        <View style="display: flex; flex-direction: column; justify-content: space-between; gap: 20px; box-shadow: 2px 2px 5px #999; padding: 15px; border-radius: 5px; margin-bottom: 10px;">
+
+          <View style="flex: 1; border-left: 1px solid #eee; padding-left: 15px;">
+            <Header value="Left wing" style="font-size: 14px; border-bottom: 1px solid #eee; padding-bottom: 5px;"/>
+            <View style="display: flex; flex-direction: column; justify-content: space-between;">
+            <Label value="wing-left-base" background="#c800ff"/>
+            <Label value="wing-left-tip" background="#c80096"/>
+            <Label value="wing-left-front" background="#ff00c8"/>
+            <Label value="wing-left-hind" background="#9600af"/>
+            </View>
+          </View>
+
+          <View style="flex: 1; border-left: 1px solid #eee; padding-left: 15px;">
+            <Header value="Right wing" style="font-size: 14px; border-bottom: 1px solid #eee; padding-bottom: 5px;"/>
+            <View style="display: flex; flex-direction: column; justify-content: space-between;">
+            <Label value="wing-right-base" background="#c83296"/>
+            <Label value="wing-right-tip" background="#c89696"/>
+            <Label value="wing-right-front" background="#ff6496"/>
+            <Label value="wing-right-hind" background="#966496"/>
+            </View>
+          </View>
+          
+          <View style="flex: 1; border-left: 1px solid #eee; padding-left: 15px;">
+            <Header value="Left hind leg" style="font-size: 14px; border-bottom: 1px solid #eee; padding-bottom: 5px;"/>
+            <View style="display: flex; flex-direction: column; justify-content: space-between;">
+            <Label value="leg-left-0" background="#00c8ff"/>
+            <Label value="leg-left-1" background="#7dc8ff"/>
+            <Label value="leg-left-2" background="#afc8ff"/>
+            </View>
+          </View>
+
+          <View style="flex: 1; border-left: 1px solid #eee; padding-left: 15px;">
+            <Header value="Right hind leg" style="font-size: 14px; border-bottom: 1px solid #eee; padding-bottom: 5px;"/>
+            <View style="display: flex; flex-direction: column; justify-content: space-between;">
+            <Label value="leg-right-0" background="#00c8c8"/>
+            <Label value="leg-right-1" background="#7dc8c8"/>
+            <Label value="leg-right-2" background="#afc8c8"/>
+            </View>
+          </View>
+          
+          <View style="flex: 1; border-left: 1px solid #eee; padding-left: 15px;">
+            <Header value="Abdomen" style="font-size: 14px; border-bottom: 1px solid #eee; padding-bottom: 5px;"/>
+            <View style="display: flex; flex-direction: column; justify-content: space-between;">
+            <Label value="body-left" background="#64c864"/>
+            <Label value="body-right" background="#64ff00"/>
+            <Label value="body-tip" background="#00ff00"/>
+            </View>
+          </View>
+          
+        </View>
+      </View>
+    </KeyPointLabels>
+    </View>
+  
+</View>
