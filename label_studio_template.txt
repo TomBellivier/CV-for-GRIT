@@ -49,7 +49,7 @@
             <View style="display: flex; flex-direction: column; justify-content: space-between;">
             <Label value="prothorax-left" background="#ff9632"/>
             <Label value="prothorax-right" background="#ffc800"/>
-            <Label value="petiole" background="#ffff00"/>
+            <Label value="thorax-bottom" background="#ffff00"/>
             </View>
           </View>
         </View>
