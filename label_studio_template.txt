@@ -47,8 +47,8 @@
           <View style="flex: 1; border-left: 1px solid #eee; padding-left: 15px;">
             <Header value="Thorax" style="font-size: 14px; border-bottom: 1px solid #eee; padding-bottom: 5px;"/>
             <View style="display: flex; flex-direction: column; justify-content: space-between;">
-            <Label value="prothorax-left" background="#ff9632"/>
-            <Label value="prothorax-right" background="#ffc800"/>
+            <Label value="thorax-left" background="#ff9632"/>
+            <Label value="thorax-right" background="#ffc800"/>
             <Label value="thorax-bottom" background="#ffff00"/>
             </View>
           </View>
