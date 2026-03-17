@@ -1,8 +1,9 @@
 <View>
     <View style="display: flex; flex-direction: row; justify-content: space-between; gap: 20px; padding: 15px; border-radius: 5px; margin-bottom: 10px;">
-
     <Image name="img-1" value="$img" zoom="true" zoomControl="true" rotateControl="true"/>
     
+    <View style="display: flex; flex-direction: column; justify-content: space-between; gap: 5px; box-shadow: 2px 2px 5px #999; padding: 15px; border-radius: 5px; margin-bottom: 5px;">
+
     <KeyPointLabels name="kp" toName="img-1" strokeWidth="4" maxUsages="1" unique="true" showInLine="false" opacity="0.5">
         <View style="display: flex; flex-direction: row; justify-content: space-between; gap: 5px; padding: 5px; border-radius: 5px; margin-bottom: 5px;">
 
@@ -106,6 +107,8 @@
         </View>
       </View>
     </KeyPointLabels>
+    <TextArea name="remarks" toName="img-1" placeholder="Enter any remarks..." rows="5" maxSubmissions="1"/>
+    </View>
     </View>
   
 </View>
