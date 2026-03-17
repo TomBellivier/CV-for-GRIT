@@ -62,7 +62,7 @@
             <Label value="wing-left-base" background="#c800ff"/>
             <Label value="wing-left-tip" background="#c80096"/>
             <Label value="wing-left-front" background="#ff00c8"/>
-            <Label value="wing-left-hind" background="#9600af"/>
+            <Label value="wing-left-rear" background="#9600af"/>
             </View>
           </View>
 
@@ -72,7 +72,7 @@
             <Label value="wing-right-base" background="#c83296"/>
             <Label value="wing-right-tip" background="#c89696"/>
             <Label value="wing-right-front" background="#ff6496"/>
-            <Label value="wing-right-hind" background="#966496"/>
+            <Label value="wing-right-rear" background="#966496"/>
             </View>
           </View>
           
