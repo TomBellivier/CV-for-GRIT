@@ -5,7 +5,7 @@
     <View style="display: flex; flex-direction: column; justify-content: space-between; gap: 5px; box-shadow: 2px 2px 5px #999; padding: 15px; border-radius: 5px; margin-bottom: 5px;">
 
     <KeyPointLabels name="kp" toName="img-1" strokeWidth="4" maxUsages="1" unique="true" showInLine="false" opacity="0.5">
-        <View style="display: flex; flex-direction: row; justify-content: space-between; gap: 5px; padding: 5px; border-radius: 5px; margin-bottom: 5px;">
+        <View style="display: flex; flex-direction: row; justify-content: space-between; gap: 5px; padding: 5px; border-radius: 5px; margin-bottom: 5px;" background="#ffa39e">
 
         <View style="display: flex; flex-direction: column; justify-content: space-between; gap: 5px; box-shadow: 2px 2px 5px #999; padding: 15px; border-radius: 5px; margin-bottom: 5px;">
 
@@ -28,70 +28,11 @@
            </View>
           
           <View style="flex: 1; border-left: 1px solid #eee; padding-left: 15px;">
-            <Header value="Left Antenna" style="font-size: 14px; border-bottom: 1px solid #eee; padding-bottom: 5px;"/>
-            <View style="display: flex; flex-direction: column; justify-content: space-between;">
-            <Label value="left-antenna-0" background="#00ffff"/>
-            <Label value="left-antenna-1" background="#96ffff"/>
-            <Label value="left-antenna-2" background="#c8ffff"/>
-            </View>
-          </View>
-
-          <View style="flex: 1; border-left: 1px solid #eee; padding-left: 15px;">
-            <Header value="Right Antenna" style="font-size: 14px; border-bottom: 1px solid #eee; padding-bottom: 5px;"/>
-            <View style="display: flex; flex-direction: column; justify-content: space-between;">
-            <Label value="right-antenna-0" background="#00ffc8"/>
-            <Label value="right-antenna-1" background="#96ffc8"/>
-            <Label value="right-antenna-2" background="#c8ffc8"/>
-            </View>
-          </View>
-
-          <View style="flex: 1; border-left: 1px solid #eee; padding-left: 15px;">
             <Header value="Thorax" style="font-size: 14px; border-bottom: 1px solid #eee; padding-bottom: 5px;"/>
             <View style="display: flex; flex-direction: column; justify-content: space-between;">
             <Label value="thorax-left" background="#ff9632"/>
             <Label value="thorax-right" background="#ffc800"/>
             <Label value="thorax-bottom" background="#ffff00"/>
-            </View>
-          </View>
-        </View>
-
-        <View style="display: flex; flex-direction: column; justify-content: space-between; gap: 20px; box-shadow: 2px 2px 5px #999; padding: 15px; border-radius: 5px; margin-bottom: 10px;">
-
-          <View style="flex: 1; border-left: 1px solid #eee; padding-left: 15px;">
-            <Header value="Left wing" style="font-size: 14px; border-bottom: 1px solid #eee; padding-bottom: 5px;"/>
-            <View style="display: flex; flex-direction: column; justify-content: space-between;">
-            <Label value="left-wing-base" background="#c800ff"/>
-            <Label value="left-wing-tip" background="#c80096"/>
-            <Label value="left-wing-front" background="#ff00c8"/>
-            <Label value="left-wing-rear" background="#9600af"/>
-            </View>
-          </View>
-
-          <View style="flex: 1; border-left: 1px solid #eee; padding-left: 15px;">
-            <Header value="Right wing" style="font-size: 14px; border-bottom: 1px solid #eee; padding-bottom: 5px;"/>
-            <View style="display: flex; flex-direction: column; justify-content: space-between;">
-            <Label value="right-wing-base" background="#c83296"/>
-            <Label value="right-wing-tip" background="#c89696"/>
-            <Label value="right-wing-front" background="#ff6496"/>
-            <Label value="right-wing-rear" background="#966496"/>
-            </View>
-          </View>
-          
-          <View style="flex: 1; border-left: 1px solid #eee; padding-left: 15px;">
-            <Header value="Left hind leg" style="font-size: 14px; border-bottom: 1px solid #eee; padding-bottom: 5px;"/>
-            <View style="display: flex; flex-direction: column; justify-content: space-between;">
-            <Label value="left-leg-0" background="#00c8ff"/>
-            <Label value="left-leg-1" background="#7dc8ff"/>
-            <Label value="left-leg-2" background="#afc8ff"/>
-            </View>
-          </View>
-
-          <View style="flex: 1; border-left: 1px solid #eee; padding-left: 15px;">
-            <Header value="Right hind leg" style="font-size: 14px; border-bottom: 1px solid #eee; padding-bottom: 5px;"/>
-            <View style="display: flex; flex-direction: column; justify-content: space-between;">
-            <Label value="right-leg-0" background="#00c8c8"/>
-            <Label value="right-leg-1" background="#7dc8c8"/>
-            <Label value="right-leg-2" background="#afc8c8"/>
             </View>
           </View>
           
@@ -105,8 +46,91 @@
           </View>
           
         </View>
+        <View style="display: flex; flex-direction: column; justify-content: space-between; gap: 20px; box-shadow: 2px 2px 5px #999; padding: 15px; border-radius: 5px; margin-bottom: 10px;">
+			
+         <View style="flex: 1; border-left: 1px solid #eee; padding-left: 15px;">
+            <Header value="Left Antenna" style="font-size: 14px; border-bottom: 1px solid #eee; padding-bottom: 5px;"/>
+            <View style="display: flex; flex-direction: column; justify-content: space-between;">
+            <Label value="left-antenna-0" background="#00ffff"/>
+            <Label value="left-antenna-1" background="#96ffff"/>
+            <Label value="left-antenna-2" background="#c8ffff"/>
+            </View>
+          </View>
+          
+          <View style="flex: 1; border-left: 1px solid #eee; padding-left: 15px;">
+            <Header value="Left forewing" style="font-size: 14px; border-bottom: 1px solid #eee; padding-bottom: 5px;"/>
+            <View style="display: flex; flex-direction: column; justify-content: space-between;">
+            <Label value="left-forewing-base" background="#c800ff"/>
+            <Label value="left-forewing-tip" background="#c80096"/>
+            <Label value="left-forewing-front" background="#ff00c8"/>
+            <Label value="left-forewing-rear" background="#9600af"/>
+            </View>
+          </View>
+
+           <View style="flex: 1; border-left: 1px solid #eee; padding-left: 15px;">
+            <Header value="Left hindwing" style="font-size: 14px; border-bottom: 1px solid #eee; padding-bottom: 5px;"/>
+            <View style="display: flex; flex-direction: column; justify-content: space-between;">
+            <Label value="left-hindwing-base" background="#646496"/>
+            <Label value="left-hindwing-tip" background="#6464ff"/>
+            <Label value="left-hindwing-front" background="#9664c8"/>
+            <Label value="left-hindwing-rear" background="#3264c8"/>
+            </View>
+          </View>
+          
+          <View style="flex: 1; border-left: 1px solid #eee; padding-left: 15px;">
+            <Header value="Left hind leg" style="font-size: 14px; border-bottom: 1px solid #eee; padding-bottom: 5px;"/>
+            <View style="display: flex; flex-direction: column; justify-content: space-between;">
+            <Label value="left-leg-0" background="#00c8ff"/>
+            <Label value="left-leg-1" background="#7dc8ff"/>
+            <Label value="left-leg-2" background="#afc8ff"/>
+            </View>
+          </View>
+     
+        </View>
+
+        <View style="display: flex; flex-direction: column; justify-content: space-between; gap: 20px; box-shadow: 2px 2px 5px #999; padding: 15px; border-radius: 5px; margin-bottom: 10px;">
+
+          <View style="flex: 1; border-left: 1px solid #eee; padding-left: 15px;">
+            <Header value="Right Antenna" style="font-size: 14px; border-bottom: 1px solid #eee; padding-bottom: 5px;"/>
+            <View style="display: flex; flex-direction: column; justify-content: space-between;">
+            <Label value="right-antenna-0" background="#00ffc8"/>
+            <Label value="right-antenna-1" background="#96ffc8"/>
+            <Label value="right-antenna-2" background="#c8ffc8"/>
+            </View>
+          </View>
+          
+          <View style="flex: 1; border-left: 1px solid #eee; padding-left: 15px;">
+            <Header value="Right forewing" style="font-size: 14px; border-bottom: 1px solid #eee; padding-bottom: 5px;"/>
+            <View style="display: flex; flex-direction: column; justify-content: space-between;">
+            <Label value="right-forewing-base" background="#c83296"/>
+            <Label value="right-forewing-tip" background="#c89696"/>
+            <Label value="right-forewing-front" background="#ff6496"/>
+            <Label value="right-forewing-rear" background="#966496"/>
+            </View>
+          </View>
+
+          <View style="flex: 1; border-left: 1px solid #eee; padding-left: 15px;">
+            <Header value="Right hindwing" style="font-size: 14px; border-bottom: 1px solid #eee; padding-bottom: 5px;"/>
+            <View style="display: flex; flex-direction: column; justify-content: space-between;">
+            <Label value="right-hindwing-base" background="#9696ff"/>
+            <Label value="right-hindwing-tip" background="#969696"/>
+            <Label value="right-hindwing-front" background="#c896c8"/>
+            <Label value="right-hindwing-rear" background="#6496c8"/>
+            </View>
+          </View>
+
+          <View style="flex: 1; border-left: 1px solid #eee; padding-left: 15px;">
+            <Header value="Right hind leg" style="font-size: 14px; border-bottom: 1px solid #eee; padding-bottom: 5px;"/>
+            <View style="display: flex; flex-direction: column; justify-content: space-between;">
+            <Label value="right-leg-0" background="#00c8c8"/>
+            <Label value="right-leg-1" background="#7dc8c8"/>
+            <Label value="right-leg-2" background="#afc8c8"/>
+            </View>
+          </View>
+
+        </View>
       </View>
-    </KeyPointLabels>
+      </KeyPointLabels>
     <TextArea name="remarks" toName="img-1" placeholder="Enter any remarks..." rows="5" maxSubmissions="1"/>
     </View>
     </View>
