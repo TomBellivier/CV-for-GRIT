@@ -81,7 +81,7 @@
             <Label value="left-leg-0" background="#00c8ff"/>
             <Label value="left-leg-1" background="#7dc8ff"/>
             <Label value="left-leg-2" background="#afc8ff"/>
-            <Label value="left-leg-2" background="#ffc8ff"/>
+            <Label value="left-leg-3" background="#ffc8ff"/>
             </View>
           </View>
      
