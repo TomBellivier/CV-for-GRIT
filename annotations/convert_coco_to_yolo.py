@@ -258,9 +258,10 @@ def convert_coco(
 if __name__ == "__main__":
     # IT NEEDS TO BE ONLY ONE FILE IN THE FOLDER
     # except if every files uses images from the same directory 
+    IMAGE_DIR = "C:/Users/tombe/Documents/_MLE/CV-for-GRIT/databases/hawaii_beetles_images/individual_specimens/08/"
     convert_coco(
         labels_dir="./coco-converted/", 
-        image_dir = "C:/Users/tombe/Documents/_MLE/CV-for-GRIT/databases/hawaii_beetles_images/individual_specimens/08/", 
+        image_dir = IMAGE_DIR, 
         save_dir = "../models/datasets/", use_keypoints=True
     )
 
