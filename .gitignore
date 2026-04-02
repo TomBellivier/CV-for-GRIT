@@ -1,1 +1,11 @@
 *.png
+*.jpg
+*.jpeg
+*.log
+*.json
+!label_studio_annotations/
+!label_studio_annotations/**/*.json
+*.pth
+*.pt
+models/datasets/
+models/runs/

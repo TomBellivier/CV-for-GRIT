@@ -1,0 +1,2 @@
+set LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED=true
+label-studio start
