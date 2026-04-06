@@ -132,9 +132,7 @@ def filter(all_kps, keywords):
 def make_config_file(dataset_name, filter_keywords=[], printing=False):
     filtered_total = filter(TOTAL, filter_keywords)
     filtered_skeleton = filter(SKELETON_NAMES,filter_keywords)
-    print(len(filtered_total), len(filtered_skeleton))
-    print(filtered_total, filtered_skeleton)
-    return
+
     base_idx = {filtered_total[i]:i for i in range(len(filtered_total))}
     flip_idx = {}
     for x in filtered_total:
@@ -151,7 +149,7 @@ def make_config_file(dataset_name, filter_keywords=[], printing=False):
     if printing :
         print("Flipped indices:", [base_idx[x] for x in fliped_total])
 
-    squeleton_idx = [[base_idx[x] for x in pair] for pair in SKELETON_NAMES]
+    squeleton_idx = [[base_idx[x] for x in pair] for pair in filtered_skeleton]
     if printing:
         print("Skeleton indices:", squeleton_idx)
     
@@ -160,11 +158,11 @@ def make_config_file(dataset_name, filter_keywords=[], printing=False):
         "train" : "images/train",
         "val" : "images/val",
         "test" : "images/test",
-        "kp_shape" : [len(TOTAL), 3],
+        "kp_shape" : [len(filtered_total), 3],
         "skeleton" : squeleton_idx,
         "flip_idx" : [base_idx[x] for x in fliped_total],
         "names": {0 : "insects"},
-        "kp_names": {0 : TOTAL}
+        "kp_names": {0 : filtered_total}
     }
 
     with open(f"{dataset_name}/yolo-config.yaml", "w") as f:
