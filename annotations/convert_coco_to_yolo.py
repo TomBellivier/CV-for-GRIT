@@ -152,27 +152,27 @@ def make_config_file(dataset_name, filter_keywords=[], printing=False):
     squeleton_idx = [[base_idx[x] for x in pair] for pair in filtered_skeleton]
     if printing:
         print("Skeleton indices:", squeleton_idx)
-    
+    print(str(dataset_name))
     config = {
-        "path" : dataset_name,
+        "path" : str(dataset_name),
         "train" : "images/train",
         "val" : "images/val",
         "test" : "images/test",
-        "kp_shape" : [len(filtered_total), 3],
+        "kpt_shape" : [len(filtered_total), 3],
         "skeleton" : squeleton_idx,
         "flip_idx" : [base_idx[x] for x in fliped_total],
         "names": {0 : "insects"},
-        "kp_names": {0 : filtered_total}
+        "kpt_names": {0 : filtered_total}
     }
 
     with open(f"{dataset_name}/yolo-config.yaml", "w") as f:
-        yaml.dump(config, f)
+        yaml.dump(config, f, sort_keys=False, default_flow_style=None)
 
 def convert_coco(
     labels_dir: str = "../coco/annotations/",
     image_dir: str = "../coco/images/",
     save_dir: str = "coco_converted/",
-    yolo_conversion_done_dir = "./yolo-conversion-done/",
+    yolo_conversion_done_dir = "./annotations/yolo-conversion-done/",
     filter_keywords = [],
     TVT_split: list[int] = [0.8, 0.1, 0.1],
     use_keypoints: bool = False,
@@ -192,6 +192,8 @@ def convert_coco(
     coco80 = coco91_to_coco80_class()
     all_files = sorted([p for p in Path(labels_dir).resolve().glob("*.json")])
     print(all_files)
+
+    filtered_kpts = filter(TOTAL, filter_keywords)
 
     # Import json
     for json_file in all_files:
@@ -250,7 +252,14 @@ def convert_coco(
                     if use_keypoints:
                         if ann.get("keypoints") is None:
                             continue
-                        kp = box + (np.array(ann["keypoints"]).reshape(-1, 3) / np.array([w, h, 1])).reshape(-1).tolist()
+
+                        filtered_kp = []
+                        for kp_idx in range(len(filtered_kpts)):
+                            if check_filter(TOTAL[kp_idx], filter_keywords):
+                                for i in range(3):
+                                    filtered_kp.append(ann["keypoints"][kp_idx*3 + i])
+
+                        kp = box + (np.array(filtered_kp).reshape(-1, 3) / np.array([w, h, 1])).reshape(-1).tolist()
                         keypoints.append(
                             kp
                         )
@@ -283,13 +292,13 @@ def convert_coco(
 if __name__ == "__main__":
     # IT NEEDS TO BE ONLY ONE FILE IN THE FOLDER
     # except if every files uses images from the same directory 
-    IMAGE_DIR = "C:/Users/tombe/Documents/_MLE/CV-for-GRIT/databases/hawaii_beetles_images/individual_specimens/08/"
+    IMAGE_DIR = "/home/tombellivier/Documents/CV/CV-for-GRIT/databases/hawaii_beetles_images/individual_specimens/08"
     
     convert_coco(
         labels_dir="./annotations/coco-converted/", 
         image_dir = IMAGE_DIR, 
         save_dir = "./models/datasets/", 
-        filter_keywords = ["leg", ""],
+        filter_keywords = ["leg", "hindwing"],
         use_keypoints=True
     )
 
