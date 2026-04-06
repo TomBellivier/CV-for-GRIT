@@ -8,4 +8,5 @@
 *.pth
 *.pt
 models/datasets/
-models/runs/
+#models/runs/
+!models/run_results.json
