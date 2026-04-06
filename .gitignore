@@ -5,8 +5,13 @@
 *.json
 !label_studio_annotations/
 !label_studio_annotations/**/*.json
+
+!annotations/
+!annotations/**/*.json
 *.pth
 *.pt
-models/datasets/
+*.cache
+models/**/labels/
+models/**/images/
 #models/runs/
 !models/run_results.json

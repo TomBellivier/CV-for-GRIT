@@ -289,7 +289,7 @@ if __name__ == "__main__":
         labels_dir="./annotations/coco-converted/", 
         image_dir = IMAGE_DIR, 
         save_dir = "./models/datasets/", 
-        filter_keywords = [],
+        filter_keywords = ["leg", ""],
         use_keypoints=True
     )
 
