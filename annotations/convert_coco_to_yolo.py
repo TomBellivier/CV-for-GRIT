@@ -71,10 +71,12 @@ SKELETON_NAMES = [
     ["neck", "right-eye"],
     ["neck", "thorax-left"],
     ["neck", "thorax-right"],
+    ["neck", "thorax-bottom"],
     ["thorax-left", "thorax-bottom"],
     ["thorax-right", "thorax-bottom"],
     ["thorax-bottom", "body-left"],
     ["thorax-bottom", "body-right"],
+    ["thorax-bottom", "body-tip"],
     ["body-left", "body-tip"],
     ["body-right", "body-tip"],
     ["thorax-bottom", "left-forewing-base"],
@@ -108,10 +110,34 @@ SKELETON_NAMES = [
 ]
 
 
-def make_config_file(dataset_name, printing=False):
-    base_idx = {TOTAL[i]:i for i in range(len(TOTAL))}
+def check_filter(kp_name, keywords):
+    for kw in keywords:
+        if kw in kp_name:
+            return False
+    return True
+
+def filter(all_kps, keywords):
+    new_kps = []
+    for element in all_kps:
+        if isinstance(element, list):
+            new_element = filter(element, keywords)
+            if len(new_element) == len(element):
+                new_kps.append(new_element)
+        elif isinstance(element, str):
+            if check_filter(element, keywords):
+                new_kps.append(element)
+    return new_kps
+
+
+def make_config_file(dataset_name, filter_keywords=[], printing=False):
+    filtered_total = filter(TOTAL, filter_keywords)
+    filtered_skeleton = filter(SKELETON_NAMES,filter_keywords)
+    print(len(filtered_total), len(filtered_skeleton))
+    print(filtered_total, filtered_skeleton)
+    return
+    base_idx = {filtered_total[i]:i for i in range(len(filtered_total))}
     flip_idx = {}
-    for x in TOTAL:
+    for x in filtered_total:
         if "left" in x:
             flip_idx[x.replace("left", "right")] = base_idx[x]
             
@@ -149,6 +175,7 @@ def convert_coco(
     image_dir: str = "../coco/images/",
     save_dir: str = "coco_converted/",
     yolo_conversion_done_dir = "./yolo-conversion-done/",
+    filter_keywords = [],
     TVT_split: list[int] = [0.8, 0.1, 0.1],
     use_keypoints: bool = False,
     cls91to80: bool = True
@@ -252,16 +279,19 @@ def convert_coco(
 
         os.rename(json_file, Path(yolo_conversion_done_dir) / json_file.name)
         
-        make_config_file(fn, printing=False)
+        make_config_file(fn, filter_keywords=filter_keywords, printing=False)
 
 
 if __name__ == "__main__":
     # IT NEEDS TO BE ONLY ONE FILE IN THE FOLDER
     # except if every files uses images from the same directory 
     IMAGE_DIR = "C:/Users/tombe/Documents/_MLE/CV-for-GRIT/databases/hawaii_beetles_images/individual_specimens/08/"
+    
     convert_coco(
-        labels_dir="./coco-converted/", 
+        labels_dir="./annotations/coco-converted/", 
         image_dir = IMAGE_DIR, 
-        save_dir = "../models/datasets/", use_keypoints=True
+        save_dir = "./models/datasets/", 
+        filter_keywords = [],
+        use_keypoints=True
     )
 
