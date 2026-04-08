@@ -154,7 +154,7 @@ def make_config_file(dataset_name, filter_keywords=[], printing=False):
         print("Skeleton indices:", squeleton_idx)
     print(str(dataset_name))
     config = {
-        "path" : str(dataset_name),
+        "path" : "models/datasets/" + str(dataset_name),
         "train" : "images/train",
         "val" : "images/val",
         "test" : "images/test",

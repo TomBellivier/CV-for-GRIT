@@ -13,5 +13,6 @@
 *.cache
 models/**/labels/
 models/**/images/
+!models/runs/**/*_pred.jpg
 #models/runs/
 !models/run_results.json
