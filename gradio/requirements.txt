@@ -1,0 +1,5 @@
+gradio>=4.0
+ultralytics>=8.0
+opencv-python-headless
+matplotlib
+numpy
