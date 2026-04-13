@@ -154,7 +154,7 @@ def make_config_file(dataset_name, filter_keywords=[], printing=False):
         print("Skeleton indices:", squeleton_idx)
     print(str(dataset_name))
     config = {
-        "path" : "models/datasets/" + str(dataset_name),
+        "path" : "models/datasets/" + Path(dataset_name).name,
         "train" : "images/train",
         "val" : "images/val",
         "test" : "images/test",
@@ -197,6 +197,16 @@ def convert_coco(
 
     # Import json
     for json_file in all_files:
+        new_image_dir = image_dir
+        if image_dir == "ask":
+            new_image_dir = input(f"Put the path to the images corresonding to {json_file} (or skip to skip this file) : ")
+            if new_image_dir == "skip":
+                continue
+        elif image_dir is not None:
+            new_image_dir = image_dir
+        else:
+            continue
+        
         lname = json_file.stem.replace("instances_", "")
         fn = Path(save_dir) / lname  # folder name
         fn = increment_path(fn)
@@ -231,7 +241,7 @@ def convert_coco(
         for img_id, anns in TQDM(annotations.items(), desc=f"Annotations {json_file}"):
             img = images[f"{img_id:d}"]
             h, w = img["height"], img["width"]
-            f = img["file_name"]
+            file_name = Path(img["file_name"]).name
 
             bboxes = []
             keypoints = []
@@ -270,17 +280,25 @@ def convert_coco(
                 fd = fn / Path("labels") / split_dict[img_id] 
             else:
                 fd = fn / Path("labels")
-            with open((fd / f).with_suffix(".txt"), "a", encoding="utf-8") as file:
+
+            with open((fd / file_name).with_suffix(".txt"), "a", encoding="utf-8") as file:
                 for i in range(len(bboxes)):
                     line = (*(keypoints[i]),)  # cls, box, keypoints
-                    file.write(("%g " * len(line)).rstrip() % line + "\\n")
+                    file.write(("%g " * len(line)).rstrip() % line)
+            
+            if TVT_split:
+                fd_images = fn / Path("images") / split_dict[img_id] 
+            else:
+                fd_images = fn / Path("images")
+            
             
             # copy corresponding image to new location
-            if image_dir:
+            if new_image_dir:
+                
                 if TVT_split:
-                    shutil.copy(Path(image_dir) / img["file_name"], fn / Path("images") / split_dict[img_id] / img["file_name"])
+                    shutil.copy(Path(new_image_dir) / file_name, fd_images / file_name, follow_symlinks=False)
                 else:
-                    shutil.copy(Path(image_dir) / img["file_name"], fn / Path("images") / img["file_name"])
+                    shutil.copy(Path(new_image_dir) / file_name, fd_images / file_name, follow_symlinks=False)
             
             img_idx += 1
 
@@ -296,7 +314,7 @@ if __name__ == "__main__":
     
     convert_coco(
         labels_dir="./annotations/coco-converted/", 
-        image_dir = IMAGE_DIR, 
+        image_dir = "ask", 
         save_dir = "./models/datasets/", 
         filter_keywords = ["leg", "hindwing"],
         use_keypoints=True
