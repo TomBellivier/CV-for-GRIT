@@ -55,7 +55,7 @@ def run_with_local_files(folder_path):
 
     for img_idx in range(len(downloaded_data)):
         img = downloaded_data[img_idx]
-        base = "".join(img["file_upload"].split("-")[1:])
+        base = "".join(img["data"]["img"].split("/")[-1].split("-")[-1])
 
         downloaded_data[img_idx]["data"]["img"] = f"{formatted_folder_path}{base}"
     
@@ -67,6 +67,6 @@ def run_with_local_files(folder_path):
     #"/data/local-files/?d=Users%5Ctombe%5CDocuments%5C_MLE%5CCV-for-GRIT%5Cdatabases%5Chawaii_beetles_images%5Cindividual_specimens%5C01%5CIMG_0093_specimen_1_MECKON_NEON.BET.D20.000001.png"
 
 if __name__ == "__main__":
-    IMAGE_REPO = "C:\\Users\\tombe\\Documents\\_MLE\\CV-for-GRIT\\databases\\test"
+    IMAGE_REPO = "C:\\Users\\tombe\\Documents\\_MLE\\CV-for-GRIT\\databases\\hawaii_beetles_images\\individual_specimens\\01"
     run_with_local_files(IMAGE_REPO)
     # run_with_local_files("./databases/hawaii_beetles_images/individual_specimens/01/")
