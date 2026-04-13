@@ -273,7 +273,7 @@ def convert_coco(
             with open((fd / f).with_suffix(".txt"), "a", encoding="utf-8") as file:
                 for i in range(len(bboxes)):
                     line = (*(keypoints[i]),)  # cls, box, keypoints
-                    file.write(("%g " * len(line)).rstrip() % line + "\n")
+                    file.write(("%g " * len(line)).rstrip() % line + "\\n")
             
             # copy corresponding image to new location
             if image_dir:
@@ -292,7 +292,7 @@ def convert_coco(
 if __name__ == "__main__":
     # IT NEEDS TO BE ONLY ONE FILE IN THE FOLDER
     # except if every files uses images from the same directory 
-    IMAGE_DIR = "/home/tombellivier/Documents/CV/CV-for-GRIT/databases/hawaii_beetles_images/individual_specimens/08"
+    IMAGE_DIR = "C:\\Users\\tombe\\Documents\\_MLE\\CV-for-GRIT\\databases\\hawaii_beetles_images\\individual_specimens\\07"
     
     convert_coco(
         labels_dir="./annotations/coco-converted/", 
