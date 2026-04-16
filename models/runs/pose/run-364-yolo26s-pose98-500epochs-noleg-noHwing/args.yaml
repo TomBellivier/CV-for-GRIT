@@ -1,7 +1,7 @@
 task: pose
 mode: train
 model: yolo26s-pose.pt
-data: ./datasets/fuzed-noleg-noHwing/yolo-config.yaml
+data: ./datasets/fuzed-01-07-08-16-17-noleg-noHwing/yolo-config.yaml
 epochs: 500
 time: null
 patience: 100

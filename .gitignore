@@ -16,5 +16,6 @@ databases/laji_clean_images
 models/**/labels/
 models/**/images/
 !models/runs/**/*_pred.jpg
+!models/runs/**/*output.png
 #models/runs/
 !models/run_results.json

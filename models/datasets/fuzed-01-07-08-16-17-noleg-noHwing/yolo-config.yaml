@@ -1,4 +1,4 @@
-path: models/datasets/models\datasets\HawaiiBeetles07Marija-Corrected3
+path: models/datasets/fuzed-01-07-08-16-17-noleg-noHwing
 train: images/train
 val: images/val
 test: images/test
