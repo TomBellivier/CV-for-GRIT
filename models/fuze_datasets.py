@@ -39,11 +39,12 @@ def fuze(dataset_name, dataset_list, dataset_folder = "./models/datasets/", eras
             shutil.rmtree(Path(dataset_folder) / dataset)
 
 if __name__ == "__main__":
-    fuze("fuzed-01-07-08-16-17-noleg-noHwing", 
+    fuze("HB-complete", 
          [
-            "HawaiiBeetles17",
-            "HawaiiBeetles16",
-            "HawaiiBeetles07Marija-noleg-noHwing-Corrected",
-            "fuzed-01-08-noleg-noHwing"
+            "HB01-16042026",
+            "HB07-16042026",
+            "HB08-16042026",
+            "HB16-16042026",
+            "HB17-16042026"
           ], 
           erase=True)

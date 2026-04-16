@@ -242,6 +242,7 @@ def convert_coco(
             img = images[f"{img_id:d}"]
             h, w = img["height"], img["width"]
             file_name = Path(img["file_name"]).name
+            file_name = file_name.split("%5C")[-1]
 
             bboxes = []
             keypoints = []
@@ -277,9 +278,9 @@ def convert_coco(
 
             # Write
             if TVT_split:
-                fd = fn / Path("labels") / split_dict[img_id] 
+                fd = fn / "labels" / split_dict[img_id] 
             else:
-                fd = fn / Path("labels")
+                fd = fn / "labels"
 
             with open((fd / file_name).with_suffix(".txt"), "a", encoding="utf-8") as file:
                 for i in range(len(bboxes)):
@@ -287,9 +288,9 @@ def convert_coco(
                     file.write(("%g " * len(line)).rstrip() % line)
             
             if TVT_split:
-                fd_images = fn / Path("images") / split_dict[img_id] 
+                fd_images = fn /"images" / split_dict[img_id] 
             else:
-                fd_images = fn / Path("images")
+                fd_images = fn / "images"
             
             
             # copy corresponding image to new location
@@ -316,7 +317,7 @@ if __name__ == "__main__":
         labels_dir="./annotations/coco-converted/", 
         image_dir = "ask", 
         save_dir = "./models/datasets/", 
-        filter_keywords = ["leg", "hindwing"],
+        filter_keywords = [],
         use_keypoints=True
     )
 
