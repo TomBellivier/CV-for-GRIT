@@ -100,10 +100,12 @@ SKELETON_NAMES = [
     ["right-hindwing-tip", "right-hindwing-front"],
     ["right-hindwing-tip", "right-hindwing-rear"],
     ["thorax-bottom", "left-leg-0"],
+    ["body-left", "left-leg-1"],
     ["left-leg-0", "left-leg-1"],
     ["left-leg-1", "left-leg-2"],
     ["left-leg-2", "left-leg-3"],
     ["thorax-bottom", "right-leg-0"],
+    ["body-right", "right-leg-1"],
     ["right-leg-0", "right-leg-1"],
     ["right-leg-1", "right-leg-2"],
     ["right-leg-2", "right-leg-3"]
