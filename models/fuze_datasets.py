@@ -39,7 +39,7 @@ def fuze(dataset_name, dataset_list, dataset_folder = "./models/datasets/", eras
             shutil.rmtree(Path(dataset_folder) / dataset)
 
 if __name__ == "__main__":
-    fuze("HB-complete", 
+    fuze("HB-complete-scalebars", 
          [
             "HB01-16042026",
             "HB07-16042026",

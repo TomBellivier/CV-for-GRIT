@@ -246,6 +246,9 @@ def convert_coco(
             file_name = Path(img["file_name"]).name
             file_name = file_name.split("%5C")[-1]
 
+            if not (Path(new_image_dir) / file_name).exists():
+                continue
+
             bboxes = []
             keypoints = []
             for ann in anns:
@@ -313,11 +316,11 @@ def convert_coco(
 if __name__ == "__main__":
     # IT NEEDS TO BE ONLY ONE FILE IN THE FOLDER
     # except if every files uses images from the same directory 
-    IMAGE_DIR = "C:\\Users\\tombe\\Documents\\_MLE\\CV-for-GRIT\\databases\\hawaii_beetles_images\\individual_specimens\\01"
+    IMAGE_DIR = "C:\\Users\\tombe\\Documents\\_MLE\\CV-for-GRIT\\databases\\hawaii-beetles-images-scalebar"
     
     convert_coco(
         labels_dir="./annotations/coco-converted/", 
-        image_dir = "ask", 
+        image_dir = IMAGE_DIR, # or "ask"
         save_dir = "./models/datasets/", 
         filter_keywords = [],
         use_keypoints=True
