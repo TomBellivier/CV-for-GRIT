@@ -10,7 +10,7 @@ Implementation of Computer Vision model to measure insect traits from images. Th
 ## Check annotations 
 1. Put the volunteers file in "import volunteers files/downloaded", and make sure there is only one file 
 2. Open "import volunteers files/change_import_name.py" and change the value of "IMAGE_REPO". Run the code.
-Cheking : 
+Checking : 
 1. On a terminal, type the command "start_label_studio". 
 2. On Label Studio project, add a storage source (local) at the image directory specified just before. 
 3. Import the modified file in Label studio, it should find every images.

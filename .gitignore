@@ -19,3 +19,4 @@ models/**/images/
 !models/runs/**/*output.png
 #models/runs/
 !models/run_results.json
+*__pycache__/
