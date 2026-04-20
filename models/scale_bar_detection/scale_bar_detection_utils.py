@@ -16,7 +16,7 @@ UNIT_TO_MM: dict[str, float] = {
 }
 OCR_LANGUAGES          = ["en"]  
 
-def _ensure_ocr_reader(reader) -> object:
+def _ensure_ocr_reader(reader=None) -> object:
     """Lazy-load EasyOCR reader (downloads weights ~100 MB on first call)."""
     if reader is None:
         reader = easyocr.Reader(OCR_LANGUAGES, gpu=False, verbose=False)
@@ -69,6 +69,8 @@ def _preprocess_for_ocr(crop_rgb: np.ndarray) -> np.ndarray:
     return cv2.cvtColor(thresh, cv2.COLOR_GRAY2RGB)
 
 def detect_scale_bar(
+    scale_bar_model : YOLO,  
+    reader : easyocr.Reader,
     img_bgr: np.ndarray,
     img_path: str,
     conf: float = 0.25,
@@ -87,8 +89,6 @@ def detect_scale_bar(
     annotated : np.ndarray
         Copy of img_bgr with the scale bar bounding box drawn on it (BGR).
     """
-
-    scale_bar_model = YOLO(SCALE_BAR_MODEL_PATH)
 
     if scale_bar_model is None:
         return None, "Scale bar model not loaded."
@@ -127,7 +127,7 @@ def detect_scale_bar(
     processed = _preprocess_for_ocr(crop_rgb)
 
     try:
-        reader  = _ensure_ocr_reader()
+        reader  = _ensure_ocr_reader(reader)
         raw_ocr = reader.readtext(processed, detail=1, paragraph=False)
     except Exception as exc:
         return None, f"OCR failed: {exc}"
