@@ -1,8 +1,8 @@
-path: models/datasets/HB-complete-scalebars
+path: models/datasets/HawaiiBeetles01
 train: images/train
 val: images/val
 test: images/test
-kpt_shape: [42, 3]
+kpt_shape: [26, 3]
 skeleton:
 - [0, 5]
 - [0, 12]
@@ -35,36 +35,12 @@ skeleton:
 - [22, 25]
 - [23, 24]
 - [23, 25]
-- [8, 26]
-- [26, 28]
-- [26, 29]
-- [27, 28]
-- [27, 29]
-- [8, 30]
-- [30, 32]
-- [30, 33]
-- [31, 32]
-- [31, 33]
-- [8, 34]
-- [9, 35]
-- [34, 35]
-- [35, 36]
-- [36, 37]
-- [8, 38]
-- [10, 39]
-- [38, 39]
-- [39, 40]
-- [40, 41]
 flip_idx: [0, 2, 1, 4, 3, 5, 7, 6, 8, 10, 9, 11, 15, 16, 17, 12, 13, 14, 22, 23, 24,
-  25, 18, 19, 20, 21, 30, 31, 32, 33, 26, 27, 28, 29, 38, 39, 40, 41, 34, 35, 36,
-  37]
+  25, 18, 19, 20, 21]
 names: {0: insects}
 kpt_names:
   0: [head-top, head-left, head-right, left-eye, right-eye, neck, thorax-left, thorax-right,
     thorax-bottom, body-left, body-right, body-tip, left-antenna-0, left-antenna-1,
     left-antenna-2, right-antenna-0, right-antenna-1, right-antenna-2, left-forewing-base,
     left-forewing-tip, left-forewing-front, left-forewing-rear, right-forewing-base,
-    right-forewing-tip, right-forewing-front, right-forewing-rear, left-hindwing-base,
-    left-hindwing-tip, left-hindwing-front, left-hindwing-rear, right-hindwing-base,
-    right-hindwing-tip, right-hindwing-front, right-hindwing-rear, left-leg-0, left-leg-1,
-    left-leg-2, left-leg-3, right-leg-0, right-leg-1, right-leg-2, right-leg-3]
+    right-forewing-tip, right-forewing-front, right-forewing-rear]

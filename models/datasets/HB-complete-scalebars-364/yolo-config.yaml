@@ -1,4 +1,4 @@
-path: models/datasets/HB-complete-scalebars
+path: models/datasets/HB-complete-scalebars-364
 train: images/train
 val: images/val
 test: images/test

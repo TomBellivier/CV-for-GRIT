@@ -316,13 +316,13 @@ def convert_coco(
 if __name__ == "__main__":
     # IT NEEDS TO BE ONLY ONE FILE IN THE FOLDER
     # except if every files uses images from the same directory 
-    IMAGE_DIR = "C:\\Users\\tombe\\Documents\\_MLE\\CV-for-GRIT\\databases\\hawaii-beetles-images-scalebar"
+    IMAGE_DIR = "/home/tombellivier/Documents/CV/CV-for-GRIT/databases/hawaii-beetles-images-scalebar"
     
     convert_coco(
         labels_dir="./annotations/coco-converted/", 
         image_dir = IMAGE_DIR, # or "ask"
         save_dir = "./models/datasets/", 
-        filter_keywords = [],
+        filter_keywords = ["hindwing", "leg"], 
         use_keypoints=True
     )
 
