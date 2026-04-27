@@ -39,12 +39,13 @@ def fuze(dataset_name, dataset_list, dataset_folder = "./models/datasets/", eras
             shutil.rmtree(Path(dataset_folder) / dataset)
 
 if __name__ == "__main__":
-    fuze("HB-complete-scalebars", 
+    fuze("HB-complete-scalebars-noleg-noHwing", 
          [
-            "HB01-16042026",
-            "HB07-16042026",
-            "HB08-16042026",
-            "HB16-16042026",
-            "HB17-16042026"
+            "HawaiiBeetles01",
+            "HawaiiBeetles03-Henrique",
+            "HawaiiBeetles07-Marija",
+            "HawaiiBeetles08",
+            "HawaiiBeetles16",
+            "HawaiiBeetles17"
           ], 
           erase=True)
