@@ -84,7 +84,7 @@ def run_with_local_files(folder_path, from_ubuntu=False, running_on_ubuntu=False
     #"/data/local-filesadd/?d=Users%5Ctombe%5CDocuments%5C_MLE%5CCV-for-GRIT%5Cdatabases%5Chawaii_beetles_images%5Cindividual_specimens%5C01%5CIMG_0093_specimen_1_MECKON_NEON.BET.D20.000001.png"
 
 if __name__ == "__main__":
-    IMAGE_REPO = "C:\\Users\\tombe\\Documents\\_MLE\\CV-for-GRIT\\databases\\orbit_bees\\selected_images\\02"
+    IMAGE_REPO = "C:\\Users\\tombe\\Documents\\_MLE\\CV-for-GRIT\\databases\\hawaii_beetles_images\\individual_specimens\\02"
     run_with_local_files(IMAGE_REPO, from_ubuntu=False, running_on_ubuntu=False, convert_name_to_label_studio=True)
     # run_with_local_files("./databases/hawaii_beetles_images/individual_specimens/01/")
 
