@@ -1,0 +1,46 @@
+path: models/datasets/All-species-noleg-noHwing
+train: images/train
+val: images/val
+test: images/test
+kpt_shape: [26, 3]
+skeleton:
+- [0, 5]
+- [0, 12]
+- [0, 15]
+- [12, 13]
+- [13, 14]
+- [15, 16]
+- [16, 17]
+- [5, 1]
+- [5, 2]
+- [5, 3]
+- [5, 4]
+- [5, 6]
+- [5, 7]
+- [5, 8]
+- [6, 8]
+- [7, 8]
+- [8, 9]
+- [8, 10]
+- [8, 11]
+- [9, 11]
+- [10, 11]
+- [8, 18]
+- [18, 20]
+- [18, 21]
+- [19, 20]
+- [19, 21]
+- [8, 22]
+- [22, 24]
+- [22, 25]
+- [23, 24]
+- [23, 25]
+flip_idx: [0, 2, 1, 4, 3, 5, 7, 6, 8, 10, 9, 11, 15, 16, 17, 12, 13, 14, 22, 23, 24,
+  25, 18, 19, 20, 21]
+names: {0: insects}
+kpt_names:
+  0: [head-top, head-left, head-right, left-eye, right-eye, neck, thorax-left, thorax-right,
+    thorax-bottom, body-left, body-right, body-tip, left-antenna-0, left-antenna-1,
+    left-antenna-2, right-antenna-0, right-antenna-1, right-antenna-2, left-forewing-base,
+    left-forewing-tip, left-forewing-front, left-forewing-rear, right-forewing-base,
+    right-forewing-tip, right-forewing-front, right-forewing-rear]
