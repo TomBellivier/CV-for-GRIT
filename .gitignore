@@ -5,9 +5,8 @@
 *.json
 !label_studio_annotations/
 !label_studio_annotations/**/*.json
-!databases/
-!databases/**/*.json
-databases/laji_clean_images
+databases/
+!databases/**/*/ipynb
 !annotations/
 !annotations/**/*.json
 *.pth
