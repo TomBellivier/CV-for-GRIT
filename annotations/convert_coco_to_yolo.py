@@ -316,7 +316,7 @@ def convert_coco(
 if __name__ == "__main__":
     # IT NEEDS TO BE ONLY ONE FILE IN THE FOLDER
     # except if every files uses images from the same directory 
-    IMAGE_DIR = "/home/tombellivier/Documents/CV/CV-for-GRIT/databases/ORBIT bees"
+    IMAGE_DIR = "./databases/hawaii_beetles_images/individual_specimens/02"
     
     convert_coco(
         labels_dir="./annotations/coco-converted/", 
