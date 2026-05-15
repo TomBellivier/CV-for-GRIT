@@ -316,13 +316,13 @@ def convert_coco(
 if __name__ == "__main__":
     # IT NEEDS TO BE ONLY ONE FILE IN THE FOLDER
     # except if every files uses images from the same directory 
-    IMAGE_DIR = "./databases/hawaii_beetles_images/individual_specimens/02"
+    IMAGE_DIR = "./databases/luomus_pictures_1/temp0102"
     
     convert_coco(
         labels_dir="./annotations/coco-converted/", 
         image_dir = IMAGE_DIR, # or "ask"
         save_dir = "./models/datasets/", 
-        filter_keywords = ["hindwing", "leg"], 
+        filter_keywords = [], 
         use_keypoints=True
     )
 
