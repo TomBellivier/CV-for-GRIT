@@ -1,0 +1,7 @@
+model=./model_examples/run-LuoLeps-274-pose98-500epochs-complete.pt
+dataset=C:/Users/tombe/Documents/_MLE/CV-for-GRIT/models/datasets/LuoLeps0102
+n_images=274
+detection_rate=1.000
+at_risk_rate=0.062
+silhouette=0.226
+worst_cluster=3
