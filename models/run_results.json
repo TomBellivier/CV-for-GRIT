@@ -987,12 +987,6 @@
       303.67115000939276
     ]
   },
-  "null": {
-    "name": "runs/pose/None",
-    "training time": -1,
-    "keypoints perf px": NaN,
-    "keypoints perf mm": NaN
-  },
   "run-100-yolo26n": {
     "name": "runs/pose/run-100-yolo26n/weights/best.pt",
     "training time": -1,

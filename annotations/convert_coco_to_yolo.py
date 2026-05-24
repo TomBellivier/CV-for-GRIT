@@ -176,6 +176,7 @@ def convert_coco(
     save_dir: str = "coco_converted/",
     yolo_conversion_done_dir = "./annotations/yolo-conversion-done/",
     filter_keywords = [],
+    dataset_name: str = "CustomDataset",
     TVT_split: list[int] = [0.8, 0.1, 0.1],
     use_keypoints: bool = False,
     cls91to80: bool = True
@@ -209,9 +210,13 @@ def convert_coco(
         else:
             continue
         
-        lname = json_file.stem.replace("instances_", "")
+        if dataset_name:
+            lname = dataset_name
+        else:
+            lname = json_file.stem.replace("instances_", "")
         fn = Path(save_dir) / lname  # folder name
-        fn = increment_path(fn)
+        if not dataset_name:
+            fn = increment_path(fn)
         if TVT_split:
             (fn / "labels" / "train").mkdir(parents=True, exist_ok=True)
             (fn / "labels" / "val").mkdir(parents=True, exist_ok=True)
@@ -221,9 +226,9 @@ def convert_coco(
             (fn / "images" / "test").mkdir(parents=True, exist_ok=True)
         with open(json_file, encoding="utf-8") as f:
             data = json.load(f)
-
-        # Create image dict
+        
         images = {f"{x['id']:d}": x for x in data["images"]}
+
         # Create image-annotations dict
         annotations = defaultdict(list)
         for ann in data["annotations"]:
@@ -310,18 +315,27 @@ def convert_coco(
 
         os.rename(json_file, Path(yolo_conversion_done_dir) / json_file.name)
         
-        make_config_file(fn, filter_keywords=filter_keywords, printing=False)
+        if not dataset_name:
+            make_config_file(fn, filter_keywords=filter_keywords, printing=False)
+
+    if dataset_name:
+        make_config_file(Path(save_dir) / dataset_name, filter_keywords=filter_keywords, printing=False)
 
 
 if __name__ == "__main__":
     # IT NEEDS TO BE ONLY ONE FILE IN THE FOLDER
     # except if every files uses images from the same directory 
-    IMAGE_DIR = "./databases/luomus_pictures_1/temp0102"
+    IMAGE_DIR = "C:/Users/tombe/Documents/_MLE/CV-for-GRIT/databases/full databases/coleoptera/"
+
+    # if not None, it will merge every files in one dataset with this name, 
+    # otherwise it will create one dataset per file with the name of the file
+    DATASET_NAME = "Coleoptera"
     
     convert_coco(
         labels_dir="./annotations/coco-converted/", 
         image_dir = IMAGE_DIR, # or "ask"
         save_dir = "./models/datasets/", 
+        dataset_name = DATASET_NAME,
         filter_keywords = [], 
         use_keypoints=True
     )
