@@ -171,6 +171,17 @@ def make_pose_config_file(dataset_name, filter_keywords=[], printing=False, cls_
     with open(f"{dataset_name}/yolo-config.yaml", "w") as f:
         yaml.dump(config, f, sort_keys=False, default_flow_style=None)
 
+def make_detect_config_file(dataset_name, groups=[]):
+    config = {
+        "path" : "models/datasets/" + Path(dataset_name).name,
+        "train" : "images/train",
+        "val" : "images/val",
+        "test" : "images/test",
+        "names" : {i: group for i, group in enumerate(groups)}
+    }
+
+    with open(f"{dataset_name}/yolo-config.yaml", "w") as f:
+        yaml.dump(config, f, sort_keys=False, default_flow_style=None)
 
 def create_pose_dataset(dataset_list, final_folder, dataset_folder = "./models/datasets/", cls=False):
     all_images_files = []
@@ -208,6 +219,41 @@ def create_pose_dataset(dataset_list, final_folder, dataset_folder = "./models/d
     
     make_pose_config_file(final_folder, cls_groups=dataset_list if cls else [])
 
+def create_detect_dataset(dataset_list, final_folder, dataset_folder = "./models/datasets/"):
+    all_images_files = []
+    all_label_files = []
+
+    for dataset in tqdm.tqdm(dataset_list, colour="red"):
+        dataset_path = Path(dataset_folder) / dataset
+        for split in ["train", "val", "test"]:
+            for label_file in tqdm.tqdm((dataset_path / "labels" / split).glob("*.txt"), colour = "yellow"):
+                if label_file in all_label_files:
+                    print(f"Warning: label file {label_file} already exists")
+                else:
+                    all_label_files.append(label_file)
+                    new_label_file_path = final_folder / "labels" / split / label_file.name
+                    shutil.copy(label_file, new_label_file_path)
+                    # modify label file to attribute correct class id
+                    with open(new_label_file_path, "r") as f:
+                        lines = f.readlines()
+                    with open(new_label_file_path, "w") as f:
+                        for line in lines:
+                            line = line.strip()
+                            if line:
+                                parts = line.split()[:5]
+                                new_class_id = dataset_list.index(dataset)
+                                parts[0] = str(new_class_id)
+                                f.write(" ".join(parts) + "\n")
+
+            for image_file in tqdm.tqdm((dataset_path / "images" / split).glob("*.*"), colour="blue"):
+                if image_file in all_images_files:
+                    print(f"Warning: image file {image_file} already exists")
+                else:
+                    all_images_files.append(image_file)
+                    shutil.copy(image_file, final_folder / "images" / split / image_file.name)
+    
+    make_detect_config_file(final_folder, groups=dataset_list)
+
 def create_cls_dataset(dataset_list, final_folder, dataset_folder = "./models/datasets/"):
     all_images_files = []
 
@@ -226,7 +272,7 @@ def fuze(dataset_name, dataset_list, dataset_folder = "./models/datasets/", eras
     f = Path(dataset_folder) / dataset_name
     f = increment_path(f)
 
-    if "pose" in task:  
+    if "pose" in task or task == "detect":  
         (f / "labels" / "train").mkdir(parents=True, exist_ok=True)
         (f / "labels" / "val").mkdir(parents=True, exist_ok=True)
         (f / "labels" / "test").mkdir(parents=True, exist_ok=True)
@@ -243,6 +289,8 @@ def fuze(dataset_name, dataset_list, dataset_folder = "./models/datasets/", eras
         create_pose_dataset(dataset_list, f, dataset_folder)
     elif task == "pose+cls":
         create_pose_dataset(dataset_list, f, dataset_folder, cls=True)
+    elif task == "detect":
+        create_detect_dataset(dataset_list, f, dataset_folder)
     elif task == "cls":
         create_cls_dataset(dataset_list, f, dataset_folder)
     else:
@@ -254,7 +302,7 @@ def fuze(dataset_name, dataset_list, dataset_folder = "./models/datasets/", eras
             shutil.rmtree(Path(dataset_folder) / dataset)
 
 if __name__ == "__main__":
-    fuze("AllSpecies-pose&cls", 
+    fuze("AllSpecies-detect", 
          [
             # "HawaiiBeetles01",
             # "HawaiiBeetles03-Henrique",
@@ -268,5 +316,5 @@ if __name__ == "__main__":
             "Hymenoptera",
             "Lepidoptera"
           ], 
-          task = "pose+cls",
+          task = "detect",
           erase=False)

@@ -1,0 +1,5 @@
+path: AllSpecies-detect
+train: images/train
+val: images/val
+test: images/test
+names: {0: Coleoptera, 1: Hymenoptera, 2: Lepidoptera}

@@ -17,4 +17,5 @@ def restore_dataset(dataset_folder):
                 print(f"Warning: {img_file} is corrupted and will be skipped. Error: {e}")
 
 if __name__ == "__main__":
-    restore_dataset("./models/datasets/AllSpecies-posecls")
+    restore_dataset("C:/Users/tombe/Documents/_MLE/CV-for-GRIT/models/datasets/AllSpecies-detect")
+    
