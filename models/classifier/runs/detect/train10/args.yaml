@@ -1,8 +1,8 @@
-task: classify
+task: detect
 mode: train
-model: yolo26n-cls.pt
-data: ..\datasets\AllSpecies-cls
-epochs: 1
+model: yolo26n.pt
+data: ..\datasets\AllSpecies-detect\yolo-config.yaml
+epochs: 10
 time: null
 patience: 100
 batch: 16
@@ -13,7 +13,7 @@ cache: false
 device: cpu
 workers: 8
 project: null
-name: train3
+name: train10
 exist_ok: false
 pretrained: true
 optimizer: auto
@@ -106,4 +106,4 @@ auto_augment: randaugment
 erasing: 0.4
 cfg: null
 tracker: botsort.yaml
-save_dir: C:\Users\tombe\Documents\_MLE\CV-for-GRIT\models\classifier\runs\classify\train3
+save_dir: C:\Users\tombe\Documents\_MLE\CV-for-GRIT\models\classifier\runs\detect\train10

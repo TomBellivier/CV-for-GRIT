@@ -1,8 +1,8 @@
-task: classify
+task: pose
 mode: train
-model: yolo26n-cls.pt
-data: ..\datasets\AllSpecies-cls
-epochs: 1
+model: yolo26n-pose.pt
+data: ..\datasets\AllSpecies-posecls\yolo-config.yaml
+epochs: 10
 time: null
 patience: 100
 batch: 16
@@ -13,7 +13,7 @@ cache: false
 device: cpu
 workers: 8
 project: null
-name: train2
+name: train-2
 exist_ok: false
 pretrained: true
 optimizer: auto
@@ -80,6 +80,7 @@ warmup_momentum: 0.8
 warmup_bias_lr: 0.1
 box: 7.5
 cls: 0.5
+cls_pw: 0.0
 dfl: 1.5
 pose: 12.0
 kobj: 1.0
@@ -106,4 +107,4 @@ auto_augment: randaugment
 erasing: 0.4
 cfg: null
 tracker: botsort.yaml
-save_dir: C:\Users\tombe\Documents\_MLE\CV-for-GRIT\models\classifier\runs\classify\train2
+save_dir: C:\Users\tombe\Documents\_MLE\CV-for-GRIT\models\classifier\runs\pose\train-2
