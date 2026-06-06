@@ -1,4 +1,4 @@
-path: AllSpecies-detect
+path: models/datasets/AllSpecies-detect
 train: images/train
 val: images/val
 test: images/test
