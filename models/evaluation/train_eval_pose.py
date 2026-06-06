@@ -25,6 +25,7 @@ import json
 import math
 from datetime import datetime
 from pathlib import Path
+import time
 
 import numpy as np
 import pandas as pd
@@ -34,10 +35,9 @@ from ultralytics import YOLO
 # Default group -> data.yaml mapping, used when no --data-config file is given.
 # Replace the paths with the actual location of each group's dataset.
 DEFAULT_GROUPS = {
-    "group_1": "datasets/group_1/data.yaml",
-    "group_2": "datasets/group_2/data.yaml",
-    "group_3": "datasets/group_3/data.yaml",
-    "group_4": "datasets/group_4/data.yaml",
+    "Coleoptera": "models/datasets/Coleoptera/yolo-config.yaml",
+    "Hymenoptera": "models/datasets/Hymenoptera/yolo-config.yaml",
+    "Lepidoptera": "models/datasets/Lepidoptera/yolo-config.yaml"
 }
 
 # PCK thresholds, expressed as a fraction of the ground-truth bbox diagonal.
@@ -116,7 +116,7 @@ def read_data_yaml(data_yaml_path):
 
     kpt_shape = data.get("kpt_shape", [None, 3])
     n_kpts, kpt_dim = int(kpt_shape[0]), int(kpt_shape[1])
-    names = data.get("names", {})
+    names = data.get("kpt_names", {})[0]
     return {
         "val_path": val_path,
         "n_kpts": n_kpts,
@@ -377,6 +377,7 @@ def evaluate_one_group(best_model, data_yaml, info, args):
         "box_map50": float(metrics.box.map50),
     }
     summary.update(accumulator.summary())
+    print(info.keys())
     per_keypoint = accumulator.per_keypoint_frame(info["names"])
     return summary, per_keypoint
 
@@ -394,8 +395,13 @@ def main():
         print(f"[{run_tag}] processing group '{group_name}'")
         info = read_data_yaml(data_yaml)
 
+        time0 = time.time()
+
         best_model, save_dir = train_one_group(
             args, group_name, data_yaml, run_tag)
+        
+        time1 = time.time()
+
 
         curve = read_learning_curve(save_dir, group_name)
         if not curve.empty:
@@ -404,6 +410,7 @@ def main():
         summary, per_keypoint = evaluate_one_group(
             best_model, data_yaml, info, args)
         summary["group"] = group_name
+        summary["training_time_sec"] = round(time1 - time0, 2)
         summary_rows.append(summary)
 
         per_keypoint.insert(0, "group", group_name)

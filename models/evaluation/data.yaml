@@ -1,0 +1,4 @@
+groups:
+  Coleoptera: "models/datasets/Coleoptera/yolo-config.yaml"
+  Hymenoptera: "models/datasets/Hymenoptera/yolo-config.yaml"
+  Lepidoptera: "models/datasets/Lepidoptera/yolo-config.yaml"
