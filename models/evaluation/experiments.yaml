@@ -34,8 +34,6 @@ grid:
     - yolo26n-pose.pt
     - yolo26s-pose.pt
     - yolo26m-pose.pt
-    - yolo26l-pose.pt
-    - yolo26x-pose.pt
   lr0:
     - 0.01
     - 0.005

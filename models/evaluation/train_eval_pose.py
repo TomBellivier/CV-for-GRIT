@@ -12,10 +12,9 @@ The workbook is consumed later by compare_pose_results.py.
 
 Example
 -------
-python train_eval_pose.py \
+python models/evaluation/train_eval_pose.py \
     --model yolo26n-pose.pt \
-    --data-config groups.yaml \
-    --epochs 100 --batch 16 --imgsz 640 \
+    --epochs 1 --batch 16 --imgsz 640 \
     --lr0 0.01 --pose 12.0 --kobj 1.0 \
     --out-dir pose_results
 """
@@ -109,10 +108,13 @@ def read_data_yaml(data_yaml_path):
     if not root.is_absolute():
         root = (data_path.parent / root).resolve()
 
-    val_field = data.get("val", "images/val")
-    val_path = Path(val_field)
-    if not val_path.is_absolute():
-        val_path = (root / val_path).resolve()
+    # old way ; doesn't work because roots already contains teh path to val
+    # val_field = data.get("val", "images/val")
+    # val_path = Path(val_field)
+    # if not val_path.is_absolute():
+    #     val_path = (root / val_path).resolve()
+    
+    val_path = Path(data_path.parent / "images" / "val").resolve()
 
     kpt_shape = data.get("kpt_shape", [None, 3])
     n_kpts, kpt_dim = int(kpt_shape[0]), int(kpt_shape[1])
@@ -377,7 +379,6 @@ def evaluate_one_group(best_model, data_yaml, info, args):
         "box_map50": float(metrics.box.map50),
     }
     summary.update(accumulator.summary())
-    print(info.keys())
     per_keypoint = accumulator.per_keypoint_frame(info["names"])
     return summary, per_keypoint
 
