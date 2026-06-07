@@ -325,11 +325,11 @@ def convert_coco(
 if __name__ == "__main__":
     # IT NEEDS TO BE ONLY ONE FILE IN THE FOLDER
     # except if every files uses images from the same directory 
-    IMAGE_DIR = "C:/Users/tombe/Documents/_MLE/CV-for-GRIT/databases/full databases/coleoptera/"
+    IMAGE_DIR = "C:/Users/tombe/Documents/_MLE/CV-for-GRIT/databases/full databases/diptera/"
 
     # if not None, it will merge every files in one dataset with this name, 
     # otherwise it will create one dataset per file with the name of the file
-    DATASET_NAME = "Coleoptera"
+    DATASET_NAME = "Diptera"
     
     convert_coco(
         labels_dir="./annotations/coco-converted/", 

@@ -12,9 +12,10 @@ The workbook is consumed later by compare_pose_results.py.
 
 Example
 -------
-python models/evaluation/train_eval_pose.py \
+python train_eval_pose.py \
     --model yolo26n-pose.pt \
-    --epochs 1 --batch 16 --imgsz 640 \
+    --data-config groups.yaml \
+    --epochs 100 --batch 16 --imgsz 640 \
     --lr0 0.01 --pose 12.0 --kobj 1.0 \
     --out-dir pose_results
 """
@@ -36,7 +37,8 @@ from ultralytics import YOLO
 DEFAULT_GROUPS = {
     "Coleoptera": "models/datasets/Coleoptera/yolo-config.yaml",
     "Hymenoptera": "models/datasets/Hymenoptera/yolo-config.yaml",
-    "Lepidoptera": "models/datasets/Lepidoptera/yolo-config.yaml"
+    "Lepidoptera": "models/datasets/Lepidoptera/yolo-config.yaml",
+    "Diptera": "models/datasets/Diptera/yolo-config.yaml"
 }
 
 # PCK thresholds, expressed as a fraction of the ground-truth bbox diagonal.
@@ -104,26 +106,36 @@ def read_data_yaml(data_yaml_path):
     with data_path.open("r", encoding="utf-8") as handle:
         data = yaml.safe_load(handle)
 
-    root = Path(data.get("path", data_path.parent))
-    if not root.is_absolute():
-        root = (data_path.parent / root).resolve()
+    # old way : does not work because root already contains path
+    # root = Path(data.get("path", data_path.parent))
+    # if not root.is_absolute():
+    #     root = (data_path.parent / root).resolve()
 
-    # old way ; doesn't work because roots already contains teh path to val
     # val_field = data.get("val", "images/val")
     # val_path = Path(val_field)
     # if not val_path.is_absolute():
     #     val_path = (root / val_path).resolve()
-    
-    val_path = Path(data_path.parent / "images" / "val").resolve()
+    val_path = data_path.parent / "images" / "val"
 
     kpt_shape = data.get("kpt_shape", [None, 3])
     n_kpts, kpt_dim = int(kpt_shape[0]), int(kpt_shape[1])
-    names = data.get("kpt_names", {})[0]
+
+    # "names" holds object class names; keypoint labels live under "kpt_names",
+    # keyed by class index, each value being a list of keypoint names.
+    kpt_names_field = data.get("kpt_names", {})
+    if isinstance(kpt_names_field, dict) and kpt_names_field:
+        first_class = sorted(kpt_names_field.keys())[0]
+        kpt_names = list(kpt_names_field.get(first_class, []))
+    elif isinstance(kpt_names_field, list):
+        kpt_names = list(kpt_names_field)
+    else:
+        kpt_names = []
+
     return {
         "val_path": val_path,
         "n_kpts": n_kpts,
         "kpt_dim": kpt_dim,
-        "names": names,
+        "kpt_names": kpt_names,
     }
 
 
@@ -140,7 +152,7 @@ def list_val_images(val_path):
 
 
 def label_path_for_image(image_path):
-    """Map an image path to its YOLO label file path."""
+    """Map an image path to its YOLO label file path (manual fallback)."""
     parts = list(image_path.parts)
     if "images" in parts:
         parts[len(parts) - 1 - parts[::-1].index("images")] = "labels"
@@ -148,30 +160,87 @@ def label_path_for_image(image_path):
     return image_path.with_suffix(".txt")
 
 
+def resolve_val_images(data_yaml, info):
+    """Resolve validation images the same way model.val() does.
+
+    Uses Ultralytics' check_det_dataset so that dataset paths, datasets_dir and
+    .txt split files are handled identically to native validation. Falls back to
+    manual resolution relative to the data.yaml location.
+    """
+    try:
+        from ultralytics.data.utils import check_det_dataset
+        data = check_det_dataset(data_yaml)
+        val = data.get("val")
+        root = Path(data.get("path", Path(data_yaml).parent))
+        sources = list(val) if isinstance(val, (list, tuple)) else [val]
+
+        images = []
+        for source in sources:
+            source = Path(source)
+            if source.is_dir():
+                images += [p for p in source.rglob("*")
+                           if p.suffix.lower() in IMAGE_EXTENSIONS]
+            elif source.suffix.lower() == ".txt" and source.exists():
+                for line in source.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    path = Path(line)
+                    if not path.is_absolute():
+                        path = (root / line.lstrip("./")).resolve()
+                    images.append(path)
+            elif source.exists():
+                images.append(source)
+        return sorted({p for p in images if p.exists()})
+    except Exception:
+        return list_val_images(info["val_path"])
+
+
+def labels_for_images(image_paths):
+    """Map image paths to label paths using Ultralytics' own helper."""
+    try:
+        from ultralytics.data.utils import img2label_paths
+        return [Path(p) for p in img2label_paths([str(p) for p in image_paths])]
+    except Exception:
+        return [label_path_for_image(p) for p in image_paths]
+
+
 def parse_label_file(label_path, img_w, img_h, n_kpts, kpt_dim):
-    """Read one YOLO-pose label file into a list of GT instances (pixels)."""
+    """Read one YOLO-pose label file into a list of GT instances (pixels).
+
+    The per-keypoint dimension is inferred from the actual line width when it
+    disagrees with kpt_dim, so a [N, 3] kpt_shape paired with x,y-only labels
+    (or the reverse) is still parsed instead of being silently dropped.
+    """
     instances = []
     if not label_path.exists():
         return instances
 
     with label_path.open("r", encoding="utf-8") as handle:
         for line in handle:
-            values = line.split()
-            if len(values) < 5 + n_kpts * kpt_dim:
+            tokens = line.split()
+            if len(tokens) < 5 + n_kpts * 2:
                 continue
-            values = [float(v) for v in values]
+            values = [float(v) for v in tokens]
+            n_fields = len(values) - 5
+            dim = kpt_dim
+            if n_fields != n_kpts * kpt_dim and n_fields % n_kpts == 0:
+                dim = n_fields // n_kpts
+            if dim not in (2, 3) or n_fields < n_kpts * dim:
+                continue
+
             cx, cy, bw, bh = values[1:5]
             x1 = (cx - bw / 2.0) * img_w
             y1 = (cy - bh / 2.0) * img_h
             x2 = (cx + bw / 2.0) * img_w
             y2 = (cy + bh / 2.0) * img_h
 
-            raw_kpts = np.array(values[5:5 + n_kpts * kpt_dim], dtype=float)
-            raw_kpts = raw_kpts.reshape(n_kpts, kpt_dim)
+            raw_kpts = np.array(values[5:5 + n_kpts * dim], dtype=float)
+            raw_kpts = raw_kpts.reshape(n_kpts, dim)
             kpts = np.zeros((n_kpts, 3), dtype=float)
             kpts[:, 0] = raw_kpts[:, 0] * img_w
             kpts[:, 1] = raw_kpts[:, 1] * img_h
-            kpts[:, 2] = raw_kpts[:, 2] if kpt_dim == 3 else 2.0
+            kpts[:, 2] = raw_kpts[:, 2] if dim == 3 else 2.0
 
             instances.append({"box": np.array([x1, y1, x2, y2]), "kpts": kpts})
     return instances
@@ -218,6 +287,7 @@ class KeypointAccumulator:
         self.thresholds = thresholds
         self.dist_px = np.zeros(n_kpts)
         self.dist_norm = np.zeros(n_kpts)
+        self.conf_sum = np.zeros(n_kpts)
         self.count = np.zeros(n_kpts)
         self.pck_hits = {thr: np.zeros(n_kpts) for thr in thresholds}
         self.oks_values = []
@@ -243,6 +313,7 @@ class KeypointAccumulator:
             d = dists[k]
             self.dist_px[k] += d
             self.dist_norm[k] += d / diag
+            self.conf_sum[k] += pred_kpts[k, 2]
             self.count[k] += 1
             for thr in self.thresholds:
                 if d / diag <= thr:
@@ -252,15 +323,16 @@ class KeypointAccumulator:
         if oks_terms:
             self.oks_values.append(float(np.mean(oks_terms)))
 
-    def per_keypoint_frame(self, names):
+    def per_keypoint_frame(self, kpt_names):
         rows = []
         for k in range(self.n_kpts):
             n = self.count[k]
+            name = kpt_names[k] if k < len(kpt_names) else str(k)
             row = {
                 "kpt_index": k,
-                "kpt_name": names.get(k, str(k)) if isinstance(names, dict)
-                else (names[k] if k < len(names) else str(k)),
+                "kpt_name": name,
                 "n_obs": int(n),
+                "kpt_conf": self.conf_sum[k] / n if n > 0 else np.nan,
                 "mpjpe_px": self.dist_px[k] / n if n > 0 else np.nan,
                 "nmpjpe": self.dist_norm[k] / n if n > 0 else np.nan,
             }
@@ -273,6 +345,7 @@ class KeypointAccumulator:
         total = self.count.sum()
         out = {
             "num_matched": self.n_matched,
+            "mean_kpt_conf": self.conf_sum.sum() / total if total > 0 else np.nan,
             "mpjpe_px": self.dist_px.sum() / total if total > 0 else np.nan,
             "nmpjpe": self.dist_norm.sum() / total if total > 0 else np.nan,
             "mean_oks": float(np.mean(self.oks_values)) if self.oks_values
@@ -284,23 +357,31 @@ class KeypointAccumulator:
         return out
 
 
-def run_keypoint_pipeline(model, info, conf, iou_match):
+def run_keypoint_pipeline(model, data_yaml, info, conf, iou_match):
     """Predict on the validation split and compute per-keypoint metrics."""
-    images = list_val_images(info["val_path"])
+    images = resolve_val_images(data_yaml, info)
+    labels = labels_for_images(images)
     accumulator = KeypointAccumulator(info["n_kpts"], PCK_THRESHOLDS)
-    n_images = 0
 
-    for image_path in images:
+    if not images:
+        print("  WARNING: no validation images resolved; "
+              "PCK/MPJPE will be empty.")
+        return accumulator, 0
+
+    n_images = 0
+    n_with_labels = 0
+    for image_path, label_path in zip(images, labels):
         if not image_path.exists():
             continue
         n_images += 1
         result = model.predict(str(image_path), conf=conf, verbose=False)[0]
         img_h, img_w = result.orig_shape
 
-        gt = parse_label_file(label_path_for_image(image_path),
-                              img_w, img_h, info["n_kpts"], info["kpt_dim"])
+        gt = parse_label_file(Path(label_path), img_w, img_h,
+                              info["n_kpts"], info["kpt_dim"])
         if not gt:
             continue
+        n_with_labels += 1
 
         if result.boxes is None or result.keypoints is None \
                 or len(result.boxes) == 0:
@@ -312,6 +393,15 @@ def run_keypoint_pipeline(model, info, conf, iou_match):
         for gi, pi in match_instances(gt_boxes, pred_boxes, iou_match):
             accumulator.add(gt[gi]["kpts"], pred_kpts[pi], gt[gi]["box"])
 
+    if n_with_labels == 0:
+        print("  WARNING: no label files found next to the validation images; "
+              "check the images/labels folder layout.")
+    elif accumulator.n_matched == 0:
+        print(f"  WARNING: no GT-prediction pairs matched at IoU >= {iou_match}; "
+              "PCK/MPJPE will be empty.")
+    elif accumulator.count.sum() == 0:
+        print("  WARNING: pairs matched but every GT keypoint has visibility 0; "
+              "PCK/MPJPE will be empty. Check the visibility flags in the labels.")
     return accumulator, n_images
 
 
@@ -368,7 +458,7 @@ def evaluate_one_group(best_model, data_yaml, info, args):
         verbose=False,
     )
     accumulator, n_images = run_keypoint_pipeline(
-        best_model, info, args.conf, args.iou_match)
+        best_model, data_yaml, info, args.conf, args.iou_match)
 
     summary = {
         "num_val_images": n_images,
@@ -379,7 +469,7 @@ def evaluate_one_group(best_model, data_yaml, info, args):
         "box_map50": float(metrics.box.map50),
     }
     summary.update(accumulator.summary())
-    per_keypoint = accumulator.per_keypoint_frame(info["names"])
+    per_keypoint = accumulator.per_keypoint_frame(info["kpt_names"])
     return summary, per_keypoint
 
 

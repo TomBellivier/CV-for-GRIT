@@ -23,7 +23,8 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 # Scalar metrics compared between groups. Lower is better only for the errors.
-COMPARISON_METRICS = ["pose_map", "pose_map50", "mpjpe_px", "pck_0.1"]
+COMPARISON_METRICS = ["pose_map", "pose_map50", "mpjpe_px", "pck_0.1",
+                      "mean_kpt_conf"]
 LOWER_IS_BETTER = {"mpjpe_px", "nmpjpe"}
 
 # Substrings used to locate the relevant columns inside learning_curves.
@@ -57,10 +58,15 @@ def load_runs(results_dir):
         summary["run_tag"] = run_tag
         summary["model"] = metadata.get("model", "unknown")
 
+        per_keypoint = sheets.get("per_keypoint", pd.DataFrame()).copy()
+        if not per_keypoint.empty:
+            per_keypoint["run_tag"] = run_tag
+
         runs.append({
             "run_tag": run_tag,
             "metadata": metadata,
             "summary": summary,
+            "per_keypoint": per_keypoint,
             "curves": sheets.get("learning_curves", pd.DataFrame()),
         })
     return runs
@@ -168,6 +174,48 @@ def best_config_per_group(all_summary):
     return all_summary.loc[idx, columns].reset_index(drop=True)
 
 
+def plot_keypoint_conf_vs_error(per_keypoint, run_tag, out_dir, n_annotate=6):
+    """Scatter of per-keypoint confidence vs error, one point per keypoint.
+
+    Each point is one keypoint of one insect group. Median guide lines split the
+    plane into quadrants (well localised vs poorly localised, confident vs not),
+    and only the worst keypoints are labelled so the figure stays readable even
+    with many keypoints and several groups.
+    """
+    needed = {"kpt_conf", "nmpjpe", "group", "kpt_name"}
+    if per_keypoint.empty or not needed.issubset(per_keypoint.columns):
+        return
+    data = per_keypoint.dropna(subset=["kpt_conf", "nmpjpe"])
+    if data.empty:
+        return
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    groups = sorted(data["group"].unique())
+    cmap = plt.get_cmap("tab10")
+
+    for i, group in enumerate(groups):
+        group_df = data[data["group"] == group]
+        ax.scatter(group_df["kpt_conf"], group_df["nmpjpe"],
+                   s=30, alpha=0.6, color=cmap(i % 10), label=str(group))
+
+    ax.axvline(data["kpt_conf"].median(), color="grey", ls="--", lw=0.8)
+    ax.axhline(data["nmpjpe"].median(), color="grey", ls="--", lw=0.8)
+
+    worst = data.nlargest(n_annotate, "nmpjpe")
+    for _, row in worst.iterrows():
+        ax.annotate(f"{row['kpt_name']} ({row['group']})",
+                    (row["kpt_conf"], row["nmpjpe"]),
+                    fontsize=7, xytext=(4, 4), textcoords="offset points")
+
+    ax.set_xlabel("predicted confidence (higher is better)")
+    ax.set_ylabel("normalized error - nmpjpe (lower is better)")
+    ax.set_title(f"Keypoint confidence vs error - {run_tag}")
+    ax.legend(fontsize=8, title="group")
+    fig.tight_layout()
+    fig.savefig(out_dir / f"{run_tag}__keypoint_conf_error.png", dpi=150)
+    plt.close(fig)
+
+
 def main():
     args = parse_args()
     runs = load_runs(args.results_dir)
@@ -182,6 +230,8 @@ def main():
     for run in runs:
         plot_group_comparison(run["summary"], run["run_tag"], figures_dir)
         plot_learning_curves(run["curves"], run["run_tag"], figures_dir)
+        plot_keypoint_conf_vs_error(
+            run["per_keypoint"], run["run_tag"], figures_dir)
 
     all_summary = pd.concat([run["summary"] for run in runs],
                             ignore_index=True)
@@ -192,10 +242,18 @@ def main():
     plot_cross_config(all_summary, figures_dir)
     best_df = best_config_per_group(all_summary)
 
+    per_keypoint_frames = [run["per_keypoint"] for run in runs
+                           if not run["per_keypoint"].empty]
+    all_per_keypoint = pd.concat(per_keypoint_frames, ignore_index=True) \
+        if per_keypoint_frames else pd.DataFrame()
+
     out_path = out_dir / "comparison_summary.xlsx"
     with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
         all_summary.to_excel(writer, sheet_name="all_runs", index=False)
         best_df.to_excel(writer, sheet_name="best_per_group", index=False)
+        if not all_per_keypoint.empty:
+            all_per_keypoint.to_excel(
+                writer, sheet_name="per_keypoint_all", index=False)
         for metric in COMPARISON_METRICS:
             if metric in all_summary.columns:
                 pivot = all_summary.pivot_table(
