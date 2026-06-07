@@ -36,9 +36,9 @@ from ultralytics import YOLO
 # Replace the paths with the actual location of each group's dataset.
 DEFAULT_GROUPS = {
     "Coleoptera": "models/datasets/Coleoptera/yolo-config.yaml",
+    "Diptera": "models/datasets/Diptera/yolo-config.yaml",
     "Hymenoptera": "models/datasets/Hymenoptera/yolo-config.yaml",
     "Lepidoptera": "models/datasets/Lepidoptera/yolo-config.yaml",
-    "Diptera": "models/datasets/Diptera/yolo-config.yaml"
 }
 
 # PCK thresholds, expressed as a fraction of the ground-truth bbox diagonal.

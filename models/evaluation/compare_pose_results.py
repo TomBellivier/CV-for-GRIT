@@ -15,6 +15,7 @@ python compare_pose_results.py --results-dir pose_results --out-dir comparison
 """
 
 import argparse
+import math
 from pathlib import Path
 
 import matplotlib
@@ -174,13 +175,12 @@ def best_config_per_group(all_summary):
     return all_summary.loc[idx, columns].reset_index(drop=True)
 
 
-def plot_keypoint_conf_vs_error(per_keypoint, run_tag, out_dir, n_annotate=6):
-    """Scatter of per-keypoint confidence vs error, one point per keypoint.
+def plot_keypoint_conf_vs_error(per_keypoint, run_tag, out_dir):
+    """Per-group scatter of keypoint confidence vs error on a square grid.
 
-    Each point is one keypoint of one insect group. Median guide lines split the
-    plane into quadrants (well localised vs poorly localised, confident vs not),
-    and only the worst keypoints are labelled so the figure stays readable even
-    with many keypoints and several groups.
+    One subplot per insect group, arranged on an m x m grid with
+    m = ceil(sqrt(number_of_groups)). Every keypoint is labelled with its name.
+    Axis limits and the median guide lines are shared so groups stay comparable.
     """
     needed = {"kpt_conf", "nmpjpe", "group", "kpt_name"}
     if per_keypoint.empty or not needed.issubset(per_keypoint.columns):
@@ -189,28 +189,36 @@ def plot_keypoint_conf_vs_error(per_keypoint, run_tag, out_dir, n_annotate=6):
     if data.empty:
         return
 
-    fig, ax = plt.subplots(figsize=(8, 6))
     groups = sorted(data["group"].unique())
-    cmap = plt.get_cmap("tab10")
+    m = math.ceil(math.sqrt(len(groups)))
+    fig, axes = plt.subplots(m, m, figsize=(6 * m, 5 * m), squeeze=False)
+    flat_axes = axes.flatten()
 
-    for i, group in enumerate(groups):
+    x_min, x_max = data["kpt_conf"].min(), data["kpt_conf"].max()
+    y_min, y_max = data["nmpjpe"].min(), data["nmpjpe"].max()
+    conf_median = data["kpt_conf"].median()
+    err_median = data["nmpjpe"].median()
+
+    for ax, group in zip(flat_axes, groups):
         group_df = data[data["group"] == group]
         ax.scatter(group_df["kpt_conf"], group_df["nmpjpe"],
-                   s=30, alpha=0.6, color=cmap(i % 10), label=str(group))
+                   s=25, alpha=0.7, color="tab:blue")
+        for _, row in group_df.iterrows():
+            ax.annotate(str(row["kpt_name"]),
+                        (row["kpt_conf"], row["nmpjpe"]),
+                        fontsize=6, xytext=(3, 3), textcoords="offset points")
+        ax.axvline(conf_median, color="grey", ls="--", lw=0.8)
+        ax.axhline(err_median, color="grey", ls="--", lw=0.8)
+        ax.set_xlim(x_min, x_max)
+        ax.set_ylim(y_min, y_max)
+        ax.set_title(str(group))
+        ax.set_xlabel("predicted confidence (higher is better)")
+        ax.set_ylabel("normalized error - nmpjpe (lower is better)")
 
-    ax.axvline(data["kpt_conf"].median(), color="grey", ls="--", lw=0.8)
-    ax.axhline(data["nmpjpe"].median(), color="grey", ls="--", lw=0.8)
+    for ax in flat_axes[len(groups):]:
+        ax.axis("off")
 
-    worst = data.nlargest(n_annotate, "nmpjpe")
-    for _, row in worst.iterrows():
-        ax.annotate(f"{row['kpt_name']} ({row['group']})",
-                    (row["kpt_conf"], row["nmpjpe"]),
-                    fontsize=7, xytext=(4, 4), textcoords="offset points")
-
-    ax.set_xlabel("predicted confidence (higher is better)")
-    ax.set_ylabel("normalized error - nmpjpe (lower is better)")
-    ax.set_title(f"Keypoint confidence vs error - {run_tag}")
-    ax.legend(fontsize=8, title="group")
+    fig.suptitle(f"Keypoint confidence vs error - {run_tag}")
     fig.tight_layout()
     fig.savefig(out_dir / f"{run_tag}__keypoint_conf_error.png", dpi=150)
     plt.close(fig)
