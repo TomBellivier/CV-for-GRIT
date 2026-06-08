@@ -1,16 +1,9 @@
 # Configuration consumed by run_experiments.py.
-#
-# Note on weight names (Ultralytics convention):
-#   YOLOv8  -> yolov8n-pose.pt   (keeps the "v")
-#   YOLO11  -> yolo11n-pose.pt    (no "v")
-#   YOLO26  -> yolo26n-pose.pt    (no "v")
 
-# Shared across every experiment.
 data_config: models/evaluation/data.yaml
 out_dir: pose_results
 runs_dir: runs_pose
 
-# Applied to every experiment unless explicitly overridden below.
 defaults:
   epochs: 100
   batch: 16
@@ -22,11 +15,8 @@ defaults:
   patience: 50
   device: "0"
 
-# Explicit list: each entry is one full run over the four insect groups.
 # experiments:
 
-# Optional grid: expanded into the full Cartesian product and appended to the
-# explicit list above. Comment this block out if you only want the list.
 grid:
   model:
     - yolo11s-pose.pt
