@@ -23,20 +23,19 @@ defaults:
   device: "0"
 
 # Explicit list: each entry is one full run over the four insect groups.
-experiments:
-  - model: yolo11n-pose.pt
-  - model: yolov8n-pose.pt
+# experiments:
 
 # Optional grid: expanded into the full Cartesian product and appended to the
 # explicit list above. Comment this block out if you only want the list.
 grid:
   model:
-    - yolo26n-pose.pt
+    - yolo11s-pose.pt
+    - yolov8s-pose.pt
     - yolo26s-pose.pt
-    - yolo26m-pose.pt
   lr0:
     - 0.01
     - 0.005
   pose:
     - 12.0
-    - 20.0
+    - 24.0
+    - 100.0
