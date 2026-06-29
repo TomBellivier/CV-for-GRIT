@@ -3,6 +3,8 @@
 *.jpeg
 *.log
 *.json
+*.pkl
+
 !label_studio_annotations/
 !label_studio_annotations/**/*.json
 databases/
@@ -23,3 +25,4 @@ models/**/images/
 
 models/optimization/runs
 models/optimization/wandb
+models/optimization/Optuna

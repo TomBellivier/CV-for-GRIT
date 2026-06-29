@@ -1,4 +1,4 @@
-path: models/datasets/Lepidoptera
+path: Lepidoptera
 train: images/train
 val: images/val
 test: images/test
