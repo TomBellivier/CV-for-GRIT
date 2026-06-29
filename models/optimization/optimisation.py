@@ -20,7 +20,7 @@ DATASET = "../datasets/Lepidoptera/yolo-config.yaml"
 
 STUDY_NAME = "study_pose_kobj_box_cls_dfl_rle"
 
-N_TRIALS = 20
+N_TRIALS = 100
 
 SAVE = False
 
