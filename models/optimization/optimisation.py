@@ -65,7 +65,7 @@ if __name__ == "__main__":
         print(f'time (s): {time_s} seconds')
 
         import joblib
-        joblib.dump(study2, "study_opt_lr_pose_kobj.pkl")
+        joblib.dump(study2, f"{STUDY_NAME}.pkl")
 
 
 # -------------- VISU
