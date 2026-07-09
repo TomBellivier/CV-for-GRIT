@@ -1,0 +1,35 @@
+_wandb:
+    value:
+        cli_version: 0.28.0
+        e:
+            qfmt856u0h6pdwxhm4po1evute7txf6g:
+                codePath: models/optimization/optimisation.py
+                email: tom.bellivier@gmail.com
+                executable: /home/tombellivier/Documents/CV/CV-for-GRIT/.venv/bin/python
+                git:
+                    commit: 356b10e0f0f9081ccce51ceaa502e3e7269cd928
+                    remote: https://github.com/TomBellivier/CV-for-GRIT
+                host: FreeLlama
+                os: Linux-6.17.0-35-generic-x86_64-with-glibc2.39
+                program: /home/tombellivier/Documents/CV/CV-for-GRIT/models/optimization/optimisation.py
+                python: CPython 3.12.3
+                root: /home/tombellivier/Documents/CV/CV-for-GRIT/models/evaluation
+                startedAt: "2026-07-08T09:19:55.959625Z"
+                writerId: qfmt856u0h6pdwxhm4po1evute7txf6g
+        m: []
+        python_version: 3.12.3
+        t:
+            "1":
+                - 1
+                - 35
+                - 41
+            "2":
+                - 1
+                - 35
+                - 41
+            "3":
+                - 13
+            "4": 3.12.3
+            "5": 0.28.0
+            "12": 0.28.0
+            "13": linux-x86_64

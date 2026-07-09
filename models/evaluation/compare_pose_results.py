@@ -620,7 +620,7 @@ def main():
     args = parse_args()
     runs = load_runs(args.results_dir)
     if not runs:
-        print(f"No result_*.xlsx files found in {args.results_dir}")
+        print(f"No results_*.xlsx files found in {args.results_dir}")
         return
 
     out_dir = Path(args.out_dir)
