@@ -5,6 +5,8 @@
 *.json
 *.pkl
 
+models/datasets
+
 !label_studio_annotations/
 !label_studio_annotations/**/*.json
 databases/
