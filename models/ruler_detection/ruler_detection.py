@@ -78,7 +78,7 @@ def fft_dominant_frequency(row: np.ndarray,
 
     return period_px, phase_rad, max(mag_masked[peaks])
 
-def cycles_observes(row, period_px, seuil_env=0.3):
+def cycles_observes(row, period_px, seuil_env=0.2):
     N = len(row)
     f0 = 1.0 / period_px
     row_c = row - row.mean()                 # PAS de fenêtre ici (on garde les bords)
@@ -152,7 +152,7 @@ def _croissance(graine, direction, membres, groupe_id, gid,
         else:
             cycles_pred = cm[0] + pente0 * (lines[cand] - lm[0])  # graine seule
 
-        if abs(period[cand] - period_pred) <= delta and abs(n_cycles[cand] - cycles_pred) <= delta:
+        if abs(period[cand] - period_pred) <= delta : #and abs(n_cycles[cand] - cycles_pred) <= delta:
             groupe_id[cand] = gid
             membres.append(cand)
             sauts = 0
@@ -213,9 +213,14 @@ def trouver_groupes(period, magnitude, lines, n_cycles, delta, max_sauts=2, n_gr
 
     groupe_id[groupe_id == -2] = -1               # les rejetés -> non classés
         
-     # --- ré-étiquetage : groupe 0 = meilleure magnitude moyenne par point ---
+    # --- ré-étiquetage : groupe 0 = meilleure magnitude moyenne par point ---
     ids = [g for g in np.unique(groupe_id) if g != -1]
-    moyennes = {g: magnitude[groupe_id == g].mean() for g in ids}
+
+    ## tri par magnitude
+    # moyennes = {g: magnitude[groupe_id == g].mean() for g in ids}
+    ## tri par nombre de point dans le groupe:
+    moyennes = {g: len(np.where(groupe_id == g)[0]) for g in ids}
+
     ordre_groupes = sorted(ids, key=lambda g: moyennes[g], reverse=True)
     remap = {ancien: nouveau for nouveau, ancien in enumerate(ordre_groupes)}
 
