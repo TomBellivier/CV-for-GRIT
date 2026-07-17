@@ -11,6 +11,7 @@ models/datasets
 !label_studio_annotations/**/*.json
 databases/
 !databases/**/*/ipynb
+!databases/*.py
 !annotations/
 !annotations/**/*.json
 *.pth
