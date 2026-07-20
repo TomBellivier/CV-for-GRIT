@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import csv
 import math
+import os
 
 from . import config
 from .definitions import MEASUREMENT_NAMES
@@ -98,22 +99,54 @@ def build_row(record: dict) -> list[str]:
 
 
 class CsvWriter:
-    """Small helper that opens the file, writes the header, then rows."""
+    """Small helper that opens the file, writes the header, then rows.
 
-    def __init__(self, output_path):
+    To survive a crash mid-run, the file is flushed to disk periodically:
+    every `flush_every` rows we push Python's buffer to the OS (file.flush())
+    and then force the OS to write to the physical disk (os.fsync()). So at any
+    moment, at most the last `flush_every` rows can be lost.
+
+    Set flush_every=1 for maximum safety (a durable write after every image, at
+    the cost of more disk syncs); a larger value trades a little safety for
+    speed. 0 disables periodic flushing (only the final close() flushes).
+    """
+
+    def __init__(self, output_path, flush_every: int | None = None):
         self.output_path = str(output_path)
+        self.flush_every = (config.CSV_FLUSH_EVERY_N_ROWS
+                            if flush_every is None else flush_every)
         self._fh = None
         self._writer = None
+        self._since_flush = 0
 
     def __enter__(self):
         self._fh = open(self.output_path, "w", newline="", encoding="utf-8")
         self._writer = csv.writer(self._fh)
         self._writer.writerow(build_header())
+        self.flush()                         # make the header durable immediately
         return self
 
     def write_record(self, record: dict):
         self._writer.writerow(build_row(record))
+        self._since_flush += 1
+        if self.flush_every and self._since_flush >= self.flush_every:
+            self.flush()
+
+    def flush(self):
+        """Force everything written so far all the way to the physical disk."""
+        if self._fh is None:
+            return
+        self._fh.flush()                     # Python buffer -> OS
+        try:
+            os.fsync(self._fh.fileno())      # OS cache -> disk
+        except OSError:
+            # Some filesystems / platforms don't support fsync; flush() still
+            # protects against a Python-level crash, which is the common case.
+            pass
+        self._since_flush = 0
 
     def __exit__(self, exc_type, exc, tb):
         if self._fh is not None:
+            # Final durable flush even if the run ended on an exception.
+            self.flush()
             self._fh.close()

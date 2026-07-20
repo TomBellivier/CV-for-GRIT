@@ -36,6 +36,7 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
+import time
 
 from processing import config
 from processing.csv_writer import CsvWriter
@@ -78,6 +79,9 @@ def parse_args():
                    help="Max tasks in flight = images pre-loaded ahead (default: 32).")
     p.add_argument("--torch-threads", type=int, default=None,
                    help="Compute threads PER worker (default: cpus // workers).")
+    p.add_argument("--flush-every", type=int, default=None,
+                   help="Force the CSV to disk every N rows for crash safety "
+                        "(default: config.CSV_FLUSH_EVERY_N_ROWS; 0 disables).")
 
     return p.parse_args()
 
@@ -126,7 +130,8 @@ def main():
 
     # ---- process in parallel, write results as they complete ----------------
     ok, err = 0, 0
-    with CsvWriter(output_csv) as writer:
+    start_time = time.time()
+    with CsvWriter(output_csv, flush_every=args.flush_every) as writer:
         for i, (item, record, error) in enumerate(
                 bounded_unordered_map(task, items, args.workers, args.buffer), start=1):
             key, image_name = item
@@ -144,7 +149,8 @@ def main():
                 writer.write_record(record)
 
             if i % 50 == 0 or i == total:
-                print(f"    {i}/{total} done  (ok={ok}, err={err})")
+                T = time.time() - start_time
+                print(f"    {i}/{total} done in {T:.1f}s (speed: {i/T:.1f} img/s) (ok={ok}, err={err})")
 
     print(f"\nDone. {ok} processed, {err} error(s). Results written to: {output_csv}")
 

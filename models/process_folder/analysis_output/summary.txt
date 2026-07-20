@@ -1,0 +1,58 @@
+================================================================
+RESULTS SUMMARY
+================================================================
+rows (images)                  : 22925
+images with a detected pose    : 16259 (70.9%)
+images without a pose          : 6666 (29.1%)
+in_train = 1                   : 1892
+in_val = 1                     : 446
+
+----------------------------------------------------------------
+GLOBAL CONFIDENCE
+----------------------------------------------------------------
+overall_pose_confidence  mean=0.514  std=0.221  median=0.598
+scale_confidence         mean=0.770  std=0.326  median=0.948
+detection_confidence     mean=0.801  std=0.220  median=0.936
+
+----------------------------------------------------------------
+NEEDS REVIEW (threshold = 0.5)
+----------------------------------------------------------------
+flagged: 40.5% of images
+
+----------------------------------------------------------------
+SCALE METHOD
+----------------------------------------------------------------
+  ruler       : 81.5%
+  scale_bar   : 10.1%
+  none        : 8.4%
+
+----------------------------------------------------------------
+PER-MEASUREMENT CONFIDENCE (mean / std / median / n)
+----------------------------------------------------------------
+  total length                   mean=0.661  std=0.291  median=0.782  n=16259
+  head width                     mean=0.750  std=0.299  median=0.897  n=16259
+  head length                    mean=0.683  std=0.295  median=0.801  n=16259
+  inter ocular distance          mean=0.673  std=0.294  median=0.776  n=16259
+  right antenna length           mean=0.458  std=0.411  median=0.336  n=16259
+  left antenna length            mean=0.682  std=0.301  median=0.833  n=16259
+  thorax width                   mean=0.811  std=0.289  median=0.973  n=16259
+  thorax length                  mean=0.690  std=0.296  median=0.807  n=16259
+  abdomen width                  mean=0.825  std=0.244  median=0.947  n=16259
+  abdomen length                 mean=0.835  std=0.225  median=0.933  n=16259
+  intertegular distance          mean=0.014  std=0.037  median=0.005  n=16259
+  left hind wing length          mean=0.834  std=0.180  median=0.894  n=16259
+  right hind wing length         mean=0.015  std=0.046  median=0.005  n=16259
+  left hind wing width           mean=0.824  std=0.258  median=0.938  n=16259
+  right hind wing width          mean=0.138  std=0.211  median=0.064  n=16259
+  left fore wing length          mean=0.690  std=0.310  median=0.846  n=16259
+  right fore wing length         mean=0.419  std=0.414  median=0.215  n=16259
+  left fore wing width           mean=0.694  std=0.268  median=0.798  n=16259
+  right fore wing width          mean=0.446  std=0.410  median=0.296  n=16259
+  left hind leg length           mean=0.389  std=0.380  median=0.223  n=16259
+  left hind leg femur length     mean=0.800  std=0.190  median=0.862  n=16259
+  left hind leg tibia length     mean=0.854  std=0.174  median=0.921  n=16259
+  left hind leg tarsus length    mean=0.429  std=0.417  median=0.227  n=16259
+  right hind leg length          mean=0.017  std=0.047  median=0.007  n=16259
+  right hind leg femur length    mean=0.017  std=0.048  median=0.007  n=16259
+  right hind leg tibia length    mean=0.167  std=0.233  median=0.084  n=16259
+  right hind leg tarsus length   mean=0.158  std=0.232  median=0.076  n=16259
