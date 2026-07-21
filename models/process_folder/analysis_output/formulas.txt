@@ -1,0 +1,13 @@
+confidence of a measure (kp) : conf = min(c_i)
+confidence of a measure (tta) : cv = std / mean
+
+global pose confidence : conf = detection_conf × mean(c_i) 
+
+scale bar confidence : conf = conf_line_box × conf_text_box × OCR_reliability
+ruler confidence :
+    1 group : conf = 1
+    multiple : conf = (1/n) · Σ |M0 − Mi| / M0
+
+confidence after converion : conf = min(conf_mesure, conf_scale)     
+
+needs_review : overall_pose_confidence < 0.5 OR scale_confidence < 0.5 

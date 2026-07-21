@@ -119,6 +119,22 @@ magnitude gap between the main group and the (up to 4) secondary groups.
 confidence columns hold the raw measurement confidence; a commented block in
 `process_folder.py` shows how to switch them to the combined mm confidence.
 
+## Keypoint export and ground-truth analysis
+
+With `config.EXPORT_KEYPOINTS = True` (default), the CSV also carries the raw
+keypoints of the measured instance: `<kp> [kp_x]`, `<kp> [kp_y]`,
+`<kp> [kp_conf]` (pixel coordinates + confidence, 3 × NUM_KEYPOINTS columns).
+
+`analyze_results.py` uses these, together with the YOLO **label files**
+(`datasets/<dataset>/labels/<split>/<stem>.txt`), to measure real error:
+it rebuilds the ground-truth keypoints/measurements (de-normalised with each
+image's size, read from disk or from the `image_width/height` columns) and
+computes, among others, OKS vs overall confidence, per-keypoint error-vs-
+confidence correlation and heatmap, per-measurement error, and needs-review vs
+error. Run `python analyze_results.py --input results.csv` (add `--no-gt` to
+skip the label-based part). OKS uses an uncalibrated falloff `--oks-kappa`
+(default 0.05) since the bee keypoints have no standard COCO sigmas.
+
 ## Bugs fixed in the adapted detector files
 
 - **Scale bar:** `_ensure_ocr_reader()` was called with no argument although it

@@ -45,6 +45,12 @@ datasets root; labels are datasets/<dataset>/labels/<split>/<stem>.txt):
     mean_error_vs_needs_review.png           mean error, flagged vs not
     rel_error_boxplot_per_measurement.png    error distribution per measurement
     mean_error_by_split.png                  error per train/val/test split
+Keypoint-level (only if the raw keypoints were exported, EXPORT_KEYPOINTS=True):
+    oks_vs_overall_confidence.png            OKS vs overall confidence (+corr)
+    kp_error_vs_confidence_correlation.png   per-keypoint Spearman(conf, error)
+    kp_error_vs_confidence_heatmap.png       error vs confidence heatmap per kp
+    oks_histogram.png                        OKS distribution
+    kp_mean_error.png                        mean error per keypoint (worst first)
 Use --no-gt to skip it, --datasets-root to point elsewhere, --gt-splits to choose splits.
 
 A note on "per keypoint"
@@ -73,7 +79,8 @@ import pandas as pd              # noqa: E402
 # simply skipped (the rest of the figures still work).
 try:
     from processing.definitions import (
-        MEASUREMENT_INDICES, MEASUREMENT_NAMES as DEF_MEASUREMENT_NAMES, NUM_KEYPOINTS,
+        MEASUREMENT_INDICES, MEASUREMENT_NAMES as DEF_MEASUREMENT_NAMES,
+        NUM_KEYPOINTS, KEYPOINT_NAMES,
     )
     from processing import config as proj_config
     HAVE_PROJECT = True
@@ -81,6 +88,9 @@ except Exception:                # noqa: BLE001
     HAVE_PROJECT = False
 
 CONF_SUFFIX = " [conf]"
+KP_X_SUFFIX = " [kp_x]"
+KP_Y_SUFFIX = " [kp_y]"
+KP_CONF_SUFFIX = " [kp_conf]"
 IMG_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp")
 
 
@@ -88,8 +98,23 @@ IMG_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp")
 # Helpers
 # --------------------------------------------------------------------------- #
 def measurement_conf_columns(df: pd.DataFrame) -> list[str]:
-    """All per-measurement confidence columns, in CSV order."""
-    return [c for c in df.columns if c.endswith(CONF_SUFFIX)]
+    """All per-measurement confidence columns, in CSV order.
+
+    Excludes the per-keypoint confidence columns ('... [kp_conf]').
+    """
+    return [c for c in df.columns
+            if c.endswith(CONF_SUFFIX) and not c.endswith(KP_CONF_SUFFIX)]
+
+
+def keypoint_names_in(df: pd.DataFrame) -> list[str]:
+    """Keypoints that have x, y AND conf columns in the CSV (in CSV order)."""
+    names = []
+    for c in df.columns:
+        if c.endswith(KP_CONF_SUFFIX):
+            kp = c[: -len(KP_CONF_SUFFIX)]
+            if (kp + KP_X_SUFFIX) in df.columns and (kp + KP_Y_SUFFIX) in df.columns:
+                names.append(kp)
+    return names
 
 
 def short_label(conf_col: str) -> str:
@@ -489,7 +514,8 @@ def parse_label_file(path: Path, num_kp: int):
         if area > best_area:
             best_area = area
             best = {"xy": np.column_stack([xs, ys]).astype(float),
-                    "vis": (np.array(vis, dtype=float) if vis is not None else None)}
+                    "vis": (np.array(vis, dtype=float) if vis is not None else None),
+                    "area": float(area)}          # normalised bbox area (w*h)
     return best
 
 
@@ -531,13 +557,16 @@ def gt_measurements_px(xy_px, vis, meas_indices) -> dict:
     return out
 
 
-def compute_errors(df, datasets_root: Path, splits, review_threshold):
-    """Match each CSV row to its GT label and accumulate per-measurement errors.
+def compute_errors(df, datasets_root: Path, splits, review_threshold,
+                   oks_kappa: float = 0.05, pck_alpha: float = 0.10):
+    """Match each CSV row to its GT label and accumulate the errors.
 
-    Returns None if no labels were found. Otherwise a dict with:
+    Returns None if no labels were found. Otherwise a dict with, per measurement:
         per_measure[m] = {'rel':[], 'abs':[], 'conf':[]}
-        img_mean_rel, img_needs_review, img_split   (aligned per-image lists)
-        n_gt   (number of images matched to a GT label)
+    and, when the raw keypoints were exported to the CSV, per keypoint:
+        per_kp[kp]     = {'err':[], 'nerr':[], 'conf':[]}   (px, px/scale, conf)
+    plus per-image aligned lists (img_mean_rel, img_needs_review, img_split,
+    img_oks, img_pck, img_overall_conf) and n_gt.
     """
     labels_map, images_map, split_of = build_gt_index(datasets_root, splits)
     if not labels_map:
@@ -547,6 +576,12 @@ def compute_errors(df, datasets_root: Path, splits, review_threshold):
                   if m in MEASUREMENT_INDICES and (px_col(m) in df.columns)]
     per = {m: {"rel": [], "abs": [], "conf": []} for m in meas_names}
     img_mean_rel, img_nr, img_split = [], [], []
+
+    # Keypoint-level setup (only if the raw kp columns are present).
+    kp_names = keypoint_names_in(df)
+    kp_index = {name: i for i, name in enumerate(KEYPOINT_NAMES)}
+    per_kp = {kp: {"err": [], "nerr": [], "conf": []} for kp in kp_names}
+    img_oks, img_pck, img_overall_conf = [], [], []
     n_gt = 0
 
     for _, row in df.iterrows():
@@ -564,10 +599,11 @@ def compute_errors(df, datasets_root: Path, splits, review_threshold):
         xy = inst["xy"].copy()
         xy[:, 0] *= W
         xy[:, 1] *= H
-        gt = gt_measurements_px(xy, inst["vis"],
-                                {m: MEASUREMENT_INDICES[m] for m in meas_names})
+        vis = inst["vis"]
+        gt = gt_measurements_px(xy, vis, {m: MEASUREMENT_INDICES[m] for m in meas_names})
         n_gt += 1
 
+        # ---- measurement-level errors ---------------------------------------
         rels = []
         for m in meas_names:
             pred = _num(row.get(px_col(m)))
@@ -575,11 +611,36 @@ def compute_errors(df, datasets_root: Path, splits, review_threshold):
             conf = _num(row.get(conf_col(m)))
             if np.isnan(pred) or np.isnan(g) or g <= 0:
                 continue
-            rel = abs(pred - g) / g
-            per[m]["rel"].append(rel)
+            per[m]["rel"].append(abs(pred - g) / g)
             per[m]["abs"].append(abs(pred - g))
             per[m]["conf"].append(conf)
-            rels.append(rel)
+            rels.append(abs(pred - g) / g)
+
+        # ---- keypoint-level errors + OKS + PCK ------------------------------
+        area_px = inst["area"] * W * H            # GT object scale s^2
+        if kp_names and area_px > 0:
+            s = math.sqrt(area_px)
+            oks_terms, pck_hits, pck_total = [], 0, 0
+            for kp in kp_names:
+                idx = kp_index[kp]
+                if vis is not None and vis[idx] == 0:      # GT keypoint absent
+                    continue
+                px = _num(row.get(kp + KP_X_SUFFIX))
+                py = _num(row.get(kp + KP_Y_SUFFIX))
+                pc = _num(row.get(kp + KP_CONF_SUFFIX))
+                if np.isnan(px) or np.isnan(py):           # no prediction
+                    continue
+                d = math.hypot(px - xy[idx, 0], py - xy[idx, 1])
+                per_kp[kp]["err"].append(d)
+                per_kp[kp]["nerr"].append(d / s)
+                per_kp[kp]["conf"].append(pc)
+                oks_terms.append(math.exp(-(d * d) / (2.0 * area_px * oks_kappa ** 2)))
+                pck_total += 1
+                pck_hits += int(d <= pck_alpha * s)
+            if oks_terms:
+                img_oks.append(float(np.mean(oks_terms)))
+                img_pck.append(pck_hits / pck_total if pck_total else np.nan)
+                img_overall_conf.append(_num(row.get("overall_pose_confidence")))
 
         pose = _num(row.get("overall_pose_confidence"))
         sc = _num(row.get("scale_confidence"))
@@ -594,6 +655,11 @@ def compute_errors(df, datasets_root: Path, splits, review_threshold):
             "img_mean_rel": np.array(img_mean_rel),
             "img_needs_review": np.array(img_nr, dtype=bool),
             "img_split": np.array(img_split, dtype=object),
+            "kp_names": kp_names, "per_kp": per_kp,
+            "img_oks": np.array(img_oks),
+            "img_pck": np.array(img_pck),
+            "img_overall_conf": np.array(img_overall_conf),
+            "oks_kappa": oks_kappa, "pck_alpha": pck_alpha,
             "n_gt": n_gt}
 
 
@@ -714,6 +780,132 @@ def fig_error_by_split(err, output_dir):
     ax.set_title("Mean error by split")
     ax.grid(axis="y", alpha=0.3)
     save(fig, output_dir, "mean_error_by_split.png")
+
+
+# ----- keypoint-level figures (need EXPORT_KEYPOINTS in the CSV) ------------ #
+def fig_oks_vs_overall_conf(err, output_dir):
+    """OKS (per image) vs overall pose confidence, with the correlation shown.
+
+    OKS rewards keypoints close to the GT (scaled by object size); a good
+    overall confidence should rise WITH OKS (positive correlation).
+    """
+    oks = err["img_oks"]
+    conf = err["img_overall_conf"]
+    mask = ~np.isnan(oks) & ~np.isnan(conf)
+    oks, conf = oks[mask], conf[mask]
+    rho = _spearman(conf, oks)
+
+    fig, ax = plt.subplots(figsize=(7, 6))
+    if oks.size:
+        ax.scatter(conf, oks, s=6, alpha=0.25, color="#4C72B0")
+        bins = np.linspace(0, 1, 11)
+        idx = np.digitize(conf, bins) - 1
+        xs, ys = [], []
+        for b in range(10):
+            sel = idx == b
+            if sel.sum():
+                xs.append((bins[b] + bins[b + 1]) / 2)
+                ys.append(oks[sel].mean())
+        ax.plot(xs, ys, "o-", color="#C44E52", label="mean OKS per confidence bin")
+        ax.legend()
+    ax.set_xlabel("overall pose confidence")
+    ax.set_ylabel("OKS")
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1.02)
+    ax.set_title(f"OKS vs overall confidence  (Spearman = {rho:.3f})")
+    ax.grid(alpha=0.3)
+    save(fig, output_dir, "oks_vs_overall_confidence.png")
+    return rho
+
+
+def fig_kp_error_conf_correlation(err, output_dir):
+    """Per-keypoint Spearman(confidence, normalised error). Negative = good."""
+    names = err["kp_names"]
+    corrs = [_spearman(err["per_kp"][kp]["conf"], err["per_kp"][kp]["nerr"]) for kp in names]
+    x = np.arange(len(names))
+    colors = ["#55A868" if (c is not None and c < 0) else "#C44E52" for c in corrs]
+    fig, ax = plt.subplots(figsize=(max(9, len(names) * 0.32), 6))
+    ax.bar(x, corrs, color=colors, alpha=0.85)
+    ax.axhline(0, color="k", lw=0.8)
+    ax.set_xticks(x)
+    ax.set_xticklabels(names, rotation=90, fontsize=6)
+    ax.set_ylabel("Spearman(confidence, normalised error)")
+    ax.set_ylim(-1, 1)
+    ax.set_title("Per-keypoint: error vs confidence (negative = confidence works)")
+    ax.grid(axis="y", alpha=0.3)
+    save(fig, output_dir, "kp_error_vs_confidence_correlation.png")
+    return dict(zip(names, corrs))
+
+
+def fig_kp_error_conf_heatmap(err, output_dir, n_bins=10):
+    """Heatmap of mean normalised error vs confidence, for each keypoint.
+
+    x = keypoint, y = confidence bin, colour = mean error (per keypoint per bin).
+    A well-behaved keypoint shows a clear vertical gradient (low error at high
+    confidence, i.e. dark at the top).
+    """
+    names = err["kp_names"]
+    bins = np.linspace(0, 1, n_bins + 1)
+    matrix = np.full((n_bins, len(names)), np.nan)
+    for j, kp in enumerate(names):
+        conf = np.asarray(err["per_kp"][kp]["conf"], dtype=float)
+        nerr = np.asarray(err["per_kp"][kp]["nerr"], dtype=float)
+        ok = ~np.isnan(conf) & ~np.isnan(nerr)
+        conf, nerr = conf[ok], nerr[ok]
+        if not conf.size:
+            continue
+        idx = np.digitize(conf, bins) - 1
+        for b in range(n_bins):
+            sel = idx == b
+            if sel.sum():
+                matrix[b, j] = nerr[sel].mean()
+
+    fig, ax = plt.subplots(figsize=(max(9, len(names) * 0.32), 6))
+    # Cap the colour scale at the 95th percentile so outliers don't wash it out.
+    vmax = np.nanpercentile(matrix, 95) if np.isfinite(matrix).any() else 1.0
+    im = ax.imshow(matrix, origin="lower", aspect="auto",
+                   extent=[0, len(names), 0, 1], cmap="magma_r", vmin=0, vmax=vmax)
+    ax.set_xticks(np.arange(len(names)) + 0.5)
+    ax.set_xticklabels(names, rotation=90, fontsize=6)
+    ax.set_ylabel("confidence")
+    ax.set_title("Mean normalised error vs confidence, per keypoint")
+    fig.colorbar(im, ax=ax, label="mean error (px / object scale)")
+    save(fig, output_dir, "kp_error_vs_confidence_heatmap.png")
+
+
+def fig_oks_histogram(err, output_dir):
+    """Distribution of per-image OKS (a standard pose-quality overview)."""
+    oks = err["img_oks"]
+    oks = oks[~np.isnan(oks)]
+    fig, ax = plt.subplots(figsize=(7, 5))
+    if oks.size:
+        ax.hist(oks, bins=30, range=(0, 1), color="#55A868", alpha=0.85)
+        ax.axvline(oks.mean(), color="k", ls="--", lw=1, label=f"mean = {oks.mean():.3f}")
+        ax.legend()
+    ax.set_xlabel("OKS")
+    ax.set_ylabel("frequency (images)")
+    ax.set_title(f"OKS distribution (kappa={err['oks_kappa']})")
+    ax.grid(axis="y", alpha=0.3)
+    save(fig, output_dir, "oks_histogram.png")
+
+
+def fig_kp_mean_error(err, output_dir):
+    """Mean normalised error per keypoint (which keypoints are hardest)."""
+    names = err["kp_names"]
+    means = [float(np.mean(err["per_kp"][kp]["nerr"])) if err["per_kp"][kp]["nerr"]
+             else np.nan for kp in names]
+    order = np.argsort([-(m if not math.isnan(m) else -1) for m in means])
+    names_s = [names[i] for i in order]
+    means_s = [means[i] for i in order]
+    x = np.arange(len(names))
+    fig, ax = plt.subplots(figsize=(max(9, len(names) * 0.32), 6))
+    ax.bar(x, means_s, color="#DD8452", alpha=0.85)
+    ax.set_xticks(x)
+    ax.set_xticklabels(names_s, rotation=90, fontsize=6)
+    ax.set_ylabel("mean normalised error (px / object scale)")
+    ax.set_title("Mean per-keypoint error (worst first)")
+    ax.grid(axis="y", alpha=0.3)
+    save(fig, output_dir, "kp_mean_error.png")
 
 
 # --------------------------------------------------------------------------- #
@@ -841,6 +1033,33 @@ def write_summary(df, conf_cols, output_dir, review_threshold,
                 lines.append(f"  {m:<30} (no matched GT)")
         lines.append("")
 
+        # keypoint-level stats
+        if err.get("kp_names") and err["img_oks"].size:
+            oks = err["img_oks"][~np.isnan(err["img_oks"])]
+            pck = err["img_pck"][~np.isnan(err["img_pck"])]
+            lines.append("-" * 64)
+            lines.append(f"KEYPOINTS (OKS kappa={err['oks_kappa']}, "
+                         f"PCK alpha={err['pck_alpha']})")
+            lines.append("-" * 64)
+            if oks.size:
+                lines.append(f"mean OKS = {oks.mean():.3f}   median OKS = {np.median(oks):.3f}")
+            if pck.size:
+                lines.append(f"mean PCK@{err['pck_alpha']} = {pck.mean():.3f}")
+            lines.append(f"corr(OKS, overall_confidence) spearman = "
+                         f"{_spearman(err['img_overall_conf'], err['img_oks']):.3f}")
+            lines.append("")
+            lines.append("  per keypoint:  mean_norm_err  spearman(conf,err)  n")
+            for kp in err["kp_names"]:
+                d = err["per_kp"][kp]
+                n = len(d["nerr"])
+                if n:
+                    mne = float(np.mean(d["nerr"]))
+                    sp = _spearman(d["conf"], d["nerr"])
+                    lines.append(f"  {kp:<24} {mne:13.3f}  {sp:17.3f}  {n}")
+                else:
+                    lines.append(f"  {kp:<24} (no matched GT)")
+            lines.append("")
+
     path = os.path.join(output_dir, "summary.txt")
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
@@ -861,6 +1080,10 @@ def main():
                         "config.DATASETS_ROOT). Used to find the GT label files.")
     p.add_argument("--gt-splits", nargs="*", default=["train", "val", "test"],
                    help="Splits to read GT labels from (default: train val test).")
+    p.add_argument("--oks-kappa", type=float, default=0.05,
+                   help="OKS falloff constant (uncalibrated; default 0.05).")
+    p.add_argument("--pck-alpha", type=float, default=0.10,
+                   help="PCK threshold as a fraction of object scale (default 0.10).")
     p.add_argument("--no-gt", action="store_true",
                    help="Skip the ground-truth error analysis entirely.")
     args = p.parse_args()
@@ -910,7 +1133,8 @@ def main():
     else:
         datasets_root = Path(args.datasets_root) if args.datasets_root else proj_config.DATASETS_ROOT
         print(f"[gt] reading labels under {datasets_root} (splits: {args.gt_splits})")
-        err = compute_errors(df, datasets_root, args.gt_splits, args.review_threshold)
+        err = compute_errors(df, datasets_root, args.gt_splits, args.review_threshold,
+                             oks_kappa=args.oks_kappa, pck_alpha=args.pck_alpha)
         if err is None:
             print("[gt] no label files found -> GT figures skipped.")
         elif err["n_gt"] == 0:
@@ -923,6 +1147,16 @@ def main():
             fig_mean_error_vs_needs_review(err, args.output_dir)
             fig_rel_error_boxplot(err, args.output_dir)
             fig_error_by_split(err, args.output_dir)
+            # keypoint-level figures (only if the raw kp columns are present)
+            if err["kp_names"] and err["img_oks"].size:
+                oks_corr = fig_oks_vs_overall_conf(err, args.output_dir)
+                kp_corr = fig_kp_error_conf_correlation(err, args.output_dir)
+                fig_kp_error_conf_heatmap(err, args.output_dir)
+                fig_oks_histogram(err, args.output_dir)
+                fig_kp_mean_error(err, args.output_dir)
+            else:
+                print("[gt] no keypoint columns in CSV -> keypoint figures skipped "
+                      "(set EXPORT_KEYPOINTS=True and re-run to unlock OKS/kp metrics).")
 
     write_summary(df, conf_cols, args.output_dir, args.review_threshold,
                   needs_review_pct, scale_type_pct,

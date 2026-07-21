@@ -27,13 +27,18 @@ import math
 import os
 
 from . import config
-from .definitions import MEASUREMENT_NAMES
+from .definitions import MEASUREMENT_NAMES, KEYPOINT_NAMES
 
 
 # Suffixes used to disambiguate the three columns of each measurement.
 PX_SUFFIX = " [px]"
 MM_SUFFIX = " [mm]"
 CONF_SUFFIX = " [conf]"
+
+# Suffixes for the raw keypoint columns (only written if config.EXPORT_KEYPOINTS).
+KP_X_SUFFIX = " [kp_x]"
+KP_Y_SUFFIX = " [kp_y]"
+KP_CONF_SUFFIX = " [kp_conf]"
 
 # Optional columns, in a stable display order.
 _OPTIONAL_ORDER = [
@@ -50,6 +55,16 @@ def _enabled_optional_columns() -> list[str]:
     return [c for c in _OPTIONAL_ORDER if config.OPTIONAL_COLUMNS.get(c, False)]
 
 
+def _keypoint_columns() -> list[str]:
+    """Keypoint columns (x, y, conf per keypoint), or [] if export is off."""
+    if not getattr(config, "EXPORT_KEYPOINTS", False):
+        return []
+    cols = []
+    for kp in KEYPOINT_NAMES:
+        cols += [kp + KP_X_SUFFIX, kp + KP_Y_SUFFIX, kp + KP_CONF_SUFFIX]
+    return cols
+
+
 def build_header() -> list[str]:
     """Return the ordered list of column names."""
     header = ["image_name", "in_train", "in_val"]
@@ -58,6 +73,7 @@ def build_header() -> list[str]:
     header += [m + CONF_SUFFIX for m in MEASUREMENT_NAMES]
     header += ["overall_pose_confidence", "scale_px_per_mm", "scale_confidence"]
     header += _enabled_optional_columns()
+    header += _keypoint_columns()
     return header
 
 
@@ -95,6 +111,17 @@ def build_row(record: dict) -> list[str]:
 
     for col in _enabled_optional_columns():
         row.append(_fmt(record.get(col)))
+
+    # Raw keypoints of the measured instance (x, y, confidence per keypoint).
+    if getattr(config, "EXPORT_KEYPOINTS", False):
+        kps = record.get("keypoints")            # (NUM_KEYPOINTS, 3) or None
+        for i in range(len(KEYPOINT_NAMES)):
+            if kps is None:
+                row += ["", "", ""]
+            else:
+                x, y, c = float(kps[i, 0]), float(kps[i, 1]), float(kps[i, 2])
+                # Round to keep the (large) file compact without losing precision.
+                row += [f"{x:.2f}", f"{y:.2f}", f"{c:.4f}"]
     return row
 
 

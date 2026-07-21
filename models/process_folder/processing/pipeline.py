@@ -82,6 +82,7 @@ def process_image(img_bgr: np.ndarray, image_name: str,
         return record
 
     keypoints = pose.keypoints
+    record["keypoints"] = keypoints           # exported as raw kp columns (x,y,conf)
 
     # ---- 3. pixel measurements ----------------------------------------------
     pixels = compute_measurements(keypoints)

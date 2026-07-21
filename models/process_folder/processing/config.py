@@ -22,18 +22,18 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # Root of the YOLO datasets. Expected layout (standard YOLO):
 #     datasets/<dataset_name>/images/<split>/<image files>
 #     datasets/<dataset_name>/labels/<split>/<label files>
-DATASETS_ROOT = PROJECT_ROOT.parent / "datasets"
+DATASETS_ROOT = PROJECT_ROOT / "datasets"
 
 # Folder that holds the trained pose models (files named "XXX.pt").
 TRAINED_MODELS_DIR = PROJECT_ROOT / "trained_models"
 
 # Exactly ONE pose model is used per run. Put its file name here.
 # (Only this model is loaded; see load_pose_model in pose_inference.py.)
-POSE_MODEL_NAME = "best.pt"                      # <-- EDIT ME
+POSE_MODEL_NAME = "XXX.pt"                      # <-- EDIT ME
 POSE_MODEL_PATH = TRAINED_MODELS_DIR / POSE_MODEL_NAME
 
 # YOLO scale-bar detector.
-SCALE_BAR_MODEL_PATH = PROJECT_ROOT.parent / "scale_bar_detection" / "best.pt"
+SCALE_BAR_MODEL_PATH = PROJECT_ROOT / "scale_bar_detection" / "best.pt"
 
 # Folder of images to process, and where to write the CSV.
 INPUT_FOLDER = PROJECT_ROOT / "images_to_process"   # <-- EDIT ME if needed
@@ -42,7 +42,13 @@ OUTPUT_CSV = PROJECT_ROOT / "results.csv"
 # Crash safety: force the CSV to disk every N rows (file.flush + os.fsync), so a
 # crash loses at most the last N rows. 1 = safest (durable write per image);
 # larger = a little faster; 0 = only flush at the very end.
-CSV_FLUSH_EVERY_N_ROWS = 500
+CSV_FLUSH_EVERY_N_ROWS = 20
+
+# Export the raw keypoints of the measured instance as extra CSV columns:
+#   '<kp> [kp_x]', '<kp> [kp_y]', '<kp> [kp_conf]'   (pixel coords + confidence)
+# This adds 3 * NUM_KEYPOINTS columns and is what unlocks the keypoint-level
+# error analysis (OKS, per-keypoint error vs confidence) in analyze_results.py.
+EXPORT_KEYPOINTS = True
 
 # Accepted image extensions (lower-case, with the dot).
 IMG_EXTENSIONS = (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp")
@@ -57,7 +63,7 @@ VAL_SPLIT_DIRNAME = "val"
 # How a processed image is matched against the dataset files:
 #   "name" -> exact file name incl. extension (e.g. "bee_001.jpg")   [requested]
 #   "stem" -> file name without extension     (e.g. "bee_001")
-MATCH_ON = "stem"
+MATCH_ON = "name"
 
 # --------------------------------------------------------------------------- #
 # Pose inference
@@ -172,12 +178,12 @@ CONVERTED_CONF_METHOD = "min"
 # default (only the columns you asked for are written). Flip any of them to True
 # to add the column; the plumbing already exists in csv_writer.py.
 OPTIONAL_COLUMNS = {
-    "scale_method":         True,   # "scale_bar" | "ruler" | "none"
+    "scale_method":         False,   # "scale_bar" | "ruler" | "none"
     "n_instances":          False,   # number of insects detected on the image
-    "detection_confidence": True,   # raw YOLO box score of the measured insect
-    "image_width":          True,
-    "image_height":         True,
-    "needs_review":         True,   # derived boolean from confidence thresholds
+    "detection_confidence": False,   # raw YOLO box score of the measured insect
+    "image_width":          False,
+    "image_height":         False,
+    "needs_review":         False,   # derived boolean from confidence thresholds
 }
 
 # Threshold used only if OPTIONAL_COLUMNS["needs_review"] is True:
