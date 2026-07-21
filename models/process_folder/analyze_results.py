@@ -26,11 +26,26 @@ Always (these columns are always in the CSV):
     needs_review_pct.png                     % of rows flagged for review
                                              (derived here from the thresholds)
     scatter_pose_vs_scale_confidence.png     relationship between the two
+    hist_scale_px_per_mm.png                 scale distribution (spot bimodality)
+    missing_rate_per_measurement.png         % missing per measurement (posed)
+    lr_symmetry_scatter.png                  left vs right pairs (mm), y=x line
+    confidence_correlation_matrix.png        confidence correlation between
+                                             measurements
+    cumulative_confidence.png                retention vs quality cutoff curve
     summary.txt                              all the numbers, incl. the %s
 
 Only if the matching OPTIONAL column was enabled in config before the run:
     hist_detection_confidence.png            needs OPTIONAL_COLUMNS["detection_confidence"]
     scale_type_pct.png                       needs OPTIONAL_COLUMNS["scale_method"]
+
+Ground-truth error analysis (only if the YOLO label files are found under the
+datasets root; labels are datasets/<dataset>/labels/<split>/<stem>.txt):
+    error_vs_confidence_correlation.png      Spearman(error, confidence) per measurement
+    error_vs_confidence_scatter.png          pooled confidence vs error + calibration line
+    mean_error_vs_needs_review.png           mean error, flagged vs not
+    rel_error_boxplot_per_measurement.png    error distribution per measurement
+    mean_error_by_split.png                  error per train/val/test split
+Use --no-gt to skip it, --datasets-root to point elsewhere, --gt-splits to choose splits.
 
 A note on "per keypoint"
 ------------------------
@@ -43,7 +58,9 @@ per-keypoint figures would mean adding keypoint-confidence columns to the export
 from __future__ import annotations
 
 import argparse
+import math
 import os
+from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")            # no display needed; render straight to files
@@ -51,7 +68,20 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np               # noqa: E402
 import pandas as pd              # noqa: E402
 
+# Project definitions are needed to rebuild ground-truth measurements from the
+# YOLO label files. If the script is run outside the project, GT analysis is
+# simply skipped (the rest of the figures still work).
+try:
+    from processing.definitions import (
+        MEASUREMENT_INDICES, MEASUREMENT_NAMES as DEF_MEASUREMENT_NAMES, NUM_KEYPOINTS,
+    )
+    from processing import config as proj_config
+    HAVE_PROJECT = True
+except Exception:                # noqa: BLE001
+    HAVE_PROJECT = False
+
 CONF_SUFFIX = " [conf]"
+IMG_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp")
 
 
 # --------------------------------------------------------------------------- #
@@ -79,6 +109,35 @@ def _series(df, col):
     if col not in df.columns:
         return pd.Series([], dtype=float)
     return pd.to_numeric(df[col], errors="coerce").dropna()
+
+
+def px_col(m):   return f"{m} [px]"
+def mm_col(m):   return f"{m} [mm]"
+def conf_col(m): return f"{m} [conf]"
+
+
+def measurement_names(df: pd.DataFrame) -> list[str]:
+    """Measurement base names, taken from the ' [px]' columns, in CSV order."""
+    return [c[: -len(" [px]")] for c in df.columns if c.endswith(" [px]")]
+
+
+def lr_pairs(names: list[str]) -> list[tuple[str, str]]:
+    """Pair each 'left ...' measurement with its 'right ...' counterpart."""
+    nameset = set(names)
+    pairs = []
+    for n in names:
+        if "left" in n:
+            r = n.replace("left", "right")
+            if r in nameset:
+                pairs.append((n, r))
+    return pairs
+
+
+def posed_mask(df: pd.DataFrame) -> pd.Series:
+    """True for rows where a pose was detected (overall_pose_confidence set)."""
+    if "overall_pose_confidence" in df.columns:
+        return pd.to_numeric(df["overall_pose_confidence"], errors="coerce").notna()
+    return pd.Series(True, index=df.index)
 
 
 # --------------------------------------------------------------------------- #
@@ -202,10 +261,468 @@ def fig_scatter_pose_scale(df, output_dir):
 
 
 # --------------------------------------------------------------------------- #
+# Extra figures (scale distribution, missing rate, L/R symmetry,
+# confidence correlation, cumulative "quality cutoff" curve)
+# --------------------------------------------------------------------------- #
+def fig_scale_distribution(df, output_dir):
+    """Histogram of scale_px_per_mm to reveal outliers / bimodality."""
+    v = _series(df, "scale_px_per_mm")
+    fig, ax = plt.subplots(figsize=(8, 5))
+    if len(v):
+        ax.hist(v.values, bins=80, color="#DD8452", alpha=0.85)
+        ax.axvline(v.median(), color="k", ls="--", lw=1,
+                   label=f"median = {v.median():.1f}")
+        ax.legend()
+    ax.set_xlabel("scale (px/mm)")
+    ax.set_ylabel("frequency (images)")
+    ax.set_title("Distribution of scale_px_per_mm "
+                 "(look for a second peak = a wrong scale mode)")
+    ax.grid(axis="y", alpha=0.3)
+    save(fig, output_dir, "hist_scale_px_per_mm.png")
+    return {"n": int(len(v)),
+            "mean": float(v.mean()) if len(v) else float("nan"),
+            "std": float(v.std()) if len(v) else float("nan"),
+            "median": float(v.median()) if len(v) else float("nan"),
+            "min": float(v.min()) if len(v) else float("nan"),
+            "max": float(v.max()) if len(v) else float("nan")}
+
+
+def fig_missing_rate(df, output_dir):
+    """Per-measurement share of missing values, among images WITH a pose.
+
+    Restricting to posed images isolates measurement-specific dropouts (e.g. a
+    measurement set to NaN because a keypoint was below its visibility
+    threshold) from the global 'no insect detected' case, which is reported
+    separately in the summary.
+    """
+    names = measurement_names(df)
+    sub = df[posed_mask(df)]
+    denom = len(sub)
+    rates = []
+    for m in names:
+        v = pd.to_numeric(sub[px_col(m)], errors="coerce") if px_col(m) in sub else pd.Series([], dtype=float)
+        rates.append(100.0 * v.isna().mean() if denom else 0.0)
+
+    x = np.arange(len(names))
+    fig, ax = plt.subplots(figsize=(max(8, len(names) * 0.5), 6))
+    ax.bar(x, rates, color="#C44E52", alpha=0.85)
+    ax.set_xticks(x)
+    ax.set_xticklabels(names, rotation=90, fontsize=7)
+    ax.set_ylabel("% missing (among posed images)")
+    ax.set_title(f"Missing-value rate per measurement (posed images: {denom})")
+    ax.grid(axis="y", alpha=0.3)
+    save(fig, output_dir, "missing_rate_per_measurement.png")
+    return dict(zip(names, rates)), denom
+
+
+def fig_lr_symmetry(df, output_dir):
+    """Scatter of each left/right measurement pair (mm) with the y=x line.
+
+    Points far from the diagonal reveal asymmetric errors (one side mis-placed).
+    """
+    pairs = lr_pairs(measurement_names(df))
+    if not pairs:
+        return
+    ncols = 3
+    nrows = math.ceil(len(pairs) / ncols)
+    fig, axes = plt.subplots(nrows, ncols, figsize=(4 * ncols, 3.6 * nrows))
+    axes = np.atleast_1d(axes).ravel()
+
+    for ax, (left, right) in zip(axes, pairs):
+        lv = pd.to_numeric(df.get(mm_col(left)), errors="coerce")
+        rv = pd.to_numeric(df.get(mm_col(right)), errors="coerce")
+        mask = lv.notna() & rv.notna()
+        if mask.any():
+            ax.scatter(lv[mask], rv[mask], s=6, alpha=0.3, color="#4C72B0")
+            hi = float(np.nanmax([lv[mask].max(), rv[mask].max()]))
+            ax.plot([0, hi], [0, hi], "r--", lw=1)
+        else:
+            ax.text(0.5, 0.5, "no mm data", ha="center", va="center",
+                    transform=ax.transAxes, fontsize=8, color="grey")
+        ax.set_xlabel(f"{left} [mm]", fontsize=7)
+        ax.set_ylabel(f"{right} [mm]", fontsize=7)
+        ax.tick_params(labelsize=6)
+
+    for ax in axes[len(pairs):]:          # hide unused cells
+        ax.axis("off")
+    fig.suptitle("Left/right symmetry (mm) - points off the red y=x line are asymmetric")
+    fig.tight_layout(rect=[0, 0, 1, 0.98])
+    save(fig, output_dir, "lr_symmetry_scatter.png")
+
+
+def fig_conf_correlation(df, conf_cols, output_dir):
+    """Correlation matrix between the per-measurement confidences."""
+    data = df[conf_cols].apply(pd.to_numeric, errors="coerce")
+    corr = data.corr()                    # pairwise-complete Pearson
+    labels = [short_label(c) for c in conf_cols]
+    fig, ax = plt.subplots(figsize=(max(8, len(conf_cols) * 0.45),
+                                    max(7, len(conf_cols) * 0.45)))
+    im = ax.imshow(corr.values, vmin=-1, vmax=1, cmap="coolwarm")
+    ax.set_xticks(np.arange(len(labels)))
+    ax.set_yticks(np.arange(len(labels)))
+    ax.set_xticklabels(labels, rotation=90, fontsize=6)
+    ax.set_yticklabels(labels, fontsize=6)
+    ax.set_title("Correlation of confidences between measurements")
+    fig.colorbar(im, ax=ax, label="Pearson r", fraction=0.046, pad=0.04)
+    save(fig, output_dir, "confidence_correlation_matrix.png")
+
+
+def fig_cumulative(df, conf_cols, output_dir):
+    """Survival curves: share of images whose confidence is >= a threshold.
+
+    Read a curve top-down to pick a quality cutoff: at threshold t, the y value
+    is the percentage of images you would keep. The 'worst measurement' curve
+    uses, per image, the minimum confidence across all its measurements -- the
+    strictest per-image criterion.
+    """
+    thr = np.linspace(0, 1, 101)
+
+    def survival(s):
+        s = s.dropna()
+        return [100.0 * (s >= t).mean() for t in thr] if len(s) else [np.nan] * len(thr)
+
+    pose = pd.to_numeric(df.get("overall_pose_confidence"), errors="coerce")
+    scale = pd.to_numeric(df.get("scale_confidence"), errors="coerce")
+    worst = df[conf_cols].apply(pd.to_numeric, errors="coerce").min(axis=1)
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.plot(thr, survival(pose), label="overall pose confidence", color="#4C72B0")
+    ax.plot(thr, survival(scale), label="scale confidence", color="#DD8452")
+    ax.plot(thr, survival(worst), label="worst measurement confidence", color="#55A868")
+    ax.set_xlabel("confidence threshold")
+    ax.set_ylabel("% of images with confidence >= threshold")
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 100)
+    ax.set_title("Cumulative retention vs quality cutoff")
+    ax.grid(alpha=0.3)
+    ax.legend()
+    save(fig, output_dir, "cumulative_confidence.png")
+
+
+# --------------------------------------------------------------------------- #
+# Ground-truth error analysis (needs the YOLO label files)
+# --------------------------------------------------------------------------- #
+# The labels live next to the images in the dataset:
+#     datasets/<dataset>/labels/<split>/<stem>.txt   (same stem as the image)
+# Each line is a YOLO-pose instance:
+#     class  cx cy w h  x1 y1 [v1]  x2 y2 [v2] ...    (all NORMALISED to [0,1])
+# We rebuild the GT measurements in PIXELS (so they compare with the '[px]'
+# columns) by de-normalising with the image width/height, then take the SUM of
+# segment lengths, exactly like the pipeline.
+
+
+def _num(x) -> float:
+    """Coerce a CSV cell to float; '' / None / bad -> NaN."""
+    try:
+        if x is None or x == "":
+            return float("nan")
+        return float(x)
+    except (TypeError, ValueError):
+        return float("nan")
+
+
+def _spearman(a, b) -> float:
+    """Spearman rank correlation, computed without SciPy (rank + Pearson)."""
+    a, b = pd.Series(list(a), dtype=float), pd.Series(list(b), dtype=float)
+    mask = a.notna() & b.notna()
+    if mask.sum() < 3:
+        return float("nan")
+    ra, rb = a[mask].rank(), b[mask].rank()
+    if ra.std() == 0 or rb.std() == 0:
+        return float("nan")
+    return float(np.corrcoef(ra, rb)[0, 1])
+
+
+def build_gt_index(datasets_root: Path, splits):
+    """Map stem -> label file, stem -> image file, stem -> split (all splits)."""
+    labels, images, split_of = {}, {}, {}
+    if not datasets_root.is_dir():
+        return labels, images, split_of
+    for dataset_dir in datasets_root.iterdir():
+        if not dataset_dir.is_dir():
+            continue
+        for split in splits:
+            ldir = dataset_dir / "labels" / split
+            if ldir.is_dir():
+                for f in ldir.glob("*.txt"):
+                    labels.setdefault(f.stem, f)
+                    split_of.setdefault(f.stem, split)
+            idir = dataset_dir / "images" / split
+            if idir.is_dir():
+                for f in idir.iterdir():
+                    if f.is_file() and f.suffix.lower() in IMG_EXTS:
+                        images.setdefault(f.stem, f)
+    return labels, images, split_of
+
+
+def parse_label_file(path: Path, num_kp: int):
+    """Return the largest-box instance as {'xy':(N,2) normalised, 'vis':(N,) or None}.
+
+    When several insects are annotated we keep the biggest box, which mirrors a
+    'largest_box' selection. This can disagree with the instance the pipeline
+    actually measured on multi-insect images (a known limitation for those).
+    """
+    best, best_area = None, -1.0
+    try:
+        text = path.read_text().splitlines()
+    except OSError:
+        return None
+    for line in text:
+        t = line.split()
+        if len(t) < 5:
+            continue
+        try:
+            vals = list(map(float, t[1:]))
+        except ValueError:
+            continue
+        w, h = vals[2], vals[3]
+        kp = vals[4:]
+        if len(kp) == num_kp * 3:
+            step = 3
+        elif len(kp) == num_kp * 2:
+            step = 2
+        else:
+            continue
+        xs, ys = kp[0::step][:num_kp], kp[1::step][:num_kp]
+        vis = kp[2::step][:num_kp] if step == 3 else None
+        area = w * h
+        if area > best_area:
+            best_area = area
+            best = {"xy": np.column_stack([xs, ys]).astype(float),
+                    "vis": (np.array(vis, dtype=float) if vis is not None else None)}
+    return best
+
+
+_DIMS_CACHE: dict = {}
+
+
+def get_dims(stem: str, row, images_map) -> tuple[int, int] | None:
+    """Image (width, height): from the CSV columns if present, else from disk."""
+    if "image_width" in row and "image_height" in row:
+        w, h = _num(row["image_width"]), _num(row["image_height"])
+        if w > 0 and h > 0:
+            return int(w), int(h)
+    p = images_map.get(stem)
+    if p is None:
+        return None
+    if p in _DIMS_CACHE:
+        return _DIMS_CACHE[p]
+    try:
+        from PIL import Image
+        with Image.open(p) as im:
+            wh = im.size                       # (width, height), header only
+        _DIMS_CACHE[p] = wh
+        return wh
+    except Exception:                          # noqa: BLE001
+        return None
+
+
+def gt_measurements_px(xy_px, vis, meas_indices) -> dict:
+    """GT measurement lengths in pixels (NaN if a keypoint is flagged absent)."""
+    out = {}
+    for m, idxs in meas_indices.items():
+        if vis is not None and any(vis[i] == 0 for i in idxs):
+            out[m] = float("nan")
+            continue
+        total = 0.0
+        for a, b in zip(idxs[:-1], idxs[1:]):
+            total += math.hypot(xy_px[a, 0] - xy_px[b, 0], xy_px[a, 1] - xy_px[b, 1])
+        out[m] = total
+    return out
+
+
+def compute_errors(df, datasets_root: Path, splits, review_threshold):
+    """Match each CSV row to its GT label and accumulate per-measurement errors.
+
+    Returns None if no labels were found. Otherwise a dict with:
+        per_measure[m] = {'rel':[], 'abs':[], 'conf':[]}
+        img_mean_rel, img_needs_review, img_split   (aligned per-image lists)
+        n_gt   (number of images matched to a GT label)
+    """
+    labels_map, images_map, split_of = build_gt_index(datasets_root, splits)
+    if not labels_map:
+        return None
+
+    meas_names = [m for m in DEF_MEASUREMENT_NAMES
+                  if m in MEASUREMENT_INDICES and (px_col(m) in df.columns)]
+    per = {m: {"rel": [], "abs": [], "conf": []} for m in meas_names}
+    img_mean_rel, img_nr, img_split = [], [], []
+    n_gt = 0
+
+    for _, row in df.iterrows():
+        stem = Path(str(row.get("image_name", ""))).stem
+        lp = labels_map.get(stem)
+        if lp is None:
+            continue
+        inst = parse_label_file(lp, NUM_KEYPOINTS)
+        if inst is None:
+            continue
+        dims = get_dims(stem, row, images_map)
+        if dims is None:
+            continue
+        W, H = dims
+        xy = inst["xy"].copy()
+        xy[:, 0] *= W
+        xy[:, 1] *= H
+        gt = gt_measurements_px(xy, inst["vis"],
+                                {m: MEASUREMENT_INDICES[m] for m in meas_names})
+        n_gt += 1
+
+        rels = []
+        for m in meas_names:
+            pred = _num(row.get(px_col(m)))
+            g = gt[m]
+            conf = _num(row.get(conf_col(m)))
+            if np.isnan(pred) or np.isnan(g) or g <= 0:
+                continue
+            rel = abs(pred - g) / g
+            per[m]["rel"].append(rel)
+            per[m]["abs"].append(abs(pred - g))
+            per[m]["conf"].append(conf)
+            rels.append(rel)
+
+        pose = _num(row.get("overall_pose_confidence"))
+        sc = _num(row.get("scale_confidence"))
+        needs_review = (np.isnan(pose) or pose < review_threshold
+                        or (not np.isnan(sc) and sc < review_threshold))
+        if rels:
+            img_mean_rel.append(float(np.mean(rels)))
+            img_nr.append(bool(needs_review))
+            img_split.append(split_of.get(stem, "?"))
+
+    return {"per_measure": per, "meas_names": meas_names,
+            "img_mean_rel": np.array(img_mean_rel),
+            "img_needs_review": np.array(img_nr, dtype=bool),
+            "img_split": np.array(img_split, dtype=object),
+            "n_gt": n_gt}
+
+
+# ----- GT figures ---------------------------------------------------------- #
+def fig_error_vs_conf_correlation(err, output_dir):
+    """Spearman correlation between per-measurement error and confidence.
+
+    A good confidence is NEGATIVELY correlated with the error (higher confidence
+    -> smaller error), so useful bars point DOWN.
+    """
+    names, corrs = [], []
+    for m in err["meas_names"]:
+        d = err["per_measure"][m]
+        names.append(m)
+        corrs.append(_spearman(d["conf"], d["rel"]))
+    x = np.arange(len(names))
+    colors = ["#55A868" if (c is not None and c < 0) else "#C44E52" for c in corrs]
+    fig, ax = plt.subplots(figsize=(max(8, len(names) * 0.5), 6))
+    ax.bar(x, corrs, color=colors, alpha=0.85)
+    ax.axhline(0, color="k", lw=0.8)
+    ax.set_xticks(x)
+    ax.set_xticklabels(names, rotation=90, fontsize=7)
+    ax.set_ylabel("Spearman(confidence, relative error)")
+    ax.set_ylim(-1, 1)
+    ax.set_title("Error vs confidence per measurement (negative = confidence works)")
+    ax.grid(axis="y", alpha=0.3)
+    save(fig, output_dir, "error_vs_confidence_correlation.png")
+    return dict(zip(names, corrs))
+
+
+def fig_error_vs_conf_scatter(err, output_dir, n_bins=10):
+    """Pooled confidence vs relative error, with a binned-mean calibration line."""
+    conf = np.concatenate([err["per_measure"][m]["conf"] for m in err["meas_names"]]) \
+        if err["meas_names"] else np.array([])
+    rel = np.concatenate([err["per_measure"][m]["rel"] for m in err["meas_names"]]) \
+        if err["meas_names"] else np.array([])
+    mask = ~np.isnan(conf) & ~np.isnan(rel)
+    conf, rel = conf[mask], rel[mask]
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    if conf.size:
+        ax.scatter(conf, rel, s=5, alpha=0.15, color="#4C72B0")
+        # binned mean error per confidence bin (a reliability / calibration line)
+        bins = np.linspace(0, 1, n_bins + 1)
+        idx = np.digitize(conf, bins) - 1
+        xs, ys = [], []
+        for b in range(n_bins):
+            sel = idx == b
+            if sel.sum():
+                xs.append((bins[b] + bins[b + 1]) / 2)
+                ys.append(rel[sel].mean())
+        ax.plot(xs, ys, "o-", color="#C44E52", label="mean error per confidence bin")
+        # clip the y view to the 99th percentile so a few outliers don't flatten it
+        ax.set_ylim(0, float(np.percentile(rel, 99)) if rel.size else 1)
+        ax.legend()
+    ax.set_xlabel("measurement confidence")
+    ax.set_ylabel("relative error |pred - gt| / gt")
+    ax.set_xlim(0, 1)
+    ax.set_title("Confidence vs error (pooled over measurements)")
+    ax.grid(alpha=0.3)
+    save(fig, output_dir, "error_vs_confidence_scatter.png")
+
+
+def fig_mean_error_vs_needs_review(err, output_dir):
+    """Mean relative error for flagged vs non-flagged images (+/- SEM)."""
+    rel = err["img_mean_rel"]
+    nr = err["img_needs_review"]
+    groups = [("not flagged", rel[~nr]), ("needs review", rel[nr])]
+    means = [g.mean() if g.size else np.nan for _, g in groups]
+    sems = [g.std() / math.sqrt(g.size) if g.size else 0.0 for _, g in groups]
+    labels = [f"{lab}\n(n={g.size})" for lab, g in groups]
+
+    fig, ax = plt.subplots(figsize=(6, 5))
+    ax.bar([0, 1], means, yerr=sems, capsize=5,
+           color=["#4C72B0", "#C44E52"], alpha=0.85)
+    ax.set_xticks([0, 1])
+    ax.set_xticklabels(labels)
+    ax.set_ylabel("mean relative error (per image)")
+    ax.set_title("Mean error vs needs_review")
+    for i, mval in enumerate(means):
+        if not math.isnan(mval):
+            ax.text(i, mval, f"{mval:.3f}", ha="center", va="bottom", fontsize=10)
+    ax.grid(axis="y", alpha=0.3)
+    save(fig, output_dir, "mean_error_vs_needs_review.png")
+    return means
+
+
+def fig_rel_error_boxplot(err, output_dir):
+    """Distribution of the relative error per measurement (which are hardest)."""
+    names = [m for m in err["meas_names"] if err["per_measure"][m]["rel"]]
+    data = [np.array(err["per_measure"][m]["rel"]) for m in names]
+    if not data:
+        return
+    fig, ax = plt.subplots(figsize=(max(8, len(names) * 0.5), 6))
+    ax.boxplot(data, showfliers=False)
+    ax.set_xticks(np.arange(1, len(names) + 1))
+    ax.set_xticklabels(names, rotation=90, fontsize=7)
+    ax.set_ylabel("relative error")
+    ax.set_title("Relative error per measurement (outliers hidden)")
+    ax.grid(axis="y", alpha=0.3)
+    save(fig, output_dir, "rel_error_boxplot_per_measurement.png")
+
+
+def fig_error_by_split(err, output_dir):
+    """Mean relative error per split (train / val / test) to check generalisation."""
+    rel, split = err["img_mean_rel"], err["img_split"]
+    order = [s for s in ["train", "val", "test"] if s in set(split)]
+    if not order:
+        return
+    means = [rel[split == s].mean() for s in order]
+    sems = [rel[split == s].std() / math.sqrt(max(1, (split == s).sum())) for s in order]
+    counts = [(split == s).sum() for s in order]
+    fig, ax = plt.subplots(figsize=(6, 5))
+    ax.bar(range(len(order)), means, yerr=sems, capsize=5, color="#8172B3", alpha=0.85)
+    ax.set_xticks(range(len(order)))
+    ax.set_xticklabels([f"{s}\n(n={c})" for s, c in zip(order, counts)])
+    ax.set_ylabel("mean relative error (per image)")
+    ax.set_title("Mean error by split")
+    ax.grid(axis="y", alpha=0.3)
+    save(fig, output_dir, "mean_error_by_split.png")
+
+
+# --------------------------------------------------------------------------- #
 # Summary text
 # --------------------------------------------------------------------------- #
 def write_summary(df, conf_cols, output_dir, review_threshold,
-                  needs_review_pct, scale_type_pct):
+                  needs_review_pct, scale_type_pct,
+                  scale_stats=None, missing_rates=None, missing_denom=0,
+                  err=None, err_corr=None):
     n = len(df)
     pose = _series(df, "overall_pose_confidence")
     scale = _series(df, "scale_confidence")
@@ -262,6 +779,26 @@ def write_summary(df, conf_cols, output_dir, review_threshold,
     lines.append("")
 
     lines.append("-" * 64)
+    lines.append("SCALE px/mm DISTRIBUTION")
+    lines.append("-" * 64)
+    if scale_stats and scale_stats.get("n"):
+        lines.append(f"  n={scale_stats['n']}  mean={scale_stats['mean']:.2f}  "
+                     f"std={scale_stats['std']:.2f}  median={scale_stats['median']:.2f}")
+        lines.append(f"  min={scale_stats['min']:.2f}  max={scale_stats['max']:.2f}  "
+                     f"(a second peak in the histogram = a wrong-scale mode)")
+    else:
+        lines.append("  (no scale values)")
+    lines.append("")
+
+    if missing_rates:
+        lines.append("-" * 64)
+        lines.append(f"MISSING-VALUE RATE PER MEASUREMENT (posed images: {missing_denom})")
+        lines.append("-" * 64)
+        for m, rate in missing_rates.items():
+            lines.append(f"  {m:<30} {rate:5.1f}% missing")
+        lines.append("")
+
+    lines.append("-" * 64)
     lines.append("PER-MEASUREMENT CONFIDENCE (mean / std / median / n)")
     lines.append("-" * 64)
     for c in conf_cols:
@@ -272,6 +809,37 @@ def write_summary(df, conf_cols, output_dir, review_threshold,
         else:
             lines.append(f"  {short_label(c):<30} (no values)")
     lines.append("")
+
+    # ----- ground-truth error section (only if labels were found) -----------
+    if err is not None:
+        lines.append("=" * 64)
+        lines.append(f"GROUND-TRUTH ERROR  (images matched to a label: {err['n_gt']})")
+        lines.append("=" * 64)
+        rel_all = err["img_mean_rel"]
+        if rel_all.size:
+            lines.append(f"per-image mean relative error: mean={rel_all.mean():.3f}  "
+                         f"median={np.median(rel_all):.3f}")
+        if err_corr:
+            nr = err["img_needs_review"]
+            lines.append(f"mean error | needs_review=False : "
+                         f"{rel_all[~nr].mean():.3f} (n={int((~nr).sum())})"
+                         if (~nr).any() else "mean error | needs_review=False : n/a")
+            lines.append(f"mean error | needs_review=True  : "
+                         f"{rel_all[nr].mean():.3f} (n={int(nr.sum())})"
+                         if nr.any() else "mean error | needs_review=True  : n/a")
+        lines.append("")
+        lines.append("  per measurement:  MAE[px]  mean_rel_err  spearman(conf,err)  n")
+        for m in err["meas_names"]:
+            d = err["per_measure"][m]
+            n = len(d["rel"])
+            if n:
+                mae = float(np.mean(d["abs"]))
+                mre = float(np.mean(d["rel"]))
+                sp = err_corr.get(m, float("nan")) if err_corr else float("nan")
+                lines.append(f"  {m:<30} {mae:8.1f}  {mre:11.3f}  {sp:17.3f}  {n}")
+            else:
+                lines.append(f"  {m:<30} (no matched GT)")
+        lines.append("")
 
     path = os.path.join(output_dir, "summary.txt")
     with open(path, "w", encoding="utf-8") as f:
@@ -288,6 +856,13 @@ def main():
     p.add_argument("--output-dir", default="analysis_output", help="Where to write PNG/TXT.")
     p.add_argument("--review-threshold", type=float, default=0.5,
                    help="Confidence below which a row counts as 'needs review'.")
+    p.add_argument("--datasets-root", default=None,
+                   help="Root of the YOLO datasets (default: the project's "
+                        "config.DATASETS_ROOT). Used to find the GT label files.")
+    p.add_argument("--gt-splits", nargs="*", default=["train", "val", "test"],
+                   help="Splits to read GT labels from (default: train val test).")
+    p.add_argument("--no-gt", action="store_true",
+                   help="Skip the ground-truth error analysis entirely.")
     args = p.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -300,12 +875,19 @@ def main():
         fig_boxplot(df, conf_cols, args.output_dir)
         fig_mean_std(df, conf_cols, args.output_dir)
         fig_heatmap(df, conf_cols, args.output_dir)
+        fig_conf_correlation(df, conf_cols, args.output_dir)
+        fig_cumulative(df, conf_cols, args.output_dir)
     fig_hist(_series(df, "overall_pose_confidence"),
              "Overall pose confidence", "hist_overall_pose_confidence.png", args.output_dir)
     fig_hist(_series(df, "scale_confidence"),
              "Scale confidence", "hist_scale_confidence.png", args.output_dir)
     fig_scatter_pose_scale(df, args.output_dir)
     needs_review_pct = fig_needs_review(df, args.output_dir, args.review_threshold)
+
+    # Extra requested figures.
+    scale_stats = fig_scale_distribution(df, args.output_dir)
+    missing_rates, missing_denom = fig_missing_rate(df, args.output_dir)
+    fig_lr_symmetry(df, args.output_dir)
 
     # Figures that depend on optional columns.
     det = _series(df, "detection_confidence")
@@ -319,8 +901,33 @@ def main():
         print("[skip] scale_method not in CSV "
               "(enable OPTIONAL_COLUMNS['scale_method'] and re-run).")
 
+    # ----- ground-truth error analysis --------------------------------------
+    err, err_corr = None, None
+    if args.no_gt:
+        print("[gt] skipped (--no-gt).")
+    elif not HAVE_PROJECT:
+        print("[gt] skipped: could not import the project (run from the project root).")
+    else:
+        datasets_root = Path(args.datasets_root) if args.datasets_root else proj_config.DATASETS_ROOT
+        print(f"[gt] reading labels under {datasets_root} (splits: {args.gt_splits})")
+        err = compute_errors(df, datasets_root, args.gt_splits, args.review_threshold)
+        if err is None:
+            print("[gt] no label files found -> GT figures skipped.")
+        elif err["n_gt"] == 0:
+            print("[gt] labels found but no CSV image matched them -> GT figures skipped.")
+            err = None
+        else:
+            print(f"[gt] matched {err['n_gt']} images to a GT label.")
+            err_corr = fig_error_vs_conf_correlation(err, args.output_dir)
+            fig_error_vs_conf_scatter(err, args.output_dir)
+            fig_mean_error_vs_needs_review(err, args.output_dir)
+            fig_rel_error_boxplot(err, args.output_dir)
+            fig_error_by_split(err, args.output_dir)
+
     write_summary(df, conf_cols, args.output_dir, args.review_threshold,
-                  needs_review_pct, scale_type_pct)
+                  needs_review_pct, scale_type_pct,
+                  scale_stats=scale_stats, missing_rates=missing_rates,
+                  missing_denom=missing_denom, err=err, err_corr=err_corr)
     print(f"\nDone. Figures and summary in: {args.output_dir}")
 
 
