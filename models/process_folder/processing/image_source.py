@@ -53,8 +53,8 @@ def _list_local_images(folder: Path) -> list[tuple[Path, str]]:
     if not folder.is_dir():
         raise FileNotFoundError(f"Input folder not found: {folder}")
     items = [
-        (p, p.name)
-        for p in sorted(folder.iterdir())
+        (p.resolve(), p.name)
+        for p in folder.rglob("*")
         if p.is_file() and p.suffix.lower() in config.IMG_EXTENSIONS
     ]
     return items
