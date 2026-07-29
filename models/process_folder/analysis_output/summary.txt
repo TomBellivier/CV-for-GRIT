@@ -22,15 +22,15 @@ flagged: 31.0% of images
 ----------------------------------------------------------------
 SCALE METHOD
 ----------------------------------------------------------------
-  ruler       : 81.5%
-  scale_bar   : 10.1%
-  none        : 8.4%
+  ruler       : 83.1%
+  scale_bar   : 13.7%
+  none        : 3.2%
 
 ----------------------------------------------------------------
 SCALE px/mm DISTRIBUTION
 ----------------------------------------------------------------
-  n=20988  mean=3979.37  std=417838.55  median=12.80
-  min=0.01  max=60500000.00  (a second peak in the histogram = a wrong-scale mode)
+  n=26657  mean=83759.03  std=5845522.61  median=104.47
+  min=0.00  max=607000000.00  (a second peak in the histogram = a wrong-scale mode)
 
 ----------------------------------------------------------------
 MISSING-VALUE RATE PER MEASUREMENT (posed images: 21642)
