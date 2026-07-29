@@ -29,14 +29,14 @@ TRAINED_MODELS_DIR = PROJECT_ROOT / "trained_models"
 
 # Exactly ONE pose model is used per run. Put its file name here.
 # (Only this model is loaded; see load_pose_model in pose_inference.py.)
-POSE_MODEL_NAME = "best.pt"                      # <-- EDIT ME
+POSE_MODEL_NAME = "model_flipping.pt"                      # <-- EDIT ME
 POSE_MODEL_PATH = TRAINED_MODELS_DIR / POSE_MODEL_NAME
 
 # YOLO scale-bar detector.
 SCALE_BAR_MODEL_PATH = PROJECT_ROOT.parent / "scale_bar_detection" / "best.pt"
 
 # Folder of images to process, and where to write the CSV.
-INPUT_FOLDER = PROJECT_ROOT / "images_to_process"   # <-- EDIT ME if needed
+INPUT_FOLDER = PROJECT_ROOT.parent.parent / "databases"   # <-- EDIT ME if needed
 OUTPUT_CSV = PROJECT_ROOT / "results.csv"
 
 # Crash safety: force the CSV to disk every N rows (file.flush + os.fsync), so a
