@@ -1,0 +1,28 @@
+# Hyperparamètres d'entraînement YOLO 
+
+# --- APPRENTISSAGE ET OPTIMISEUR ---
+lr0: 0.01             # Taux d'apprentissage initial (SGD=1E-2, Adam=1E-3)
+lrf: 0.01             # Taux d'apprentissage final (fraction de lr0)
+momentum: 0.937       # Momentum SGD / bêta1 Adam
+weight_decay: 0.0005  # Décroissance des poids de l'optimiseur
+
+# --- AUGMENTATION DES DONNÉES ---
+box: 11.0
+cls: 0.1
+dfl: 2.25
+pose: 7
+kobj: 2.25
+rle: 1.2
+hsv_h: 0.015          # Image Hue (fraction)
+hsv_s: 0.7            # Image Saturation (fraction)
+hsv_v: 0.4            # Image Value (fraction)
+degrees: 0.0          # Rotation de l'image (+/- deg)
+translate: 0.1        # Translation de l'image (+/- fraction)
+scale: 0.5            # Échelle de l'image (+/- gain)
+shear: 0.0            # Cisaillement de l'image (+/- deg)
+perspective: 0.0      # Perspective de l'image (+/- fraction)
+flipud: 0.0           # Probabilité de retournement vertical
+fliplr: 0.5           # Probabilité de retournement horizontal (flip gauche/droite)
+mosaic: 1.0           # Probabilité de l'augmentation Mosaic
+mixup: 0.0            # Probabilité de l'augmentation MixUp
+copy_paste: 0.0       # Probabilité de l'augmentation Copy-Paste

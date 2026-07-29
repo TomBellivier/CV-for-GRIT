@@ -1,0 +1,8 @@
+path: /home/tombellivier/Documents/CV/CV-for-GRIT/models/cross-validation/cv_results/folds/fold_3
+train: /home/tombellivier/Documents/CV/CV-for-GRIT/models/cross-validation/cv_results/folds/fold_3/train.txt
+val: /home/tombellivier/Documents/CV/CV-for-GRIT/models/cross-validation/cv_results/folds/fold_3/val.txt
+kpt_shape:
+- 42
+- 3
+names:
+  0: insect
