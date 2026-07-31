@@ -1,0 +1,12 @@
+# Mapping groupe -> data.yaml YOLO-pose.
+# Copier sous le nom groups.yaml et adapter les chemins.
+#
+# L'ordre des groupes fixe l'indice de classe du detecteur dans l'approche
+# two-stage (Coleoptera = 0, Diptera = 1, ...). Ne pas le changer entre la
+# preparation des donnees et l'evaluation.
+
+groups:
+  Coleoptera: models/datasets/Coleoptera/yolo-config.yaml
+  Diptera: models/datasets/Diptera/yolo-config.yaml
+  Hymenoptera: models/datasets/Hymenoptera/yolo-config.yaml
+  Lepidoptera: models/datasets/Lepidoptera/yolo-config.yaml
