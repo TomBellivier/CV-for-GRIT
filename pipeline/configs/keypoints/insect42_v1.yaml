@@ -1,0 +1,112 @@
+schema_version: 1
+name: insect42_v1
+kind: dataset_schema
+status: VALIDATED           # ADR-0006 : schema fourni et fige par l'expert du projet
+union_space: insect42_v1    # les 4 datasets partagent CE schema : le mapping union est l'identite
+
+# ORDRE FIGE A VIE : l'index d'un point est encode dans tous les artefacts produits.
+# Ajouter un point => l'ajouter EN FIN de liste et bumper schema_version.
+#
+# sigma = difficulty * sigma_from_difficulty.scale (ADR-0007). `difficulty` est la difficulte
+# de positionnement precis du point, fournie par l'expert (10 = facile, 40 = tres difficile).
+# Changer `scale` change la DEFINITION de l'OKS : bumper eval.version et rejouer les runs.
+sigma_from_difficulty:
+  scale: 0.0025
+
+keypoints:
+  - {name: head-top,             union: head-top,             difficulty: 10, flip: null}
+  - {name: head-left,            union: head-left,            difficulty: 20, flip: head-right}
+  - {name: head-right,           union: head-right,           difficulty: 20, flip: head-left}
+  - {name: left-eye,             union: left-eye,             difficulty: 15, flip: right-eye}
+  - {name: right-eye,            union: right-eye,            difficulty: 15, flip: left-eye}
+  - {name: neck,                 union: neck,                 difficulty: 10, flip: null}
+  - {name: thorax-left,          union: thorax-left,          difficulty: 30, flip: thorax-right}
+  - {name: thorax-right,         union: thorax-right,         difficulty: 30, flip: thorax-left}
+  - {name: thorax-bottom,        union: thorax-bottom,        difficulty: 20, flip: null}
+  - {name: body-left,            union: body-left,            difficulty: 30, flip: body-right}
+  - {name: body-right,           union: body-right,           difficulty: 30, flip: body-left}
+  - {name: body-tip,             union: body-tip,             difficulty: 10, flip: null}
+  - {name: left-antenna-0,       union: left-antenna-0,       difficulty: 10, flip: right-antenna-0}
+  - {name: left-antenna-1,       union: left-antenna-1,       difficulty: 30, flip: right-antenna-1}
+  - {name: left-antenna-2,       union: left-antenna-2,       difficulty: 10, flip: right-antenna-2}
+  - {name: right-antenna-0,      union: right-antenna-0,      difficulty: 10, flip: left-antenna-0}
+  - {name: right-antenna-1,      union: right-antenna-1,      difficulty: 30, flip: left-antenna-1}
+  - {name: right-antenna-2,      union: right-antenna-2,      difficulty: 10, flip: left-antenna-2}
+  - {name: left-forewing-base,   union: left-forewing-base,   difficulty: 20, flip: right-forewing-base}
+  - {name: left-forewing-tip,    union: left-forewing-tip,    difficulty: 20, flip: right-forewing-tip}
+  - {name: left-forewing-front,  union: left-forewing-front,  difficulty: 40, flip: right-forewing-front}
+  - {name: left-forewing-rear,   union: left-forewing-rear,   difficulty: 40, flip: right-forewing-rear}
+  - {name: right-forewing-base,  union: right-forewing-base,  difficulty: 20, flip: left-forewing-base}
+  - {name: right-forewing-tip,   union: right-forewing-tip,   difficulty: 20, flip: left-forewing-tip}
+  - {name: right-forewing-front, union: right-forewing-front, difficulty: 40, flip: left-forewing-front}
+  - {name: right-forewing-rear,  union: right-forewing-rear,  difficulty: 40, flip: left-forewing-rear}
+  - {name: left-hindwing-base,   union: left-hindwing-base,   difficulty: 30, flip: right-hindwing-base}
+  - {name: left-hindwing-tip,    union: left-hindwing-tip,    difficulty: 20, flip: right-hindwing-tip}
+  - {name: left-hindwing-front,  union: left-hindwing-front,  difficulty: 40, flip: right-hindwing-front}
+  - {name: left-hindwing-rear,   union: left-hindwing-rear,   difficulty: 40, flip: right-hindwing-rear}
+  - {name: right-hindwing-base,  union: right-hindwing-base,  difficulty: 30, flip: left-hindwing-base}
+  - {name: right-hindwing-tip,   union: right-hindwing-tip,   difficulty: 20, flip: left-hindwing-tip}
+  - {name: right-hindwing-front, union: right-hindwing-front, difficulty: 40, flip: left-hindwing-front}
+  - {name: right-hindwing-rear,  union: right-hindwing-rear,  difficulty: 40, flip: left-hindwing-rear}
+  - {name: left-leg-0,           union: left-leg-0,           difficulty: 20, flip: right-leg-0}
+  - {name: left-leg-1,           union: left-leg-1,           difficulty: 20, flip: right-leg-1}
+  - {name: left-leg-2,           union: left-leg-2,           difficulty: 20, flip: right-leg-2}
+  - {name: left-leg-3,           union: left-leg-3,           difficulty: 10, flip: right-leg-3}
+  - {name: right-leg-0,          union: right-leg-0,          difficulty: 20, flip: left-leg-0}
+  - {name: right-leg-1,          union: right-leg-1,          difficulty: 20, flip: left-leg-1}
+  - {name: right-leg-2,          union: right-leg-2,          difficulty: 20, flip: left-leg-2}
+  - {name: right-leg-3,          union: right-leg-3,          difficulty: 10, flip: left-leg-3}
+
+# Squelette anatomique (indices locaux) : visualisation et coherence.
+skeleton:
+  - [0, 5]
+  - [0, 12]
+  - [0, 15]
+  - [12, 13]
+  - [13, 14]
+  - [15, 16]
+  - [16, 17]
+  - [5, 1]
+  - [5, 2]
+  - [5, 3]
+  - [5, 4]
+  - [5, 6]
+  - [5, 7]
+  - [5, 8]
+  - [6, 8]
+  - [7, 8]
+  - [8, 9]
+  - [8, 10]
+  - [8, 11]
+  - [9, 11]
+  - [10, 11]
+  - [8, 18]
+  - [18, 20]
+  - [18, 21]
+  - [19, 20]
+  - [19, 21]
+  - [8, 22]
+  - [22, 24]
+  - [22, 25]
+  - [23, 24]
+  - [23, 25]
+  - [8, 26]
+  - [26, 28]
+  - [26, 29]
+  - [27, 28]
+  - [27, 29]
+  - [8, 30]
+  - [30, 32]
+  - [30, 33]
+  - [31, 32]
+  - [31, 33]
+  - [8, 34]
+  - [9, 35]
+  - [34, 35]
+  - [35, 36]
+  - [36, 37]
+  - [8, 38]
+  - [10, 39]
+  - [38, 39]
+  - [39, 40]
+  - [40, 41]

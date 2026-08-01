@@ -1,0 +1,63 @@
+"""GABARIT D'APPROCHE - copier en <nom>.py et retirer l'extension .txt.
+
+Extension .txt volontaire : ce fichier ne doit PAS etre importe par load_plugins,
+sinon il apparaitrait dans le registre et dans le smoke test.
+
+Procedure complete : CONVENTIONS.md §11 (6 artefacts, pas un de plus) :
+  1. src/insectpose/approaches/<nom>.py          <- ce fichier
+  2. configs/approach/<nom>.yaml
+  3. search_space (ici ou dans tuning/search_spaces.py)
+  4. tests/approaches/test_<nom>.py
+  5. configs/experiment/exp_<lettre>_<nom>.yaml
+  6. une entree dans DECISIONS.md
+
+Si vous devez modifier un 7e fichier existant (evaluation/, training/, tuning/,
+reporting/), ARRETEZ-VOUS : c'est un defaut de conception a remonter, pas a contourner.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
+
+from insectpose.approaches.base import BaseApproach
+from insectpose.context import RunContext
+from insectpose.data.datamodule import FoldData, ImageSet
+from insectpose.registry import register_approach
+
+
+@register_approach("NOM_DE_L_APPROCHE")  # doit etre identique au nom du YAML
+class TemplateApproach(BaseApproach):
+    """Une phrase : ce que cette approche teste et ce qu'elle suppose."""
+
+    def fit(self, data: FoldData, ctx: RunContext) -> None:
+        """Entraine sur data.train, valide sur data.val.
+
+        REGLES :
+        - ne jamais lire data.test (un test unitaire le verifie) ;
+        - ecrire uniquement dans ctx.subdir(...) ;
+        - seeds via ctx.seed('...') ;
+        - les metriques du framework servent au monitoring, jamais a la comparaison ;
+        - renseigner les couts dans ctx.extra (model_params, train_time_s, peak_vram_mb).
+        """
+        raise NotImplementedError
+
+    def predict_instances(self, images: ImageSet, ctx: RunContext) -> pd.DataFrame:
+        """Retourne les predictions DANS LE REPERE DE L'IMAGE D'ORIGINE.
+
+        Colonnes : image_id, bbox_xywh, bbox_score, kpts_xy, kpts_score,
+        keypoint_schema, bbox_source, inference_ms (optionnel).
+
+        PIEGES :
+        - travail sur crop -> retro-projeter avec invert_affine (§9.3) ;
+        - modele multi-datasets -> reprojeter de l'espace union vers le schema LOCAL ;
+        - ne PAS seuiller les scores ici : le seuillage est une operation d'evaluation.
+        """
+        raise NotImplementedError
+
+    @classmethod
+    def load(cls, run_dir: Path, cfg: Any) -> TemplateApproach:
+        """Recharge le modele depuis run_dir/weights sans reentrainement."""
+        raise NotImplementedError

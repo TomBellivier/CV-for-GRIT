@@ -1,0 +1,12 @@
+# @package _global_
+# Experience A : YOLO-pose entraine sur l'ensemble des datasets, une classe "insecte".
+# Reference a laquelle les approches par dataset, LoRA et BatchNorm-par-groupe se comparent.
+defaults:
+  - override /data: pooled
+  - override /approach: yolo_pooled
+  - override /cv: kfold5_grouped
+  - override /eval: default
+  - override /tuning: optuna_default
+
+tag: pooled_yolo
+seed: 42

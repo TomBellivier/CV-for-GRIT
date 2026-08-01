@@ -1,0 +1,11 @@
+# @package _global_
+# Uniquement pour le debug rapide. Aucun resultat de rapport ne doit venir d'un holdout.
+cv:
+  name: holdout
+  strategy: stratified_group_holdout
+  n_folds: 1
+  group_by: group_id
+  stratify_by: dataset
+  test_fraction: 0.2
+  val_fraction: 0.15
+  seed: 42

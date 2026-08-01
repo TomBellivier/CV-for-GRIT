@@ -1,0 +1,18 @@
+# @package _global_
+data:
+  scope: diptera
+  datasets: [Diptera]
+  # ADR-0017 : une image = un insecte. Viole => erreur bloquante a la preparation.
+  single_instance_per_image: true
+  # ADR-0016 : certains keypoints n'existent pas chez tous les ordres d'insectes.
+  coverage:
+    absent_max: 0.01            # <= ce taux d'annotation => point considere absent
+    rare_max: 0.5               # < ce taux => point rare, PCK par point peu informatif
+    measurement_min_rate: 0.5   # < ce taux => mesure non exploitable pour ce dataset
+  adapter: yolo                 # nom enregistre dans le registre 'adapter'
+  raw_subdir: diptera
+  keypoint_schema: insect42_v1   # ADR-0006 : schema commun aux 4 datasets
+  adapter_options:
+    annotations_glob: "*.json"  # relatif a paths.raw/<raw_subdir>
+    images_subdir: images
+    group_id_field: null        # ADR-0011 : une image = un specimen

@@ -1,0 +1,12 @@
+# @package _global_
+# Gabarit d'experience. Copier, renommer en exp_<lettre>_<approche>.yaml, commiter.
+# Une experience nommee = une ligne du tableau de resultats final.
+defaults:
+  - override /data: pooled            # pooled | coleoptera | diptera | hymenoptera | lepidoptera
+  - override /approach: ???           # nom enregistre dans le registre 'approach'
+  - override /cv: kfold5_grouped      # MEMES folds pour toutes les approches
+  - override /eval: default           # NE JAMAIS surcharger : rend les runs incomparables
+  - override /tuning: optuna_default  # budget identique entre approches
+
+tag: ???
+seed: 42

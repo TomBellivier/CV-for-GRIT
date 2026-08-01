@@ -1,0 +1,61 @@
+# @package _global_
+# Jeu de metriques FIGE, identique pour toutes les approches (CONVENTIONS.md §7.2).
+# Toute modification du JEU ou de ses parametres invalide les comparaisons deja
+# produites : bumper eval.version et rejouer les runs.
+#
+# SEULE EXCEPTION : `primary_metric` peut etre change librement (ADR-0010). Il ne
+# modifie aucun calcul, seulement l'objectif d'Optuna et le classement des approches.
+#   python -m insectpose.cli train ... eval.primary_metric=measurement_mape_median \
+#                                      eval.primary_direction=minimize
+eval:
+  version: 2
+  primary_metric: oks_ap        # ADR-0010
+  primary_direction: maximize
+
+  # Seuils
+  score_threshold_curves: 0.001 # pour AP/AR : ne jamais tronquer les courbes
+  score_threshold_pointwise: 0.5 # pour PCK/NME : seuil de "detection acceptee"
+  match_oks_threshold: 0.5      # appariement pred<->gt pour les metriques ponctuelles
+  match_iou_threshold: 0.5
+
+  metrics: [detection_ap, oks_ap_ar, pck, nme, keypoint_rate, measurement_error,
+            symmetry_gap, cost]
+
+  oks:
+    thresholds: [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95]
+    area_source: bbox           # bbox | area  (aire de reference pour l'OKS)
+    # Les sigmas ne sont PAS ici : ils appartiennent au schema de keypoints
+    # (configs/keypoints/insect42_v1.yaml), derives de la difficulte par point (ADR-0007).
+
+  pck:
+    # Un point est correct si son erreur < alpha * largeur du thorax (ADR-0009).
+    # alpha=0.25 est la valeur de reference du projet ; les deux autres donnent la courbe.
+    alphas: [0.125, 0.25, 0.5]
+    reference_alpha: 0.25       # alpha utilise pour le detail par keypoint
+    normalizer:
+      name: thorax_width
+      type: keypoint_distance   # keypoint_distance | bbox_diag
+      keypoints: [thorax-left, thorax-right]
+      fallback: bbox_diag       # bbox_diag | none ; le taux de repli est publie
+
+  # Mesures morphometriques : la grandeur reellement utilisee en aval (ADR-0008).
+  measurements:
+    enabled: true
+    file: ${paths.configs}/measurements/insect42_v1.yaml
+    symmetry: true              # ecart gauche/droite, calculable sans verite terrain
+
+  scopes:
+    overall: true
+    per_dataset: true
+    per_keypoint: true
+
+  # Les instances GT non appariees comptent comme echec (§7.2 : penaliser la non-detection).
+  count_missed_gt_as_failure: true
+
+  # Export qualitatif obligatoire (§8.4) : un modele n'est jamais valide sur des chiffres seuls.
+  qualitative:
+    enabled: true
+    n_examples: 12
+    n_worst: 6                  # les pires cas selon l'OKS par instance
+    split: test
+    allow_missing_images: false

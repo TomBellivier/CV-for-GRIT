@@ -1,0 +1,62 @@
+# @package _global_
+# Approche A : un seul modele YOLO-pose, une seule classe "insecte", les 4 datasets
+# confondus (CONVENTIONS.md §9.1). Schema de keypoints commun => aucune reprojection.
+approach:
+  name: yolo_pooled
+  _target_: insectpose.approaches.yolo_pooled.YoloPooledApproach
+
+  weights: yolo11n-pose.pt      # poids de depart ; enregistre dans le manifeste
+  prunable: false               # Ultralytics ne remonte pas d'intermediaire exploitable
+
+  # --- inference ---
+  max_det: 1                    # ADR-0017 : une image = un insecte
+  conf: 0.001                   # seuil BAS : ne jamais tronquer les courbes AP (§3.4)
+  iou: 0.7
+  half: true                    # FP16 a l'inference sur GPU ; ignore sur CPU
+
+  # --- optimisation ---
+  optimizer: auto
+  lr0: 0.01
+  lrf: 0.01
+  momentum: 0.937
+  weight_decay: 0.0005
+  warmup_epochs: 3.0
+  cos_lr: false
+
+  # --- ponderation des pertes ---
+  box: 7.5
+  pose: 12.0
+  kobj: 1.0
+  cls: 0.5
+  dfl: 1.5
+
+  # --- augmentation ---
+  # fliplr n'est licite que parce que data.yaml embarque flip_idx (§3.1) : sans lui,
+  # le miroir echangerait gauche et droite sans permuter les labels.
+  fliplr: 0.5
+  flipud: 0.0
+  degrees: 10.0
+  translate: 0.1
+  scale: 0.5
+  shear: 0.0
+  perspective: 0.0
+  hsv_h: 0.015
+  hsv_s: 0.7
+  hsv_v: 0.4
+  mosaic: 1.0
+  close_mosaic: 10
+  mixup: 0.0
+  erasing: 0.0
+
+  # Budget identique a celui des autres approches (§6.3) : ne pas elargir cet espace
+  # sans elargir aussi celui des approches concurrentes.
+  search_space:
+    lr0: {type: float, low: 1.0e-5, high: 1.0e-1, log: true}
+    lrf: {type: float, low: 1.0e-3, high: 0.5, log: true}
+    weight_decay: {type: float, low: 1.0e-5, high: 1.0e-2, log: true}
+    warmup_epochs: {type: float, low: 0.0, high: 5.0}
+    pose: {type: float, low: 4.0, high: 24.0}
+    box: {type: float, low: 2.0, high: 12.0}
+    degrees: {type: float, low: 0.0, high: 30.0}
+    scale: {type: float, low: 0.0, high: 0.7}
+    mosaic: {type: categorical, choices: [0.0, 1.0]}

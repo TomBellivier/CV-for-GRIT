@@ -1,0 +1,12 @@
+# @package _global_
+# IMPLEMENTATION DE REFERENCE (gabarit + baseline plancher + smoke test).
+# Utilise les bboxes GT : bbox_source=gt => diagnostic uniquement, jamais dans le
+# meme tableau que les approches bout-en-bout (CONVENTIONS.md §9.3).
+approach:
+  name: mean_pose
+  _target_: insectpose.approaches.reference.MeanPoseApproach
+  per_dataset_prior: true       # moyenne par dataset (true) ou globale (false)
+  shrinkage: 0.0                # 0 = moyenne brute ; >0 = vers le centre de bbox
+  search_space:
+    shrinkage: {type: float, low: 0.0, high: 0.5}
+    per_dataset_prior: {type: categorical, choices: [true, false]}

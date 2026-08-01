@@ -1,0 +1,22 @@
+# @package _global_
+# Les 4 datasets vus comme un seul corpus (une classe "insecte"). Les modeles poules
+# predisent dans l'espace union, la reprojection vers le schema local se fait a
+# l'ecriture des predictions (CONVENTIONS.md §3.1).
+data:
+  scope: pooled
+  datasets: [Coleoptera, Diptera, Hymenoptera, Lepidoptera]
+  # ADR-0017 : une image = un insecte. Viole => erreur bloquante a la preparation.
+  single_instance_per_image: true
+  # ADR-0016 : certains keypoints n'existent pas chez tous les ordres d'insectes.
+  coverage:
+    absent_max: 0.01            # <= ce taux d'annotation => point considere absent
+    rare_max: 0.5               # < ce taux => point rare, PCK par point peu informatif
+    measurement_min_rate: 0.5   # < ce taux => mesure non exploitable pour ce dataset
+  adapter: yolo
+  raw_subdir: null              # null => paths.raw/<dataset> pour chaque dataset
+  keypoint_schema: insect42_v1  # ADR-0006 : les 4 datasets partagent ce schema
+  union_space: insect42_v1      # mapping identite ; le mecanisme reste pour un futur ecart
+  adapter_options:
+    annotations_glob: "*.json"
+    images_subdir: images
+    group_id_field: null        # ADR-0011 : une image = un specimen

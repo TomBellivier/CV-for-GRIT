@@ -1,0 +1,55 @@
+# Config racine. Toute cle a une valeur par defaut explicite (CONVENTIONS.md §5.2).
+defaults:
+  - paths
+  - data: pooled
+  - cv: kfold5_grouped
+  - eval: default
+  - tuning: optuna_default
+  - approach: mean_pose
+  - _self_
+  # Place en dernier : une experience figee (§5.3) surcharge tout le reste.
+  - experiment: null
+
+# --- identification ---
+tag: dev                  # etiquette libre, entre dans le run_id
+force: false              # true = re-executer meme si le run existe deja (idempotence §8.1)
+mode: full                # full | debug (deterministe, plus lent) | smoke (fixture minimal)
+
+# --- protocole ---
+seed: 42
+split_id: null            # null = derive de cv.* ; sinon nom explicite d'un split existant
+fold: 0                   # fold externe courant
+
+# --- protocole commun : NE PAS surcharger par approche (ADR-0013) ---
+# Une approche entrainee a une autre resolution ne compare plus la methode mais la
+# resolution. Le garde-fou strict.enforce_common_image_size refuse la divergence.
+protocol:
+  image_size: [640, 640]
+
+# --- entrainement generique (surchargeable par approche, SAUF image_size) ---
+train:
+  epochs: 100
+  batch_size: 16          # -1 = taille automatique (Ultralytics, CUDA uniquement)
+  num_workers: 4
+  image_size: ${protocol.image_size}
+  early_stopping_patience: 20
+  # ADR-0019 : materiel. 'auto' => GPU 0 si CUDA disponible, sinon cpu.
+  # Multi-GPU : device: "0,1". Le materiel resolu est enregistre dans le manifeste.
+  device: auto            # auto | cpu | "0" | "0,1" | mps
+  amp: true               # precision mixte ; desactivee d'office en mode=debug
+  cache: false            # false | ram | disk : cache dataset, gain net si I/O limitantes
+  plots: false            # figures Ultralytics : bruit dans les runs d'HPO
+
+# --- garde-fous ---
+strict:
+  require_validated_keypoints: true    # refuse les schemas PLACEHOLDER (schema fige : ADR-0006)
+  enforce_common_image_size: true      # refuse une approche a resolution divergente (ADR-0013)
+  require_clean_git: false             # true => refuse un depot avec des modifications non commitees
+  validate_contracts: true             # valide chaque artefact a l'ecriture
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+  job:
+    chdir: false

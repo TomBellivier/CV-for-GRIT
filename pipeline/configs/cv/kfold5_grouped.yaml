@@ -1,0 +1,12 @@
+# @package _global_
+cv:
+  name: kfold5_grouped
+  strategy: stratified_group_kfold
+  n_folds: 5
+  # ADR-0011 : une image = un specimen dans ces 4 datasets, donc group_id == image_id.
+  # Le mecanisme de groupement reste actif : si un futur dataset apporte plusieurs vues
+  # par specimen, il suffira de renseigner data.adapter_options.group_id_field.
+  group_by: group_id
+  stratify_by: dataset
+  val_fraction: 0.15            # decoupe val a l'interieur du train, par groupe
+  seed: 42

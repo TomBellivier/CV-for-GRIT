@@ -1,0 +1,11 @@
+# @package _global_
+# Experience figee (§5.3). Tout resultat cite dans le rapport passe par un fichier de ce type.
+defaults:
+  - override /data: pooled
+  - override /approach: mean_pose
+  - override /cv: kfold5_grouped
+  - override /eval: default
+  - override /tuning: optuna_default
+
+tag: ref_baseline
+seed: 42
