@@ -316,7 +316,12 @@ def cmd_tune(cfg: DictConfig) -> dict[str, Any]:
         ctx = cmd_train(
             final_cfg,
             extra={"optuna_study": best["study_name"], "hpo_mode": mode,
-                   "hpo_source_fold": source, "hpo_n_trials": best["n_trials_completed"]},
+                   "hpo_source_fold": source, "hpo_n_trials": best["n_trials_completed"],
+                   # ADR-0012 : chaque fold externe retient LEGITIMEMENT ses propres
+                   # hyperparametres. On les exclut de l'identite du modele, sinon
+                   # chaque fold formerait une variante distincte et la dispersion
+                   # inter-folds disparaitrait des tableaux.
+                   "hpo_overridden_keys": list(best["best_params"])},
         )
         final_runs[outer_fold] = ctx.run_id
     results["final_runs"] = final_runs

@@ -66,6 +66,32 @@ def make_run_id(cfg: DictConfig, content_hash: str) -> str:
     )
 
 
+def variant_hash(cfg: DictConfig, ignored_keys: list[str] | None = None) -> str:
+    """Empreinte du MODELE, independante du fold.
+
+    Deux runs partagent cette empreinte si et seulement s'ils sont le meme modele
+    entraine sur des folds differents. Sans elle, deux variantes portant le meme tag
+    (par exemple deux poids de depart differents) seraient moyennees ensemble dans les
+    tableaux : un resultat faux, et silencieux.
+
+    `ignored_keys` sert au protocole niche (ADR-0012), ou chaque fold externe retient
+    LEGITIMEMENT des hyperparametres differents : ces cles sont exclues pour que les
+    folds d'une meme experience restent regroupes.
+    """
+    resolved = OmegaConf.to_container(cfg, resolve=True)
+    assert isinstance(resolved, dict)
+    for volatile in ("fold", "force", "paths", "hydra", "split_id"):
+        resolved.pop(volatile, None)
+    for key in ignored_keys or []:
+        node = resolved
+        parts = str(key).split(".")
+        for part in parts[:-1]:
+            node = node.get(part, {}) if isinstance(node, dict) else {}
+        if isinstance(node, dict):
+            node.pop(parts[-1], None)
+    return short_hash(stable_hash(resolved))
+
+
 @dataclass
 class RunContext:
     """Contexte d'execution partage par toutes les etapes d'un run."""
@@ -138,6 +164,11 @@ class RunContext:
             "mode": str(self.cfg.mode),
             "seed": int(self.cfg.seed),
             "content_hash": self.content_hash,
+            # Identifie le MODELE, folds confondus (§8.1).
+            "variant_hash": self.extra.get(
+                "variant_hash",
+                variant_hash(self.cfg, list(self.extra.get("hpo_overridden_keys", []))),
+            ),
             "eval_version": int(self.cfg.eval.version),
             "primary_metric": str(self.cfg.eval.primary_metric),
             "started_at": self.started_at,

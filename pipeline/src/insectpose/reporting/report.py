@@ -109,9 +109,11 @@ def write_report(paths: ProjectPaths, cfg: Any) -> Path:
         },
     )
     if bool(cfg.report.figures):
-        from insectpose.reporting.figures import write_figures
+        from insectpose.reporting.figures import write_figures, write_per_run_figures
 
         write_figures(paths, cfg, master)
+        if bool(cfg.report.get("per_run_figures", True)):
+            write_per_run_figures(paths, cfg, master)
 
     log.info("Rapport : %d approche(s), %d run(s) citables (%d trials d'HPO exclus).",
              citable["approach"].nunique(), citable["run_id"].nunique(),

@@ -18,6 +18,7 @@ log = get_logger("aggregate")
 
 _MANIFEST_FIELDS = (
     "approach", "data_scope", "split_id", "tag", "mode", "seed", "content_hash",
+    "variant_hash",
     "eval_version", "primary_metric", "duration_s",
     # Couts au niveau run : une approche les renseigne via ctx.extra (§7.2).
     "model_params", "train_time_s", "peak_vram_mb", "n_qualitative_figures",
@@ -43,6 +44,15 @@ def collect_runs(paths: ProjectPaths) -> pd.DataFrame:
         # Un run d'HPO n'est PAS un resultat : il a servi a choisir des hyperparametres,
         # sur un decoupage interne. L'agreger avec les runs finaux fausserait le rapport.
         metrics["role_in_protocol"] = manifest.get("role_in_protocol", "final")
+        # Un decoupage interne s'appelle <split_id>__outer<k> : le `fold` est alors un
+        # fold INTERNE, et l'outer est porte par le nom du decoupage.
+        split_id = str(manifest.get("split_id", ""))
+        if "__outer" in split_id:
+            metrics["outer_fold"] = int(split_id.rsplit("__outer", 1)[-1])
+            metrics["inner_fold"] = metrics["fold"]
+        else:
+            metrics["outer_fold"] = metrics["fold"]
+            metrics["inner_fold"] = None
         metrics["trial_number"] = manifest.get("trial_number")
         metrics["optuna_study"] = manifest.get("optuna_study")
         metrics["git_commit"] = (manifest.get("git") or {}).get("commit")
@@ -58,6 +68,22 @@ def collect_runs(paths: ProjectPaths) -> pd.DataFrame:
     if not frames:
         return pd.DataFrame()
     return pd.concat(frames, ignore_index=True)
+
+
+def model_label(frame: pd.DataFrame) -> pd.Series:
+    """Etiquette de modele : approche · tag, complete du hash si deux variantes coexistent.
+
+    C'est ce qui empeche deux modeles distincts portant le meme tag (deux poids de
+    depart, par exemple) d'etre moyennes ensemble comme s'ils etaient deux folds.
+    """
+    approach = frame["approach"].astype(str)
+    tag = frame["tag"].astype(str) if "tag" in frame.columns else ""
+    base = approach + " · " + tag
+    if "variant_hash" not in frame.columns:
+        return base
+    variants = frame.groupby(base.rename("base"))["variant_hash"].transform("nunique")
+    suffix = frame["variant_hash"].astype(str).str[:6]
+    return base.where(variants <= 1, base + " · " + suffix)
 
 
 def final_runs(master: pd.DataFrame) -> pd.DataFrame:
@@ -102,22 +128,29 @@ def fold_table(master: pd.DataFrame, metric: str, scope: str = "overall",
     master = master if include_trials else final_runs(master)
     sel = master[
         (master["metric"] == metric) & (master["scope"] == scope) & (master["split"] == split)
-    ]
-    return sel.pivot_table(index="approach", columns="fold", values="value", aggfunc="mean")
+    ].copy()
+    sel["model"] = model_label(sel)
+    return sel.pivot_table(index="model", columns="fold", values="value", aggfunc="mean")
 
 
 def summary_table(master: pd.DataFrame, metric: str, scope: str = "overall",
                   split: str = "test", include_trials: bool = False) -> pd.DataFrame:
-    """Moyenne, ecart-type et n inter-folds par approche (§6.2)."""
+    """Moyenne, ecart-type et n inter-folds par MODELE (§6.2).
+
+    Le regroupement se fait par variante, pas par approche : deux modeles differents
+    portant le meme tag ne doivent pas etre moyennes comme s'ils etaient deux folds.
+    """
     master = master if include_trials else final_runs(master)
     sel = master[
         (master["metric"] == metric) & (master["scope"] == scope) & (master["split"] == split)
-    ]
+    ].copy()
+    sel["model"] = model_label(sel)
     out = (
-        sel.groupby("approach")["value"]
+        sel.groupby("model")["value"]
         .agg(mean="mean", std="std", n_folds="size")
         .reset_index()
         .sort_values("mean", ascending=False)
     )
-    counts = sel.groupby("approach")["n"].sum().rename("n_instances").reset_index()
-    return out.merge(counts, on="approach", how="left")
+    counts = sel.groupby("model")["n"].sum().rename("n_instances").reset_index()
+    identity = sel.groupby("model")[["approach", "tag"]].first().reset_index()
+    return out.merge(counts, on="model", how="left").merge(identity, on="model", how="left")

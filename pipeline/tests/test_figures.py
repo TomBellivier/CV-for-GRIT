@@ -127,3 +127,88 @@ def test_comparison_excludes_hpo_trials(reported) -> None:
     kept = selection.apply(pd.concat([master, trials], ignore_index=True))
     assert set(kept["role_in_protocol"]) == {"final"}
     assert selection.excluded["hpo_trials"] > 0
+
+
+# ===========================================================================
+# Identite des modeles et lisibilite des heatmaps
+# ===========================================================================
+def test_two_variants_sharing_a_tag_are_not_averaged_together() -> None:
+    """Regression : deux poids de depart sous le meme tag etaient pris pour deux folds."""
+    from insectpose.evaluation.aggregate import model_label, summary_table
+
+    master = pd.DataFrame({
+        "approach": ["yolo_pooled"] * 4, "tag": ["pooled"] * 4,
+        "variant_hash": ["aaaaaaaa", "aaaaaaaa", "bbbbbbbb", "bbbbbbbb"],
+        "fold": [0, 1, 0, 1], "metric": ["oks_ap"] * 4, "scope": ["overall"] * 4,
+        "split": ["test"] * 4, "value": [0.8, 0.82, 0.5, 0.52], "n": [10] * 4,
+        "role_in_protocol": ["final"] * 4, "run_id": list("abcd"),
+    })
+    labels = model_label(master)
+    assert labels.nunique() == 2
+    assert all("aaaaaa" in v or "bbbbbb" in v for v in labels)
+
+    summary = summary_table(master, "oks_ap")
+    assert len(summary) == 2
+    assert set(summary["n_folds"]) == {2}
+    assert summary["mean"].max() > 0.79 and summary["mean"].min() < 0.53
+
+
+def test_single_variant_keeps_a_short_label() -> None:
+    """Le hash n'apparait qu'en cas de collision : sinon les etiquettes seraient illisibles."""
+    from insectpose.evaluation.aggregate import model_label
+
+    master = pd.DataFrame({
+        "approach": ["lora", "lora"], "tag": ["d", "d"],
+        "variant_hash": ["aaaaaaaa", "aaaaaaaa"],
+    })
+    assert list(model_label(master).unique()) == ["lora · d"]
+
+
+def test_outer_and_inner_folds_are_distinguished(reported) -> None:
+    _, _, master = reported
+    assert "outer_fold" in master.columns
+    assert "inner_fold" in master.columns
+    final = master[master["role_in_protocol"] == "final"]
+    assert (final["outer_fold"] == final["fold"]).all()
+    assert final["inner_fold"].isna().all()
+
+
+@pytest.mark.parametrize(
+    ("rgba", "expected"),
+    [((0.99, 0.91, 0.14, 1.0), "black"),    # jaune vif (haut de viridis)
+     ((0.27, 0.00, 0.33, 1.0), "white"),    # violet fonce (bas de viridis)
+     ((0.13, 0.57, 0.55, 1.0), "black")],   # teal median : le noir contraste mieux
+)
+def test_heatmap_text_colour_follows_cell_luminance(rgba, expected) -> None:
+    """Un seuil fonde sur la valeur se trompe aux deux extremites de la palette."""
+    from insectpose.reporting.compare import text_color
+
+    assert text_color(rgba) == expected
+
+
+def test_text_colour_threshold_is_the_wcag_crossover() -> None:
+    """Le seuil retenu (0.179) est le point ou noir et blanc contrastent autant."""
+    from insectpose.reporting.compare import text_color
+
+    def contrast(luminance: float, other: float) -> float:
+        lo, hi = sorted((luminance, other))
+        return (hi + 0.05) / (lo + 0.05)
+
+    for grey in (0.02, 0.10, 0.30, 0.60, 0.95):
+        rgba = (grey, grey, grey, 1.0)
+        linear = grey / 12.92 if grey <= 0.04045 else ((grey + 0.055) / 1.055) ** 2.4
+        best = "black" if contrast(linear, 0.0) > contrast(linear, 1.0) else "white"
+        assert text_color(rgba) == best
+
+
+def test_per_run_figures_go_to_separate_folders(reported) -> None:
+    """Un run ne doit pas ecraser les figures du precedent."""
+    from insectpose.reporting.figures import write_per_run_figures
+
+    cfg, project, master = reported
+    produced = write_per_run_figures(project, cfg, master)
+    assert produced
+    run_ids = set(master["run_id"].dropna().unique())
+    folders = {p.parent.name for p in produced}
+    assert folders <= run_ids
+    assert (project.results / "runs").exists()

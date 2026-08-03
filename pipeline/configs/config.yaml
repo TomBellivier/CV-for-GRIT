@@ -29,7 +29,7 @@ protocol:
 # --- entrainement generique (surchargeable par approche, SAUF image_size) ---
 train:
   epochs: 100
-  batch_size: -1          # -1 = taille automatique (Ultralytics, CUDA uniquement)
+  batch_size: 16          # -1 = taille automatique (Ultralytics, CUDA uniquement)
   num_workers: 4
   image_size: ${protocol.image_size}
   early_stopping_patience: 20
@@ -43,6 +43,10 @@ train:
 # --- rapport ---
 report:
   figures: true           # false = tableaux seuls (agregation plus rapide)
+  # Un dossier de figures par run, sous results/runs/<run_id>/. Le rapport global
+  # compare les modeles ; ces dossiers permettent d'examiner un run isolement sans
+  # que le suivant ne l'ecrase.
+  per_run_figures: true
   dpi: 150
   split: test             # split sur lequel portent les figures
 

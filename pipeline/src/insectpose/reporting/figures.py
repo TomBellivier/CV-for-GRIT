@@ -455,9 +455,10 @@ def fig_symmetry_scatter(paths: ProjectPaths, master: pd.DataFrame, cfg: Any,
 
 
 # --- point d'entree ----------------------------------------------------------
-def write_figures(paths: ProjectPaths, cfg: Any, master: pd.DataFrame) -> list[Path]:
-    """Produit toutes les figures du rapport. Effet de bord : ecrit results/figures/."""
-    out_dir = paths.results / "figures"
+def write_figures(paths: ProjectPaths, cfg: Any, master: pd.DataFrame,
+                  out_dir: Path | None = None) -> list[Path]:
+    """Produit les figures d'un jeu de runs. Effet de bord : ecrit dans `out_dir`."""
+    out_dir = out_dir or (paths.results / "figures")
     dpi = int(cfg.report.dpi)
     split = str(cfg.report.split)
     written: list[Path] = []
@@ -486,3 +487,21 @@ def write_figures(paths: ProjectPaths, cfg: Any, master: pd.DataFrame) -> list[P
     produced = [p for p in written if p is not None]
     log.info("%d figure(s) ecrite(s) dans %s", len(produced), out_dir)
     return produced
+
+
+def write_per_run_figures(paths: ProjectPaths, cfg: Any, master: pd.DataFrame) -> list[Path]:
+    """Un dossier de figures par run, sous results/runs/<run_id>/.
+
+    Le rapport global compare les modeles entre eux ; ces dossiers-la permettent
+    d'examiner un run isolement sans que le suivant ne l'ecrase.
+    Effet de bord : ecrit results/runs/<run_id>/.
+    """
+    written: list[Path] = []
+    for run_id in sorted(final_runs(master)["run_id"].dropna().unique()):
+        subset = master[master["run_id"] == run_id]
+        written.extend(
+            write_figures(paths, cfg, subset, paths.results / "runs" / str(run_id))
+        )
+    log.info("Figures par run ecrites pour %d run(s).",
+             final_runs(master)["run_id"].nunique())
+    return written

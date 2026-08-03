@@ -77,11 +77,21 @@ class CompareFilter:
         return data
 
     def label(self, frame: pd.DataFrame) -> pd.Series:
-        """Etiquette de ligne des heatmaps, construite depuis les champs demandes."""
+        """Etiquette de ligne des heatmaps.
+
+        Si deux VARIANTES distinctes partagent la meme etiquette — deux poids de depart
+        sous le meme tag, par exemple — le hash de variante est ajoute. Sans cela, deux
+        modeles differents seraient moyennes ensemble comme s'ils etaient deux folds.
+        """
         columns = [c for c in self.label_by if c in frame.columns]
         if not columns:
             return frame["run_id"].astype(str)
-        return frame[columns].astype(str).agg(" · ".join, axis=1)
+        base = frame[columns].astype(str).agg(" · ".join, axis=1)
+        if "variant_hash" not in frame.columns:
+            return base
+        variants = frame.groupby(base.rename("base"))["variant_hash"].transform("nunique")
+        return base.where(variants <= 1,
+                          base + " · " + frame["variant_hash"].astype(str).str[:6])
 
 
 def load_master(paths: ProjectPaths) -> pd.DataFrame:
@@ -94,32 +104,53 @@ def load_master(paths: ProjectPaths) -> pd.DataFrame:
     return read_parquet(path)
 
 
+def text_color(rgba: tuple[float, ...]) -> str:
+    """Noir ou blanc, selon la luminance REELLE de la case.
+
+    Une palette comme viridis va du violet fonce au jaune vif : un seuil fonde sur la
+    valeur numerique se trompe aux deux extremites. On calcule donc la luminance
+    perceptuelle de la couleur effectivement tracee (coefficients sRGB), apres
+    linearisation gamma.
+    """
+    channels = []
+    for component in rgba[:3]:
+        c = float(component)
+        channels.append(c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4)
+    luminance = 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+    # 0.179 est le point ou le contraste WCAG du noir egale celui du blanc :
+    # (L + 0.05)^2 = 0.05 x 1.05. Au-dessus, le noir est plus lisible.
+    return "black" if luminance > 0.179 else "white"
+
+
 def _heatmap(matrix: pd.DataFrame, title: str, path: Path, lower_is_better: bool,
              dpi: int = 150, value_format: str = "{:.3f}") -> Path:
     """Trace une heatmap annotee. Effet de bord : ecrit `path`."""
     height = 0.5 * len(matrix) + 2.5
     width = 1.1 * len(matrix.columns) + 4
     fig, ax = plt.subplots(figsize=(width, height))
-    cmap = "viridis_r" if lower_is_better else "viridis"
+    cmap = plt.get_cmap("viridis_r" if lower_is_better else "viridis")
     values = matrix.to_numpy(dtype=float)
-    image = ax.imshow(values, cmap=cmap, aspect="auto")
+    finite_values = values[np.isfinite(values)]
+    vmin = float(finite_values.min()) if finite_values.size else 0.0
+    vmax = float(finite_values.max()) if finite_values.size else 1.0
+    if vmin == vmax:
+        vmax = vmin + 1e-9
+    norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
+    image = ax.imshow(values, cmap=cmap, norm=norm, aspect="auto")
 
     ax.set_xticks(range(len(matrix.columns)))
     ax.set_xticklabels(matrix.columns, rotation=30, ha="right")
     ax.set_yticks(range(len(matrix)))
     ax.set_yticklabels(matrix.index, fontsize=8)
 
-    finite = values[np.isfinite(values)]
-    midpoint = float(np.nanmedian(finite)) if finite.size else 0.0
     for i in range(values.shape[0]):
         for j in range(values.shape[1]):
             value = values[i, j]
             if not np.isfinite(value):
                 ax.text(j, i, "-", ha="center", va="center", fontsize=7, color="grey")
                 continue
-            dark = (value > midpoint) if not lower_is_better else (value < midpoint)
             ax.text(j, i, value_format.format(value), ha="center", va="center",
-                    fontsize=7, color="white" if dark else "black")
+                    fontsize=7, color=text_color(cmap(norm(value))))
 
     fig.colorbar(image, ax=ax, shrink=0.8)
     ax.set_title(title + ("  (lower is better)" if lower_is_better else ""))
