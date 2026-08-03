@@ -133,25 +133,19 @@ def test_approach_is_registered_and_declares_availability() -> None:
     assert available or any(dep in reason for dep in ("torch", "ultralytics"))
 
 
-def test_search_space_is_declared(cfg) -> None:
+def test_search_space_is_declared(config_factory) -> None:
     """L'espace de recherche doit etre lisible en config, pas enterre dans le code."""
     import optuna
-    from omegaconf import OmegaConf
 
-    OmegaConf.update(cfg, "approach.name", "yolo_pooled", force_add=True)
-    from insectpose.cli import load_config
-
-    yolo_cfg = load_config([f"paths.root={cfg.paths.root}", "approach=yolo_pooled"])
+    yolo_cfg = config_factory(["approach=yolo_pooled"])
     overrides = APPROACHES.get("yolo_pooled").search_space(optuna.create_study().ask(), yolo_cfg)
     assert "approach.lr0" in overrides
     assert 1e-5 <= overrides["approach.lr0"] <= 1e-1
 
 
-def test_single_detection_per_image_is_configured(project) -> None:
+def test_single_detection_per_image_is_configured(config_factory) -> None:
     """ADR-0017 : une image = un insecte, donc max_det = 1."""
-    from insectpose.cli import load_config
-
-    yolo_cfg = load_config([f"paths.root={project.root}", "approach=yolo_pooled"])
+    yolo_cfg = config_factory(["approach=yolo_pooled"])
     assert int(yolo_cfg.approach.max_det) == 1
     assert float(yolo_cfg.approach.conf) <= 0.01   # pas de troncature des courbes AP
 
@@ -167,3 +161,28 @@ def test_heterogeneous_schemas_are_refused(project) -> None:
     source = SimpleNamespace(schemas={"a": schema, "b": other})
     with pytest.raises(ValueError, match="schema de keypoints unique"):
         YoloPooledApproach._schema(source)
+
+
+def test_missing_config_key_is_reported_by_name(config_factory) -> None:
+    """Une config plus ancienne que le code doit produire un message actionnable."""
+    from omegaconf import OmegaConf
+
+    from insectpose.approaches.yolo_pooled import YoloPooledApproach
+
+    cfg = config_factory(["approach=yolo_pooled"])
+    YoloPooledApproach(cfg)   # config complete : aucune erreur
+
+    incomplete = cfg.copy()
+    OmegaConf.set_struct(incomplete, False)
+    del incomplete.approach["predict_chunk_size"]
+    with pytest.raises(KeyError, match="approach.predict_chunk_size"):
+        YoloPooledApproach(incomplete)
+
+
+def test_declared_keys_match_the_shipped_config(config_factory) -> None:
+    """Garde-fou : toute cle declaree requise doit exister dans le YAML livre."""
+    from insectpose.approaches.yolo_pooled import YoloPooledApproach as A
+
+    cfg = config_factory(["approach=yolo_pooled"])
+    assert all(k in cfg.approach for k in A.REQUIRED_APPROACH_KEYS)
+    assert all(k in cfg.train for k in A.REQUIRED_TRAIN_KEYS)

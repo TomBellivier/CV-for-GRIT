@@ -77,20 +77,35 @@ def raw_coco(project: ProjectPaths) -> ProjectPaths:
 
 
 @pytest.fixture()
-def cfg(project: ProjectPaths) -> DictConfig:
-    """Config complete pointant vers le projet jetable."""
+def config_factory(project: ProjectPaths):
+    """Fabrique de configs pointant vers le projet jetable.
+
+    Changer d'approche EXIGE de recomposer le groupe Hydra (`approach=<nom>`) : patcher
+    `approach.name` laisserait les cles de l'approche precedente en place, ce qui est
+    une source d'erreurs silencieuses.
+    """
     from insectpose.cli import load_config
 
-    overrides = [
-        f"paths.root={project.root}",
-        "data=pooled",
-        f"data.datasets=[{','.join(DATASETS)}]",
-        "cv=kfold5_grouped",
-        "cv.n_folds=3",
-        "mode=smoke",
-        "tag=test",
-        "train.epochs=1",
-    ]
-    config = load_config(overrides, config_dir=project.configs)
-    OmegaConf.set_struct(config, False)
-    return config
+    def build(extra: list[str] | None = None) -> DictConfig:
+        overrides = [
+            f"paths.root={project.root}",
+            "data=pooled",
+            f"data.datasets=[{','.join(DATASETS)}]",
+            "cv=kfold5_grouped",
+            "cv.n_folds=3",
+            "mode=smoke",
+            "tag=test",
+            "train.epochs=1",
+            *(extra or []),
+        ]
+        config = load_config(overrides, config_dir=project.configs)
+        OmegaConf.set_struct(config, False)
+        return config
+
+    return build
+
+
+@pytest.fixture()
+def cfg(config_factory) -> DictConfig:
+    """Config par defaut (approche de reference)."""
+    return config_factory()

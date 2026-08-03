@@ -1,0 +1,57 @@
+# @package _global_
+# Approche F : YOLO-pose poule prive des pattes et des ailes posterieures (ADR-0027).
+approach:
+  name: yolo_pooled_reduced
+  _target_: insectpose.approaches.yolo_reduced.YoloPooledReducedApproach
+
+  weights: yolo11n-pose.pt
+  prunable: false
+
+  # Motifs recherches dans les NOMS de keypoints du schema. 'leg' couvre les 8 points
+  # de pattes, 'hindwing' les 8 points d'ailes posterieures : 16 des 42 points sont
+  # retires des labels d'ENTRAINEMENT (vis = 0), jamais du test.
+  #
+  # ATTENTION (ADR-0027) : la verite terrain conserve ces points et l'evaluation les
+  # compte. Les metriques `overall` de F sont donc mecaniquement moins bonnes que celles
+  # de A et ne sont PAS comparables. La comparaison valide porte sur les points conserves :
+  #   python scripts/compare_models.py --exclude-keypoints leg hindwing
+  drop_keypoints: [leg, hindwing]
+
+  # --- inference ---
+  max_det: 1
+  conf: 0.001
+  iou: 0.7
+  inference_precision: fp16
+  predict_chunk_size: 16
+
+  # --- optimisation : identique a l'approche A, pour n'isoler que l'effet du retrait ---
+  optimizer: auto
+  lr0: 0.01
+  lrf: 0.01
+  momentum: 0.937
+  weight_decay: 0.0005
+  warmup_epochs: 3.0
+  box: 7.5
+  pose: 12.0
+  kobj: 1.0
+  cls: 0.5
+  dfl: 1.5
+  fliplr: 0.5
+  degrees: 10.0
+  translate: 0.1
+  scale: 0.5
+  mosaic: 1.0
+  close_mosaic: 10
+  hsv_h: 0.015
+  hsv_s: 0.7
+  hsv_v: 0.4
+
+  search_space:
+    lr0: {type: float, low: 1.0e-5, high: 1.0e-1, log: true}
+    lrf: {type: float, low: 1.0e-3, high: 0.5, log: true}
+    weight_decay: {type: float, low: 1.0e-5, high: 1.0e-2, log: true}
+    warmup_epochs: {type: float, low: 0.0, high: 5.0}
+    pose: {type: float, low: 4.0, high: 24.0}
+    box: {type: float, low: 2.0, high: 12.0}
+    degrees: {type: float, low: 0.0, high: 30.0}
+    scale: {type: float, low: 0.0, high: 0.7}

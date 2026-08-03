@@ -21,6 +21,8 @@ dependencies = [
     "torch>=2.1",
     "torchvision>=0.16",
     "ultralytics>=8.3",
+    # ADR-0025 : adaptateurs LoRA de l'approche D.
+    "peft>=0.11",
 ]
 
 [project.optional-dependencies]

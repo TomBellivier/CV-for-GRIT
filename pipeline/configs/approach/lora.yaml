@@ -1,0 +1,61 @@
+# @package _global_
+# Approche D : adaptateurs LoRA sur un YOLO-pose pre-entraine (ADR-0025).
+approach:
+  name: lora
+  _target_: insectpose.approaches.lora.LoraApproach
+
+  weights: yolo11n-pose.pt      # ADR-0025 : on part des poids COCO, pas du modele poule
+  prunable: false
+
+  lora:
+    r: 8                        # rang des adaptateurs
+    alpha: 16.0
+    dropout: 0.0
+    # Nombre de blocs, en fin de cou, recevant les adaptateurs. Les index sont calcules
+    # depuis la structure du modele : changer de taille (n/s/m/l) ne casse rien.
+    neck_blocks: 3
+    # ADR-0025 : les tetes restent entrainables, tout le reste est gele. C'est LA
+    # variable cachee des comparaisons LoRA : le manifeste enregistre le nombre exact
+    # de parametres entrainables, sans quoi "LoRA rang 8" ne veut rien dire.
+    train_head: true
+
+  # --- inference ---
+  max_det: 1
+  conf: 0.001
+  iou: 0.7
+  inference_precision: fp16
+  predict_chunk_size: 16
+
+  # --- optimisation ---
+  # Peu de parametres entraines : un pas plus grand qu'en entrainement complet est usuel.
+  optimizer: auto
+  lr0: 0.001
+  lrf: 0.01
+  momentum: 0.937
+  weight_decay: 0.0005
+  warmup_epochs: 3.0
+  box: 7.5
+  pose: 12.0
+  kobj: 1.0
+  cls: 0.5
+  dfl: 1.5
+  fliplr: 0.5
+  degrees: 10.0
+  translate: 0.1
+  scale: 0.5
+  mosaic: 1.0
+  close_mosaic: 10
+  hsv_h: 0.015
+  hsv_s: 0.7
+  hsv_v: 0.4
+
+  # Budget identique aux autres approches (§6.3).
+  search_space:
+    lr0: {type: float, low: 1.0e-5, high: 1.0e-1, log: true}
+    lora.r: {type: categorical, choices: [4, 8, 16, 32]}
+    lora.alpha: {type: float, low: 4.0, high: 64.0, log: true}
+    lora.neck_blocks: {type: int, low: 1, high: 5}
+    pose: {type: float, low: 4.0, high: 24.0}
+    weight_decay: {type: float, low: 1.0e-5, high: 1.0e-2, log: true}
+    degrees: {type: float, low: 0.0, high: 30.0}
+    scale: {type: float, low: 0.0, high: 0.7}

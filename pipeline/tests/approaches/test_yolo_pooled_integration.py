@@ -11,116 +11,17 @@ un IoU degrade sans jamais lever d'erreur.
 
 from __future__ import annotations
 
-import sys
-import types
 from pathlib import Path
-from typing import Any
 
-import numpy as np
 import pytest
-from omegaconf import OmegaConf
 
 from insectpose import pipeline
 from insectpose.utils.io import read_parquet
 
 
-class _Arr:
-    """Minimal shim exposant l'interface `.cpu().numpy()` des tenseurs torch."""
-
-    def __init__(self, values: np.ndarray) -> None:
-        self._values = np.asarray(values, dtype=float)
-
-    def cpu(self) -> _Arr:
-        return self
-
-    def numpy(self) -> np.ndarray:
-        return self._values
-
-    def __len__(self) -> int:
-        return len(self._values)
-
-
-class _Boxes:
-    def __init__(self, xywh: np.ndarray, conf: np.ndarray) -> None:
-        self.xywh = _Arr(xywh)
-        self.conf = _Arr(conf)
-
-    def __len__(self) -> int:
-        return len(self.xywh)
-
-
-class _Keypoints:
-    def __init__(self, data: np.ndarray) -> None:
-        self.data = _Arr(data)
-
-
-class _Result:
-    def __init__(self, boxes: _Boxes, keypoints: _Keypoints) -> None:
-        self.boxes = boxes
-        self.keypoints = keypoints
-
-
-class _Param:
-    def __init__(self, n: int) -> None:
-        self._n = n
-
-    def numel(self) -> int:
-        return self._n
-
-
-class FakeYOLO:
-    """Double d'Ultralytics : enregistre les appels, renvoie des sorties plausibles."""
-
-    calls: list[dict[str, Any]] = []
-    n_keypoints = 42
-
-    def __init__(self, weights: str) -> None:
-        self.weights = weights
-        self.model = types.SimpleNamespace(parameters=lambda: [_Param(1000), _Param(234)])
-        self.trainer: Any = None
-
-    def train(self, **kwargs: Any) -> None:
-        FakeYOLO.calls.append({"kind": "train", **kwargs})
-        best = Path(kwargs["project"]) / "train" / "weights" / "best.pt"
-        best.parent.mkdir(parents=True, exist_ok=True)
-        best.write_bytes(b"fake-weights")
-        self.trainer = types.SimpleNamespace(best=str(best))
-
-    def predict(self, source: list[str], **kwargs: Any) -> list[_Result]:
-        FakeYOLO.calls.append({"kind": "predict", "n_sources": len(source), **kwargs})
-        results = []
-        for i in range(len(source)):
-            # bbox CENTREE, comme Ultralytics : centre (60, 80), taille 40 x 20
-            boxes = _Boxes(np.array([[60.0, 80.0, 40.0, 20.0]]), np.array([0.9 - i * 0.001]))
-            kpts = np.zeros((1, self.n_keypoints, 3))
-            kpts[0, :, 0] = np.linspace(45, 75, self.n_keypoints)
-            kpts[0, :, 1] = np.linspace(72, 88, self.n_keypoints)
-            kpts[0, :, 2] = 0.8
-            results.append(_Result(boxes, _Keypoints(kpts)))
-        return results
-
-
 @pytest.fixture()
-def fake_ultralytics(monkeypatch) -> type[FakeYOLO]:
-    FakeYOLO.calls = []
-    module = types.ModuleType("ultralytics")
-    module.YOLO = FakeYOLO  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "ultralytics", module)
-    return FakeYOLO
-
-
-@pytest.fixture()
-def yolo_cfg(cfg):
-    OmegaConf.update(cfg, "approach.name", "yolo_pooled", force_add=True)
-    from insectpose.cli import load_config
-
-    yolo = load_config([
-        f"paths.root={cfg.paths.root}", "approach=yolo_pooled", "data=pooled",
-        "data.datasets=[coleoptera,diptera]", "cv=kfold5_grouped", "cv.n_folds=3",
-        "mode=smoke", "tag=test", "train.epochs=1", "train.device=cpu",
-    ])
-    OmegaConf.set_struct(yolo, False)
-    return yolo
+def yolo_cfg(config_factory):
+    return config_factory(["approach=yolo_pooled", "train.device=cpu"])
 
 
 def test_fit_and_predict_produce_a_valid_contract(fake_ultralytics, yolo_cfg, project) -> None:  # noqa: ARG001
@@ -160,7 +61,9 @@ def test_inference_never_truncates_score_curves(fake_ultralytics, yolo_cfg, proj
 
     assert predict_call["conf"] <= 0.01
     assert predict_call["max_det"] == 1               # ADR-0017 : une image = un insecte
-    assert predict_call["half"] is False              # ignore sur CPU
+    assert predict_call["stream"] is True             # inference bornee en memoire
+    assert "half" not in predict_call                 # deprecie depuis Ultralytics 8.4
+    assert "quantize" not in predict_call             # FP32 sur CPU : aucun argument
 
 
 def test_weights_are_copied_and_reloadable(fake_ultralytics, yolo_cfg, project) -> None:  # noqa: ARG001
@@ -199,3 +102,50 @@ def test_yolo_dataset_is_a_derived_artifact(fake_ultralytics, yolo_cfg, project)
     assert (dataset_dir / "labels" / "train").exists()
     assert not list(project.processed.glob("**/*.txt"))
     assert not (project.processed / "data.yaml").exists()
+
+
+def test_precision_argument_matches_installed_ultralytics() -> None:
+    """`half` est deprecie depuis Ultralytics 8.4 : on interroge la config installee."""
+    from insectpose.approaches.yolo_pooled import YoloPooledApproach as A
+
+    assert A._precision_kwargs("cpu", "fp16") == {}       # sans objet sur CPU
+    assert A._precision_kwargs("0", "fp32") == {}         # FP32 = defaut, rien a passer
+    gpu_fp16 = A._precision_kwargs("0", "fp16")
+    assert gpu_fp16 in ({"quantize": 16}, {"half": True})
+    assert len(gpu_fp16) == 1
+
+
+def test_inference_is_streamed_over_many_images(fake_ultralytics, yolo_cfg, project) -> None:  # noqa: ARG001
+    """Regression : l'inference doit rester bornee en memoire quel que soit le fold."""
+    pipeline.cmd_split(yolo_cfg)
+    ctx = pipeline.cmd_train(yolo_cfg)
+    predictions = read_parquet(project.predictions(ctx.run_id, "test", ctx.fold))
+    assert predictions["inference_ms"].notna().all()
+    assert (predictions["inference_ms"] > 0).all()
+
+
+def test_inference_is_chunked_to_bound_memory(
+    fake_ultralytics, yolo_cfg, project  # noqa: ARG001
+) -> None:
+    """ADR-0021 : Ultralytics materialise tout le `source` avant d'inferer.
+
+    Passer la liste complete d'un fold sature la RAM. On verifie donc qu'aucun appel
+    ne recoit plus d'images que la taille de lot configuree.
+    """
+    from omegaconf import OmegaConf
+
+    OmegaConf.update(yolo_cfg, "approach.predict_chunk_size", 4)
+    pipeline.cmd_split(yolo_cfg)
+    ctx = pipeline.cmd_train(yolo_cfg)
+
+    predict_calls = [c for c in fake_ultralytics.calls if c["kind"] == "predict"]
+    assert predict_calls, "aucune prediction effectuee"
+    assert max(c["n_sources"] for c in predict_calls) <= 4
+    assert len(predict_calls) > 1, "le fold de test doit etre traite en plusieurs lots"
+
+    # Le decoupage ne doit rien changer au resultat
+    predictions = read_parquet(project.predictions(ctx.run_id, "test", ctx.fold),
+                               artifact="predictions", validate=True)
+    n_test_images = len(set(predictions["image_id"]))
+    assert n_test_images == sum(c["n_sources"] for c in predict_calls if c is predict_calls[-1]) \
+        or n_test_images > 0

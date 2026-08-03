@@ -29,7 +29,7 @@ protocol:
 # --- entrainement generique (surchargeable par approche, SAUF image_size) ---
 train:
   epochs: 100
-  batch_size: 16          # -1 = taille automatique (Ultralytics, CUDA uniquement)
+  batch_size: -1          # -1 = taille automatique (Ultralytics, CUDA uniquement)
   num_workers: 4
   image_size: ${protocol.image_size}
   early_stopping_patience: 20
@@ -39,6 +39,12 @@ train:
   amp: true               # precision mixte ; desactivee d'office en mode=debug
   cache: false            # false | ram | disk : cache dataset, gain net si I/O limitantes
   plots: false            # figures Ultralytics : bruit dans les runs d'HPO
+
+# --- rapport ---
+report:
+  figures: true           # false = tableaux seuls (agregation plus rapide)
+  dpi: 150
+  split: test             # split sur lequel portent les figures
 
 # --- garde-fous ---
 strict:

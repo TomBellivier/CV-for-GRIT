@@ -20,11 +20,13 @@ from insectpose.utils.io import read_json, read_parquet
 
 @pytest.mark.smoke
 @pytest.mark.parametrize("approach_name", sorted(APPROACHES.available()))
-def test_full_pipeline_per_approach(cfg, project, approach_name) -> None:
+def test_full_pipeline_per_approach(config_factory, project, approach_name) -> None:
     available, reason = APPROACHES.get(approach_name).availability()
     if not available:
         pytest.skip(f"{approach_name} indisponible dans cet environnement : {reason}")
-    OmegaConf.update(cfg, "approach.name", approach_name, force_add=True)
+    # Recomposition du groupe Hydra : patcher `approach.name` laisserait les cles de
+    # l'approche precedente (defaut reel corrige apres coup).
+    cfg = config_factory([f"approach={approach_name}"])
     pipeline.cmd_split(cfg)
     ctx = pipeline.cmd_train(cfg)
 
@@ -128,3 +130,18 @@ def test_missing_images_are_refused_by_default(cfg, project) -> None:
         image.unlink()
     with _pytest.raises(FileNotFoundError, match="export qualitatif"):
         pipeline.cmd_train(cfg)
+
+
+@pytest.mark.parametrize("approach_name", sorted(APPROACHES.available()))
+def test_approach_config_matches_its_name(config_factory, approach_name) -> None:
+    """Garde-fou : le groupe de config charge doit etre CELUI de l'approche.
+
+    Sans cette verification, un test qui patche `approach.name` sans recomposer le
+    groupe Hydra laisse les cles de l'approche precedente et echoue plus loin, sur un
+    'Missing key' incomprehensible.
+    """
+    cfg = config_factory([f"approach={approach_name}"])
+    assert str(cfg.approach.name) == approach_name
+    assert str(cfg.approach._target_).rsplit(".", 1)[0].endswith(
+        APPROACHES.get(approach_name).__module__.rsplit(".", 1)[-1]
+    )

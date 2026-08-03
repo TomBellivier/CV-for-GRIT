@@ -1,0 +1,10 @@
+# @package _global_
+defaults:
+  - override /data: pooled
+  - override /approach: yolo_pooled_reduced
+  - override /cv: kfold5_grouped
+  - override /eval: default
+  - override /tuning: optuna_default
+
+tag: reduced_kpts
+seed: 42

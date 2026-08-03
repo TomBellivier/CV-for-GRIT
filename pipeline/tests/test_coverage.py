@@ -60,9 +60,15 @@ def test_measurement_coverage_flags_unusable_measurements(coverage, project) -> 
 
 
 def test_prepare_writes_coverage_artifacts(cfg, project, raw_coco) -> None:  # noqa: ARG001
+    from omegaconf import OmegaConf
+
     from insectpose import pipeline
     from insectpose.utils.io import read_json, read_parquet
 
+    # La fixture ecrit du COCO : on force l'adaptateur, car le depot local peut avoir
+    # bascule `data.adapter` sur un autre format (yolo, par exemple).
+    OmegaConf.update(cfg, "data.adapter", "coco")
+    OmegaConf.update(cfg, "data.adapter_options.annotations_glob", "*.json")
     pipeline.cmd_prepare(cfg)
     table = read_parquet(project.processed / "coverage_keypoints.parquet")
     assert len(table) == 42 * 2

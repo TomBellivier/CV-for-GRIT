@@ -14,6 +14,7 @@ testable sans GPU par aller-retour.
 
 from __future__ import annotations
 
+import gc
 import time
 from pathlib import Path
 from typing import Any
@@ -43,14 +44,82 @@ _TRAIN_KEYS = (
 )
 
 
+def precision_kwargs(device: str, precision: str = "fp16") -> dict[str, Any]:
+    """Argument de precision d'inference, compatible entre versions d'Ultralytics.
+
+    `half` est deprecie depuis Ultralytics 8.4 au profit de `quantize` (16 = FP16,
+    None = FP32). On interroge la config par defaut installee plutot que de comparer
+    des numeros de version, et on ne passe RIEN en FP32 : c'est deja le defaut, et
+    cela evite un avertissement de depreciation a chaque appel.
+    """
+    if str(precision) != "fp16" or device == "cpu":
+        return {}
+    try:
+        from ultralytics.cfg import DEFAULT_CFG_DICT
+    except ImportError:
+        return {"half": True}
+    return {"quantize": 16} if "quantize" in DEFAULT_CFG_DICT else {"half": True}
+
+
+def release_model(model: Any) -> None:
+    """Libere un modele Ultralytics et la memoire de son trainer.
+
+    Sans cela, l'inference demarre avec plusieurs Go deja occupes par les
+    dataloaders, workers et buffers d'augmentation de l'entrainement (ADR-0019).
+    """
+    trainer = getattr(model, "trainer", None)
+    for attribute in ("train_loader", "test_loader", "validator", "ema", "optimizer"):
+        if trainer is not None and hasattr(trainer, attribute):
+            setattr(trainer, attribute, None)
+    gc.collect()
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except ImportError:
+        pass
+
+
 @register_approach("yolo_pooled")
 class YoloPooledApproach(BaseApproach):
     """YOLO-pose unique, entraine sur les 4 datasets confondus."""
 
-    def __init__(self, cfg: Any) -> None:
+    #: Cles que l'approche lit dans sa config. Aucune valeur par defaut cachee cote code
+    #: (CONVENTIONS.md §5.2) : la config doit les declarer, mais l'absence doit produire
+    #: un message actionnable plutot qu'une erreur OmegaConf brute.
+    REQUIRED_APPROACH_KEYS = (
+        "weights", "max_det", "conf", "iou", "inference_precision", "predict_chunk_size",
+    )
+    REQUIRED_TRAIN_KEYS = (
+        "epochs", "batch_size", "image_size", "num_workers", "early_stopping_patience",
+        "device", "amp", "cache", "plots",
+    )
+
+    def __init__(self, cfg: Any, namespace: str = "") -> None:
         super().__init__(cfg)
         self.model: Any = None
         self.schema: KeypointSchema | None = None
+        # Un `namespace` non vide isole les artefacts de ce modele dans le run, ce qui
+        # permet a une approche composite (§9.2) d'en heberger plusieurs sans collision.
+        self.namespace = namespace
+        self._check_config()
+
+    def _artifact_dir(self, ctx: RunContext, kind: str) -> Path:
+        """Sous-repertoire du run pour ce modele ('weights', 'yolo_dataset'...)."""
+        return ctx.subdir(f"{kind}/{self.namespace}" if self.namespace else kind)
+
+    def _check_config(self) -> None:
+        """Verifie la presence des cles attendues et nomme celles qui manquent."""
+        missing = [f"approach.{k}" for k in self.REQUIRED_APPROACH_KEYS
+                   if k not in self.cfg.approach]
+        missing += [f"train.{k}" for k in self.REQUIRED_TRAIN_KEYS if k not in self.cfg.train]
+        if missing:
+            raise KeyError(
+                f"[{self.name}] cles de configuration absentes : {missing}. "
+                "Votre configs/approach/yolo_pooled.yaml ou configs/config.yaml est plus "
+                "ancien que le code. Comparer avec la version du depot."
+            )
 
     # --- disponibilite -----------------------------------------------------
     @classmethod
@@ -75,8 +144,9 @@ class YoloPooledApproach(BaseApproach):
         """
         from ultralytics import YOLO
 
+        data = self._prepare_data(data, ctx)
         self.schema = self._schema(data)
-        dataset_dir = ctx.subdir("yolo_dataset")
+        dataset_dir = self._artifact_dir(ctx, "yolo_dataset")
         data_yaml = export_fold(data, self.schema, dataset_dir, splits=("train", "val"))
         self._check_augmentation()
 
@@ -88,9 +158,11 @@ class YoloPooledApproach(BaseApproach):
 
         started = time.perf_counter()
         self.model = YOLO(str(self.cfg.approach.weights))
+        trainer = self._trainer_class(ctx)
         self.model.train(
             data=str(data_yaml),
-            project=str(ctx.subdir("logs")),
+            **({"trainer": trainer} if trainer is not None else {}),
+            project=str(self._artifact_dir(ctx, "logs")),
             name="train",
             exist_ok=True,
             seed=ctx.seed("train"),
@@ -103,18 +175,45 @@ class YoloPooledApproach(BaseApproach):
             **self._train_kwargs(),
         )
         best = Path(self.model.trainer.best)
-        target = ctx.subdir("weights") / "best.pt"
-        target.write_bytes(best.read_bytes())
-        self.model = YOLO(str(target))
+        target = self._artifact_dir(ctx, "weights") / "best.pt"
+        self._write_checkpoint(best, target)
 
+        # Le trainer retient dataloaders, workers et buffers d'augmentation : sans
+        # liberation explicite, la prediction demarre avec plusieurs Go deja occupes.
+        self._release_trainer()
+        self.model = YOLO(str(target))
+        self._prepare_inference_model(self.model)
+
+        prefix = f"{self.namespace}_" if self.namespace else ""
         ctx.extra.update({
-            "train_time_s": time.perf_counter() - started,
-            "model_params": int(sum(p.numel() for p in self.model.model.parameters())),
-            "base_weights": str(self.cfg.approach.weights),
-            "peak_vram_mb": peak_vram_mb(),
-            "amp": amp,
-            "device": device_info(device),
+            f"{prefix}train_time_s": time.perf_counter() - started,
+            f"{prefix}model_params": int(sum(p.numel() for p in self.model.model.parameters())),
+            f"{prefix}base_weights": str(self.cfg.approach.weights),
+            f"{prefix}peak_vram_mb": peak_vram_mb(),
+            f"{prefix}amp": amp,
+            f"{prefix}device": device_info(device),
         })
+
+    # --- points d'extension pour les approches derivees --------------------
+    def _prepare_data(self, data: FoldData, ctx: RunContext) -> FoldData:  # noqa: ARG002
+        """Transformation du fold avant export. Par defaut : aucune."""
+        return data
+
+    def _trainer_class(self, ctx: RunContext) -> Any:  # noqa: ARG002
+        """Trainer Ultralytics personnalise, ou None pour le trainer standard."""
+        return None
+
+    def _write_checkpoint(self, best: Path, target: Path) -> None:
+        """Ecrit les poids du run. Par defaut : copie brute du meilleur checkpoint."""
+        target.write_bytes(best.read_bytes())
+
+    def _prepare_inference_model(self, model: Any) -> None:
+        """Ajustements du modele juste apres chargement pour l'inference. Aucun par defaut."""
+
+    def _release_trainer(self) -> None:
+        """Libere le trainer et la memoire associee entre entrainement et inference."""
+        release_model(self.model)
+        self.model = None
 
     # --- inference ---------------------------------------------------------
     def predict_instances(self, images: ImageSet, ctx: RunContext) -> pd.DataFrame:  # noqa: ARG002
@@ -134,22 +233,49 @@ class YoloPooledApproach(BaseApproach):
         paths = [str(images.absolute_path(row.image_path)) for row in table.itertuples()]
         image_ids = list(table.index)
 
-        started = time.perf_counter()
         device = self._device()
-        results = self.model.predict(
-            source=paths,
-            imgsz=self._imgsz(),
-            conf=float(approach_cfg.conf),
-            iou=float(approach_cfg.iou),
-            max_det=int(approach_cfg.max_det),
-            device=device,
-            half=bool(approach_cfg.half) and device != "cpu",
-            batch=int(self.cfg.train.batch_size),
-            verbose=False,
-            stream=False,
-        )
-        elapsed_ms = (time.perf_counter() - started) * 1000.0
+        started = time.perf_counter()
+        # DECOUPAGE EN LOTS OBLIGATOIRE (ADR-0021). Passer la liste complete des images
+        # a predict() fait construire par Ultralytics un chargeur qui materialise TOUTES
+        # les images d'un coup (`self.im0 = [...]`, `bs = len(im0)`). `stream=True` n'y
+        # change rien : l'accumulation a lieu a la construction du chargeur, avant toute
+        # inference. Sur un fold de plusieurs milliers d'images, la RAM sature et le
+        # processus est tue par l'OOM killer.
+        chunk_size = max(1, int(approach_cfg.predict_chunk_size))
+        precision = self._precision_kwargs(device, str(approach_cfg.inference_precision))
 
+        rows: list[dict[str, Any]] = []
+        for start in range(0, len(paths), chunk_size):
+            chunk_paths = paths[start:start + chunk_size]
+            chunk_ids = image_ids[start:start + chunk_size]
+            results = self.model.predict(
+                source=chunk_paths,
+                imgsz=self._imgsz(),
+                conf=float(approach_cfg.conf),
+                iou=float(approach_cfg.iou),
+                max_det=int(approach_cfg.max_det),
+                device=device,
+                verbose=False,
+                stream=True,
+                **precision,
+            )
+            rows.extend(self._rows_from_results(chunk_ids, results, table, schema))
+            del results
+            gc.collect()
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+        frame = pd.DataFrame(rows)
+        if not frame.empty:
+            frame["inference_ms"] = elapsed_ms / max(len(image_ids), 1)
+        return frame
+
+    @staticmethod
+    def _rows_from_results(image_ids: list[str], results: Any, table: pd.DataFrame,
+                           schema: KeypointSchema) -> list[dict[str, Any]]:
+        """Convertit un lot de Results en lignes du contrat 3.
+
+        Isole du parcours par lots pour qu'aucun objet Results ne survive au lot :
+        chacun porte l'image d'origine, et c'est cette retention qui saturait la RAM.
+        """
         rows: list[dict[str, Any]] = []
         for image_id, result in zip(image_ids, results, strict=True):
             dataset = str(table.loc[image_id, "dataset"])
@@ -170,21 +296,22 @@ class YoloPooledApproach(BaseApproach):
                     "kpts_score": [float(v) for v in kpts[i, :, 2]],
                     "keypoint_schema": schema.name,
                     "bbox_source": "predicted",
-                    "inference_ms": elapsed_ms / max(len(image_ids), 1),
                 })
-        return pd.DataFrame(rows)
+        return rows
 
     # --- rechargement ------------------------------------------------------
     @classmethod
-    def load(cls, run_dir: Path, cfg: Any) -> YoloPooledApproach:
+    def load(cls, run_dir: Path, cfg: Any, namespace: str = "") -> YoloPooledApproach:
         """Recharge les poids du run, sans reentrainement."""
         from ultralytics import YOLO
 
-        weights = Path(run_dir) / "weights" / "best.pt"
+        weights = Path(run_dir) / "weights" / namespace / "best.pt" if namespace \
+            else Path(run_dir) / "weights" / "best.pt"
         if not weights.exists():
             raise FileNotFoundError(f"Poids introuvables : {weights}")
-        obj = cls(cfg)
+        obj = cls(cfg, namespace=namespace)
         obj.model = YOLO(str(weights))
+        obj._prepare_inference_model(obj.model)
         return obj
 
     # --- utilitaires internes ---------------------------------------------
@@ -221,6 +348,11 @@ class YoloPooledApproach(BaseApproach):
         if values[0] != values[1]:
             raise ValueError(f"Ultralytics exige une resolution carree, recu {values}.")
         return values[0]
+
+    @staticmethod
+    def _precision_kwargs(device: str, precision: str = "fp16") -> dict[str, Any]:
+        """Delegue au helper module, reutilise par les autres approches YOLO."""
+        return precision_kwargs(device, precision)
 
     def _device(self) -> str:
         """Peripherique resolu (ADR-0019) : 'auto' -> GPU 0 si CUDA, sinon 'cpu'."""

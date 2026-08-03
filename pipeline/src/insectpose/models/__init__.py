@@ -1,0 +1,1 @@
+"""Briques de modeles reutilisables : normalisation par groupe, adaptateurs."""

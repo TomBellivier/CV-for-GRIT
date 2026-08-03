@@ -12,7 +12,14 @@ approach:
   max_det: 1                    # ADR-0017 : une image = un insecte
   conf: 0.001                   # seuil BAS : ne jamais tronquer les courbes AP (§3.4)
   iou: 0.7
-  half: true                    # FP16 a l'inference sur GPU ; ignore sur CPU
+  # ADR-0021 : nombre d'images passees a predict() en une fois. Ultralytics materialise
+  # toutes les images du `source` a la construction de son chargeur, avant toute
+  # inference : une liste complete de fold sature la RAM. Ce parametre n'affecte AUCUN
+  # resultat, seulement l'empreinte memoire ; il peut donc etre ajuste librement.
+  predict_chunk_size: -1
+  # fp16 | fp32. Traduit en `quantize` (Ultralytics >= 8.4) ou `half` (versions
+  # anterieures) ; ignore sur CPU. En fp32, aucun argument n'est passe : c'est le defaut.
+  inference_precision: fp16
 
   # --- optimisation ---
   optimizer: auto

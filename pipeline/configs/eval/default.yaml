@@ -8,7 +8,7 @@
 #   python -m insectpose.cli train ... eval.primary_metric=measurement_mape_median \
 #                                      eval.primary_direction=minimize
 eval:
-  version: 2
+  version: 3
   primary_metric: oks_ap        # ADR-0010
   primary_direction: maximize
 
@@ -30,7 +30,7 @@ eval:
   pck:
     # Un point est correct si son erreur < alpha * largeur du thorax (ADR-0009).
     # alpha=0.25 est la valeur de reference du projet ; les deux autres donnent la courbe.
-    alphas: [0.125, 0.25, 0.5]
+    alphas: [0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50]
     reference_alpha: 0.25       # alpha utilise pour le detail par keypoint
     normalizer:
       name: thorax_width

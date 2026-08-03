@@ -1,0 +1,68 @@
+# @package _global_
+# Approche B : un modele YOLO-pose par ordre d'insecte (CONVENTIONS.md §9.2).
+# Memes folds que l'approche A, simplement restreints : c'est ce qui rend A et B
+# comparables. Le pipeline ne voit qu'une seule approche (ADR-0023).
+approach:
+  name: yolo_per_dataset
+  _target_: insectpose.approaches.yolo_per_dataset.YoloPerDatasetApproach
+
+  # ADR-0023 : chaque modele repart des POIDS DE BASE, pas du modele poule.
+  # A et B restent ainsi independantes ; la question posee est bien
+  # "un specialiste vaut-il un generaliste ?", pas "la specialisation apporte-t-elle
+  # quelque chose apres mutualisation ?".
+  weights: yolo11n-pose.pt
+  prunable: false
+
+  # --- inference ---
+  max_det: 1                    # ADR-0017 : une image = un insecte
+  conf: 0.001                   # seuil BAS : ne jamais tronquer les courbes AP (§3.4)
+  iou: 0.7
+  inference_precision: fp16
+  predict_chunk_size: 16        # ADR-0021 : inference bornee en memoire
+
+  # --- optimisation ---
+  optimizer: auto
+  lr0: 0.01
+  lrf: 0.01
+  momentum: 0.937
+  weight_decay: 0.0005
+  warmup_epochs: 3.0
+  cos_lr: false
+
+  # --- ponderation des pertes ---
+  box: 7.5
+  pose: 12.0
+  kobj: 1.0
+  cls: 0.5
+  dfl: 1.5
+
+  # --- augmentation ---
+  fliplr: 0.5
+  flipud: 0.0
+  degrees: 10.0
+  translate: 0.1
+  scale: 0.5
+  shear: 0.0
+  perspective: 0.0
+  hsv_h: 0.015
+  hsv_s: 0.7
+  hsv_v: 0.4
+  mosaic: 1.0
+  close_mosaic: 10
+  mixup: 0.0
+  erasing: 0.0
+
+  # ADR-0023 : les hyperparametres sont PARTAGES par les 4 modeles. Un trial d'Optuna
+  # les entraine tous, donc le budget d'HPO reste strictement egal a celui de A (§6.3).
+  # Une recherche independante par dataset quadruplerait le budget : B gagnerait par
+  # l'optimisation et non par la methode.
+  search_space:
+    lr0: {type: float, low: 1.0e-5, high: 1.0e-1, log: true}
+    lrf: {type: float, low: 1.0e-3, high: 0.5, log: true}
+    weight_decay: {type: float, low: 1.0e-5, high: 1.0e-2, log: true}
+    warmup_epochs: {type: float, low: 0.0, high: 5.0}
+    pose: {type: float, low: 4.0, high: 24.0}
+    box: {type: float, low: 2.0, high: 12.0}
+    degrees: {type: float, low: 0.0, high: 30.0}
+    scale: {type: float, low: 0.0, high: 0.7}
+    mosaic: {type: categorical, choices: [0.0, 1.0]}

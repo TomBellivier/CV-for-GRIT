@@ -67,8 +67,11 @@ def write_report(paths: ProjectPaths, cfg: Any) -> Path:
 
     Retourne le chemin du tableau principal.
     """
+    from insectpose.evaluation.aggregate import final_runs
+
     master = read_parquet(paths.master_results())
     metric = str(cfg.eval.primary_metric)
+    citable = final_runs(master)
 
     main_table = summary_table(master, metric)
     write_parquet(paths.results / "summary_primary.parquet", main_table)
@@ -92,16 +95,25 @@ def write_report(paths: ProjectPaths, cfg: Any) -> Path:
         paths.results / "report_meta.json",
         {
             "primary_metric": metric,
-            "n_runs": int(master["run_id"].nunique()),
-            "approaches": sorted(master["approach"].dropna().unique().tolist()),
+            "n_runs": int(citable["run_id"].nunique()),
+            "n_hpo_trial_runs_excluded": int(
+                master["run_id"].nunique() - citable["run_id"].nunique()
+            ),
+            "approaches": sorted(citable["approach"].dropna().unique().tolist()),
             "split_ids": sorted(master["split_id"].dropna().unique().tolist()),
             "eval_versions": sorted(master["eval_version"].dropna().unique().tolist()),
             "warning": (
-                "Les lignes avec bbox_source=gt (diagnostic) ne sont pas comparables "
-                "aux approches bout-en-bout."
+                "Rows with bbox_source=gt are diagnostic only and are not comparable "
+                "with end-to-end approaches."
             ),
         },
     )
-    log.info("Rapport : %d approches, %d runs.", master["approach"].nunique(),
-             master["run_id"].nunique())
+    if bool(cfg.report.figures):
+        from insectpose.reporting.figures import write_figures
+
+        write_figures(paths, cfg, master)
+
+    log.info("Rapport : %d approche(s), %d run(s) citables (%d trials d'HPO exclus).",
+             citable["approach"].nunique(), citable["run_id"].nunique(),
+             master["run_id"].nunique() - citable["run_id"].nunique())
     return paths.results / "summary_primary.parquet"

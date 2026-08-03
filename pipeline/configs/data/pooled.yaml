@@ -4,7 +4,7 @@
 # l'ecriture des predictions (CONVENTIONS.md §3.1).
 data:
   scope: pooled
-  datasets: [Coleoptera, Diptera, Hymenoptera, Lepidoptera]
+  datasets: [coleoptera, diptera, hymenoptera, lepidoptera]
   # ADR-0017 : une image = un insecte. Viole => erreur bloquante a la preparation.
   single_instance_per_image: true
   # ADR-0016 : certains keypoints n'existent pas chez tous les ordres d'insectes.

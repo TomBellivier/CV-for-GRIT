@@ -1,0 +1,5 @@
+path: /home/tombellivier/Documents/CV/CV-for-GRIT/pipeline/runs/detect_then_pose__pooled__kfold5_grouped_seed42_pooled__fold0__yolo26n__4935cf63/yolo_dataset/detector
+names:
+  0: insect
+train: images/train
+val: images/val

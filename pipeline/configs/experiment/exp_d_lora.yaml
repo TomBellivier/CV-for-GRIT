@@ -1,0 +1,10 @@
+# @package _global_
+defaults:
+  - override /data: pooled
+  - override /approach: lora
+  - override /cv: kfold5_grouped
+  - override /eval: default
+  - override /tuning: optuna_default
+
+tag: lora
+seed: 42

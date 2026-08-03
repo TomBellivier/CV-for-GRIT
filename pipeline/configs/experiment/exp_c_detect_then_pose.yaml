@@ -1,0 +1,11 @@
+# @package _global_
+# Experience C : detection poulee puis pose sur crop normalise.
+defaults:
+  - override /data: pooled
+  - override /approach: detect_then_pose
+  - override /cv: kfold5_grouped
+  - override /eval: default
+  - override /tuning: optuna_default
+
+tag: detect_then_pose
+seed: 42

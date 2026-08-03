@@ -132,7 +132,7 @@ def export_qualitative(run_dir: Path, gt: pd.DataFrame, pred: pd.DataFrame,
             for i in np.where(gt_vis)[0]:
                 draw.line([tuple(gt_kpts[i]), tuple(pred_kpts[i])], fill=_ERROR_COLOR, width=1)
 
-        detected = "" if row.pred_row >= 0 else " | NON DETECTE"
+        detected = "" if row.pred_row >= 0 else " | NOT DETECTED"
         label = f"{row.reason} | OKS={row.oks:.3f}{detected}"
         draw.text((4, 4), label, fill=(255, 255, 255))
 
@@ -145,7 +145,7 @@ def export_qualitative(run_dir: Path, gt: pd.DataFrame, pred: pd.DataFrame,
                       "reason": str(row.reason), "detected": bool(row.pred_row >= 0)})
 
     write_json(out_dir / "qualitative_index.json",
-               {"n_examples": len(index), "legend": {"gt": "vert", "prediction": "orange",
-                                                     "erreur": "rouge"}, "examples": index})
+               {"n_examples": len(index), "legend": {"gt": "green", "prediction": "orange",
+                                                     "error": "red"}, "examples": index})
     log.info("Export qualitatif : %d figure(s) dans %s", len(written), out_dir)
     return written

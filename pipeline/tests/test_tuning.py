@@ -82,3 +82,31 @@ def test_tune_once_reuses_one_search_for_all_folds(cfg, project) -> None:
     assert set(results["outer"]) == {1}
     for run_id in results["final_runs"].values():
         assert read_json(project.manifest(run_id))["hpo_source_fold"] == 1
+
+
+@pytest.mark.smoke
+def test_hpo_trials_are_excluded_from_results(cfg, project) -> None:
+    """Un run d'HPO a servi a CHOISIR des hyperparametres : ce n'est pas un resultat.
+
+    Il tourne sur un decoupage interne ; l'agreger avec les runs finaux melangerait
+    exploration et evaluation dans le meme tableau.
+    """
+    from insectpose.evaluation.aggregate import final_runs, summary_table, write_master
+    from insectpose.utils.io import read_parquet
+
+    OmegaConf.update(cfg, "tuning.n_trials", 2)
+    OmegaConf.update(cfg, "tuning.inner_folds", 2)
+    OmegaConf.update(cfg, "tuning.mode", "tune_once")
+    pipeline.cmd_split(cfg)
+    pipeline.cmd_tune(cfg)
+
+    master = read_parquet(write_master(project))
+    assert set(master["role_in_protocol"]) == {"final", "hpo_trial"}
+    citable = final_runs(master)
+    assert citable["run_id"].nunique() < master["run_id"].nunique()
+    # Les runs citables sont ceux du decoupage EXTERNE
+    assert citable["split_id"].nunique() == 1
+    assert "__outer" not in citable["split_id"].iloc[0]
+
+    summary = summary_table(master, str(cfg.eval.primary_metric))
+    assert summary["n_folds"].iloc[0] == int(cfg.cv.n_folds)

@@ -1,0 +1,11 @@
+# @package _global_
+# Experience B : un modele YOLO-pose par ordre d'insecte, memes folds que l'experience A.
+defaults:
+  - override /data: pooled
+  - override /approach: yolo_per_dataset
+  - override /cv: kfold5_grouped
+  - override /eval: default
+  - override /tuning: optuna_default
+
+tag: per_dataset_yolo
+seed: 42

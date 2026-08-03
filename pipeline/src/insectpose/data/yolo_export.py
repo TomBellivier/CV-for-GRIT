@@ -38,7 +38,7 @@ def flat_name(image_id: str) -> str:
 
 
 def to_label_lines(instances: pd.DataFrame, width: int, height: int,
-                   n_keypoints: int) -> tuple[list[str], int]:
+                   n_keypoints: int, with_keypoints: bool = True) -> tuple[list[str], int]:
     """Lignes de label YOLO d'une image. Retourne (lignes, nb de valeurs rognees).
 
     Les coordonnees hors image sont rognees dans [0, 1] (contrainte du format) et le
@@ -68,8 +68,9 @@ def to_label_lines(instances: pd.DataFrame, width: int, height: int,
         norm[vis == 0] = 0.0
 
         values = [0, *box.tolist()]
-        for (px, py), v in zip(norm, vis, strict=True):
-            values.extend([px, py, int(v)])
+        if with_keypoints:
+            for (px, py), v in zip(norm, vis, strict=True):
+                values.extend([px, py, int(v)])
         lines.append(" ".join(
             str(v) if isinstance(v, int) else f"{v:.6f}" for v in values
         ))
@@ -96,11 +97,13 @@ def parse_label_line(line: str, width: int, height: int) -> dict[str, Any]:
 
 
 def export_split(image_set: Any, schema: KeypointSchema, root: Path, split: str,
-                 link_images: bool = True) -> int:
+                 link_images: bool = True, with_keypoints: bool = True) -> int:
     """Ecrit images/<split>/ et labels/<split>/ pour un ImageSet.
 
-    Effet de bord : cree des liens symboliques (ou des copies) vers les images et
-    ecrit un fichier .txt par image. Retourne le nombre d'images exportees.
+    Les images sont liees telles quelles : le format canonique reste la seule source
+    de verite et les coordonnees ne subissent aucune transformation d'echelle.
+
+    Effet de bord : cree images/ et labels/ sous `root`. Retourne le nombre d'images.
     """
     img_dir = root / "images" / split
     lbl_dir = root / "labels" / split
@@ -114,16 +117,17 @@ def export_split(image_set: Any, schema: KeypointSchema, root: Path, split: str,
         source = image_set.absolute_path(meta.image_path)
         target = img_dir / f"{flat_name(image_id)}{Path(str(meta.image_path)).suffix}"
         if not target.exists():
-            if link_images and source.exists():
-                target.symlink_to(source)
-            elif source.exists():
-                target.write_bytes(source.read_bytes())
-            else:
+            if not source.exists():
                 raise FileNotFoundError(
                     f"Image absente : {source}. L'export YOLO exige les images reelles."
                 )
+            if link_images:
+                target.symlink_to(source)
+            else:
+                target.write_bytes(source.read_bytes())
         lines, clipped = to_label_lines(
-            group, int(meta.image_width), int(meta.image_height), schema.n_keypoints
+            group, int(meta.image_width), int(meta.image_height), schema.n_keypoints,
+            with_keypoints=with_keypoints,
         )
         total_clipped += clipped
         (lbl_dir / f"{flat_name(image_id)}.txt").write_text("\n".join(lines) + "\n",
@@ -134,20 +138,19 @@ def export_split(image_set: Any, schema: KeypointSchema, root: Path, split: str,
     return len(images)
 
 
-def write_data_yaml(root: Path, schema: KeypointSchema, splits: dict[str, str]) -> Path:
+def write_data_yaml(root: Path, schema: KeypointSchema, splits: dict[str, str],
+                    with_keypoints: bool = True) -> Path:
     """Ecrit le data.yaml d'Ultralytics. Effet de bord : cree <root>/data.yaml.
 
     `flip_idx` est OBLIGATOIRE des lors qu'une augmentation par miroir est active :
     sans lui, un miroir echange les cotes gauche/droite sans permuter les labels et
     l'entrainement apprend une anatomie fausse (§3.1).
     """
-    payload = {
-        "path": str(root.resolve()),
-        "names": CLASS_NAMES,
-        "kpt_shape": [schema.n_keypoints, 3],
-        "flip_idx": list(schema.flip_index),
-        **{split: f"images/{name}" for split, name in splits.items()},
-    }
+    payload: dict[str, Any] = {"path": str(root.resolve()), "names": CLASS_NAMES}
+    if with_keypoints:
+        payload["kpt_shape"] = [schema.n_keypoints, 3]
+        payload["flip_idx"] = list(schema.flip_index)
+    payload.update({split: f"images/{name}" for split, name in splits.items()})
     out = root / "data.yaml"
     out.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
     return out
@@ -155,13 +158,13 @@ def write_data_yaml(root: Path, schema: KeypointSchema, splits: dict[str, str]) 
 
 def export_fold(data: Any, schema: KeypointSchema, root: Path,
                 splits: tuple[str, ...] = ("train", "val"),
-                link_images: bool = True) -> Path:
+                link_images: bool = True, with_keypoints: bool = True) -> Path:
     """Exporte un FoldData au format YOLO et retourne le chemin du data.yaml.
 
     Effet de bord : cree l'arborescence YOLO sous `root`.
     """
     root.mkdir(parents=True, exist_ok=True)
     for split in splits:
-        n = export_split(data.role(split), schema, root, split, link_images)
+        n = export_split(data.role(split), schema, root, split, link_images, with_keypoints)
         log.info("Export YOLO [%s] : %d images -> %s", split, n, root / "images" / split)
-    return write_data_yaml(root, schema, {s: s for s in splits})
+    return write_data_yaml(root, schema, {s: s for s in splits}, with_keypoints)

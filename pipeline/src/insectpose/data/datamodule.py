@@ -64,6 +64,16 @@ class ImageSet:
             )
         return self.schemas[schema_name]
 
+    def filter_dataset(self, dataset: str) -> ImageSet:
+        """Sous-ensemble restreint a un dataset, memes schemas et memes chemins.
+
+        Utilise par les approches par dataset (§9.2) : elles reutilisent les MEMES
+        folds que les approches poulees, simplement restreints (§6.2).
+        """
+        sub = self.annotations[self.annotations["dataset"] == dataset]
+        return ImageSet(name=self.name, annotations=sub.reset_index(drop=True),
+                        paths=self.paths, schemas=self.schemas)
+
     def instances_array(self) -> dict[str, np.ndarray]:
         """Vue tableau des instances : kpts (N,K,2), vis (N,K), bbox (N,4).
 
@@ -102,6 +112,16 @@ class FoldData:
         if name not in ("train", "val", "test"):
             raise ContractError(f"Role inconnu : {name}")
         return getattr(self, name)  # type: ignore[no-any-return]
+
+    def filter_dataset(self, dataset: str) -> FoldData:
+        """Fold restreint a un dataset, sans regenerer aucun decoupage (§6.2)."""
+        return FoldData(
+            split_id=self.split_id, fold=self.fold,
+            train=self.train.filter_dataset(dataset),
+            val=self.val.filter_dataset(dataset),
+            test=self.test.filter_dataset(dataset),
+            schemas=self.schemas,
+        )
 
     def summary(self) -> dict[str, Any]:
         """Comptages, a journaliser au demarrage de chaque run."""

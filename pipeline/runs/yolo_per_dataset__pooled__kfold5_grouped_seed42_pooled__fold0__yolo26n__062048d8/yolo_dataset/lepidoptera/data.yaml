@@ -1,0 +1,51 @@
+path: /home/tombellivier/Documents/CV/CV-for-GRIT/pipeline/runs/yolo_per_dataset__pooled__kfold5_grouped_seed42_pooled__fold0__yolo26n__062048d8/yolo_dataset/lepidoptera
+names:
+  0: insect
+kpt_shape:
+- 42
+- 3
+flip_idx:
+- 0
+- 2
+- 1
+- 4
+- 3
+- 5
+- 7
+- 6
+- 8
+- 10
+- 9
+- 11
+- 15
+- 16
+- 17
+- 12
+- 13
+- 14
+- 22
+- 23
+- 24
+- 25
+- 18
+- 19
+- 20
+- 21
+- 30
+- 31
+- 32
+- 33
+- 26
+- 27
+- 28
+- 29
+- 38
+- 39
+- 40
+- 41
+- 34
+- 35
+- 36
+- 37
+train: images/train
+val: images/val

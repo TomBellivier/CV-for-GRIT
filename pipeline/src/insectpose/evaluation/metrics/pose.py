@@ -86,6 +86,7 @@ class _Block:
     dist: np.ndarray      # (N_gt, K) - +inf pour une instance GT non appariee
     valid: np.ndarray     # (N_gt, K) - keypoints annotes (vis > 0)
     fallback: np.ndarray  # (N_gt,) - echelle de reference remplacee par le repli
+    conf: np.ndarray      # (N_gt, K) - confiance predite, NaN si non appariee
 
 
 def _pointwise(bundle: EvalBundle, pairs: list) -> list[_Block]:
@@ -96,7 +97,7 @@ def _pointwise(bundle: EvalBundle, pairs: list) -> list[_Block]:
     """
     thr = float(bundle.cfg.match_oks_threshold)
     score_thr = float(bundle.cfg.score_threshold_pointwise)
-    acc: dict[tuple[str, str], list[tuple[np.ndarray, np.ndarray, np.ndarray]]] = {}
+    acc: dict[tuple[str, str], list[tuple[np.ndarray, ...]]] = {}
 
     for p in pairs:
         if p.n_gt == 0:
@@ -111,24 +112,28 @@ def _pointwise(bundle: EvalBundle, pairs: list) -> list[_Block]:
             bundle.cfg.pck.normalizer, bundle.schemas[schema_name], gt_kpts, gt_vis > 0, gt_bbox
         )
         d = np.full((p.n_gt, gt_kpts.shape[1]), np.inf, dtype=float)
+        conf = np.full_like(d, np.nan)
 
         if p.n_pred:
             keep = p.scores >= score_thr
             sim = np.where(keep[:, None], p.oks, -1.0)
             matched, _ = assign_greedy(sim, p.scores, thr)
             pred_kpts = bundle.pred_array("kpts_xy", p.pred_rows).reshape(p.n_pred, -1, 2)
+            pred_conf = bundle.pred_array("kpts_score", p.pred_rows)
             for pi, gi in enumerate(matched):
                 if gi >= 0:
                     d[gi] = np.linalg.norm(pred_kpts[pi] - gt_kpts[gi], axis=-1) / max(
                         norm[gi], 1e-9
                     )
-        acc.setdefault((schema_name, p.dataset), []).append((d, gt_vis > 0, fell_back))
+                    conf[gi] = pred_conf[pi]
+        acc.setdefault((schema_name, p.dataset), []).append((d, gt_vis > 0, fell_back, conf))
 
     return [
         _Block(schema=schema, dataset=dataset,
                dist=np.concatenate([b[0] for b in blocks]),
                valid=np.concatenate([b[1] for b in blocks]),
-               fallback=np.concatenate([b[2] for b in blocks]))
+               fallback=np.concatenate([b[2] for b in blocks]),
+               conf=np.concatenate([b[3] for b in blocks]))
         for (schema, dataset), blocks in acc.items()
     ]
 
@@ -180,7 +185,11 @@ def nme(bundle: EvalBundle) -> list[dict[str, Any]]:
 
 @register_metric("keypoint_rate")
 def keypoint_rate(bundle: EvalBundle) -> list[dict[str, Any]]:
-    """PCK par keypoint : identifie les points systematiquement rates (§8.3)."""
+    """Detail par keypoint : PCK, erreur normalisee et confiance predite.
+
+    La confiance et l'erreur sont publiees par point car leur relation dit si la
+    confiance du modele est exploitable comme filtre en production (§8.3).
+    """
     if not bool(bundle.cfg.scopes.per_keypoint):
         return []
     alpha = float(bundle.cfg.pck.reference_alpha)
@@ -192,9 +201,16 @@ def keypoint_rate(bundle: EvalBundle) -> list[dict[str, Any]]:
             v = block.valid[:, k]
             if not v.any():
                 continue
-            ok = int((block.dist[v, k] <= alpha).sum())
-            out.append(
-                record(f"keypoint:{block.dataset}:{name}", f"pck@{alpha:g}_{normalizer}",
-                       ok / int(v.sum()), int(v.sum()))
-            )
+            scope = f"keypoint:{block.dataset}:{name}"
+            n = int(v.sum())
+            dist = block.dist[v, k]
+            out.append(record(scope, f"pck@{alpha:g}_{normalizer}",
+                              float((dist <= alpha).sum()) / n, n))
+            finite = np.isfinite(dist)
+            if finite.any():
+                out.append(record(scope, "nme", float(dist[finite].mean()), int(finite.sum())))
+            conf = block.conf[v, k]
+            conf = conf[np.isfinite(conf)]
+            if conf.size:
+                out.append(record(scope, "kpt_conf_mean", float(conf.mean()), int(conf.size)))
     return out

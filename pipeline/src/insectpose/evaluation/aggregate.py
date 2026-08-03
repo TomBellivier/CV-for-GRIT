@@ -40,6 +40,9 @@ def collect_runs(paths: ProjectPaths) -> pd.DataFrame:
         metrics = read_parquet(metrics_path)
         for field in _MANIFEST_FIELDS:
             metrics[field] = manifest.get(field)
+        # Un run d'HPO n'est PAS un resultat : il a servi a choisir des hyperparametres,
+        # sur un decoupage interne. L'agreger avec les runs finaux fausserait le rapport.
+        metrics["role_in_protocol"] = manifest.get("role_in_protocol", "final")
         metrics["trial_number"] = manifest.get("trial_number")
         metrics["optuna_study"] = manifest.get("optuna_study")
         metrics["git_commit"] = (manifest.get("git") or {}).get("commit")
@@ -57,6 +60,13 @@ def collect_runs(paths: ProjectPaths) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
+def final_runs(master: pd.DataFrame) -> pd.DataFrame:
+    """Runs citables : hors trials d'HPO (§6.3, §8.3)."""
+    if "role_in_protocol" not in master.columns:
+        return master
+    return master[master["role_in_protocol"].fillna("final") == "final"]
+
+
 def write_master(paths: ProjectPaths) -> Path:
     """Ecrit results/master.parquet. Effet de bord : ecrit ce fichier."""
     table = collect_runs(paths)
@@ -64,7 +74,11 @@ def write_master(paths: ProjectPaths) -> Path:
         raise FileNotFoundError(
             f"Aucun run complet dans {paths.runs}. Lancer au moins un 'train' avant 'report'."
         )
-    _warn_on_incomparable(table)
+    trials = len(table) - len(final_runs(table))
+    if trials:
+        log.info("%d ligne(s) de trials d'HPO conservees dans master.parquet pour audit, "
+                 "mais exclues des tableaux de resultats.", trials)
+    _warn_on_incomparable(final_runs(table))
     return write_parquet(paths.master_results(), table)
 
 
@@ -83,8 +97,9 @@ def _warn_on_incomparable(table: pd.DataFrame) -> None:
 
 
 def fold_table(master: pd.DataFrame, metric: str, scope: str = "overall",
-               split: str = "test") -> pd.DataFrame:
+               split: str = "test", include_trials: bool = False) -> pd.DataFrame:
     """Tableau approche x fold pour une metrique : base des tests apparies (§8.3)."""
+    master = master if include_trials else final_runs(master)
     sel = master[
         (master["metric"] == metric) & (master["scope"] == scope) & (master["split"] == split)
     ]
@@ -92,8 +107,9 @@ def fold_table(master: pd.DataFrame, metric: str, scope: str = "overall",
 
 
 def summary_table(master: pd.DataFrame, metric: str, scope: str = "overall",
-                  split: str = "test") -> pd.DataFrame:
+                  split: str = "test", include_trials: bool = False) -> pd.DataFrame:
     """Moyenne, ecart-type et n inter-folds par approche (§6.2)."""
+    master = master if include_trials else final_runs(master)
     sel = master[
         (master["metric"] == metric) & (master["scope"] == scope) & (master["split"] == split)
     ]
