@@ -4,6 +4,7 @@
 *.log
 *.json
 *.pkl
+*.parquet
 
 models/datasets
 
@@ -29,3 +30,5 @@ models/**/images/
 models/optimization/runs
 models/optimization/wandb
 models/optimization/Optuna
+
+pipeline/runs
