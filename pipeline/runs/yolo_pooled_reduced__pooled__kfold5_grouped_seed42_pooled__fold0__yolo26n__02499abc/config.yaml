@@ -1,0 +1,214 @@
+paths:
+  root: .
+  data: ./data
+  raw: ./data/raw
+  interim: ./data/interim
+  processed: ./data/processed
+  splits: ./data/splits
+  runs: ./runs
+  results: ./results
+  reports: ./reports
+  configs: ./configs
+data:
+  scope: pooled
+  datasets:
+  - coleoptera
+  - diptera
+  - hymenoptera
+  - lepidoptera
+  single_instance_per_image: true
+  coverage:
+    absent_max: 0.01
+    rare_max: 0.5
+    measurement_min_rate: 0.5
+  adapter: yolo
+  raw_subdir: null
+  keypoint_schema: insect42_v1
+  union_space: insect42_v1
+  adapter_options:
+    annotations_glob: '*.json'
+    images_subdir: images
+    group_id_field: null
+cv:
+  name: kfold5_grouped
+  strategy: stratified_group_kfold
+  n_folds: 5
+  group_by: group_id
+  stratify_by: dataset
+  val_fraction: 0.15
+  seed: 42
+eval:
+  version: 3
+  primary_metric: oks_ap
+  primary_direction: maximize
+  score_threshold_curves: 0.001
+  score_threshold_pointwise: 0.5
+  match_oks_threshold: 0.5
+  match_iou_threshold: 0.5
+  metrics:
+  - detection_ap
+  - oks_ap_ar
+  - pck
+  - nme
+  - keypoint_rate
+  - measurement_error
+  - symmetry_gap
+  - cost
+  oks:
+    thresholds:
+    - 0.5
+    - 0.55
+    - 0.6
+    - 0.65
+    - 0.7
+    - 0.75
+    - 0.8
+    - 0.85
+    - 0.9
+    - 0.95
+    area_source: bbox
+  pck:
+    alphas:
+    - 0.05
+    - 0.1
+    - 0.15
+    - 0.2
+    - 0.25
+    - 0.3
+    - 0.4
+    - 0.5
+    reference_alpha: 0.25
+    normalizer:
+      name: thorax_width
+      type: keypoint_distance
+      keypoints:
+      - thorax-left
+      - thorax-right
+      fallback: bbox_diag
+  measurements:
+    enabled: true
+    file: ./configs/measurements/insect42_v1.yaml
+    symmetry: true
+  scopes:
+    overall: true
+    per_dataset: true
+    per_keypoint: true
+  count_missed_gt_as_failure: true
+  qualitative:
+    enabled: true
+    n_examples: 12
+    n_worst: 6
+    split: test
+    allow_missing_images: false
+tuning:
+  mode: nested
+  n_trials: 40
+  timeout_s: null
+  inner_folds: 3
+  tuning_outer_fold: 0
+  sampler: tpe
+  pruner: median
+  pruner_warmup_steps: 5
+  storage: sqlite
+  load_if_exists: true
+  seed: 42
+approach:
+  name: yolo_pooled_reduced
+  _target_: insectpose.approaches.yolo_reduced.YoloPooledReducedApproach
+  weights: yolo26n-pose.pt
+  prunable: false
+  drop_keypoints:
+  - leg
+  - hindwing
+  max_det: 1
+  conf: 0.001
+  iou: 0.7
+  inference_precision: fp16
+  predict_chunk_size: 16
+  optimizer: auto
+  lr0: 0.01
+  lrf: 0.01
+  momentum: 0.937
+  weight_decay: 0.0005
+  warmup_epochs: 3.0
+  box: 7.5
+  pose: 12.0
+  kobj: 1.0
+  cls: 0.5
+  dfl: 1.5
+  fliplr: 0.5
+  degrees: 10.0
+  translate: 0.1
+  scale: 0.5
+  mosaic: 1.0
+  close_mosaic: 10
+  hsv_h: 0.015
+  hsv_s: 0.7
+  hsv_v: 0.4
+  search_space:
+    lr0:
+      type: float
+      low: 1.0e-05
+      high: 0.1
+      log: true
+    lrf:
+      type: float
+      low: 0.001
+      high: 0.5
+      log: true
+    weight_decay:
+      type: float
+      low: 1.0e-05
+      high: 0.01
+      log: true
+    warmup_epochs:
+      type: float
+      low: 0.0
+      high: 5.0
+    pose:
+      type: float
+      low: 4.0
+      high: 24.0
+    box:
+      type: float
+      low: 2.0
+      high: 12.0
+    degrees:
+      type: float
+      low: 0.0
+      high: 30.0
+    scale:
+      type: float
+      low: 0.0
+      high: 0.7
+tag: yolo26n
+force: false
+mode: full
+seed: 42
+split_id: kfold5_grouped_seed42_pooled
+fold: 0
+protocol:
+  image_size:
+  - 640
+  - 640
+train:
+  epochs: 100
+  batch_size: -1
+  num_workers: 4
+  image_size:
+  - 640
+  - 640
+  early_stopping_patience: 20
+  device: auto
+  amp: true
+  cache: false
+  plots: false
+report:
+  figures: true
+  dpi: 150
+  split: test
+strict:
+  require_validated_keypoints: true
+  enforce_common_image_size: true
+  require_clean_git: false
+  validate_contracts: true

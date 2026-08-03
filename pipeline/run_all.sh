@@ -34,9 +34,10 @@
 # # 5. protocole complet : HPO nichée puis réentraînement des 5 folds externes
 # python -m insectpose.cli tune experiment=exp_a_yolo_pooled
 
+python -m insectpose.cli train experiment=exp_f_yolo_reduced cv.fold=0 approach.weights=yolo26n-pose.pt tag=yolo26n
+
 python -m insectpose.cli train experiment=exp_d_lora cv.fold=0 approach.weights=yolo26n-pose.pt tag=yolo26n
 python -m insectpose.cli train experiment=exp_e_group_bn cv.fold=0 approach.weights=yolo26n-pose.pt tag=yolo26n
-python -m insectpose.cli train experiment=exp_f_yolo_reduced cv.fold=0 approach.weights=yolo26n-pose.pt tag=yolo26n
 
 
 # 6. agrégation + tableaux

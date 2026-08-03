@@ -28,7 +28,7 @@ from insectpose.training.patching import (
     freeze_patterns_for,
     head_index,
     make_patched_trainer,
-    match_module_names,
+    match_conv_targets,
     parameter_report,
     pose_trainer_class,
 )
@@ -98,17 +98,31 @@ class LoraApproach(YoloPooledApproach):
         Le motif est calcule depuis la STRUCTURE du modele, pas ecrit en dur : un
         changement de taille de reseau (n/s/m/l) decale les index de blocs.
         """
+        import torch
+
         names = [name for name, _ in model.named_modules()]
         last = head_index(names)
         depth = int(self.cfg.approach.lora.neck_blocks)
         blocks = "|".join(str(i) for i in range(max(last - depth, 0), last))
         pattern = rf"^model\.({blocks})\..*\bconv$"
-        targets = match_module_names(names, [pattern])
+
+        convolutions = [
+            (name, int(getattr(module, "groups", 1)))
+            for name, module in model.named_modules()
+            if isinstance(module, torch.nn.Conv2d)
+        ]
+        targets, skipped = match_conv_targets(convolutions, [pattern])
+        if skipped:
+            log.info("%d convolution(s) groupee(s) (depthwise) ecartee(s) : peft exige un "
+                     "rang divisible par `groups`, pour un gain nul.", len(skipped))
         if not targets:
             raise RuntimeError(
-                f"Aucune convolution cible pour LoRA (motif '{pattern}'). Verifier "
-                "approach.lora.neck_blocks ou la structure du modele."
+                f"Aucune convolution adaptable pour LoRA (motif '{pattern}', "
+                f"{len(skipped)} depthwise ecartee(s)). Augmenter "
+                "approach.lora.neck_blocks pour remonter vers des blocs contenant des "
+                "convolutions standard."
             )
+        self._lora_skipped = skipped
         return targets
 
     def _apply_lora(self, model: Any) -> None:
@@ -179,5 +193,6 @@ class LoraApproach(YoloPooledApproach):
         ctx.extra.update({f"lora_{k}": v for k, v in report.items()})
         ctx.extra["lora_rank"] = int(self.cfg.approach.lora.r)
         ctx.extra["lora_targets"] = getattr(self, "_lora_targets", [])
+        ctx.extra["lora_skipped_grouped"] = len(getattr(self, "_lora_skipped", []))
         if self.model is not None:
             ctx.extra["lora_final_report"] = parameter_report(self.model.model)

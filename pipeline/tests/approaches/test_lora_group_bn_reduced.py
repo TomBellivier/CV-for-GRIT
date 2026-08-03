@@ -452,3 +452,36 @@ def test_unknown_module_attribute_still_raises() -> None:
     attribute = "inexistant"   # nom variable : sinon ruff exige l'acces direct
     with pytest.raises(AttributeError, match="inexistant"):
         getattr(module, attribute)
+
+
+# ===========================================================================
+# Convolutions groupees (approche D)
+# ===========================================================================
+CONVOLUTIONS = [
+    ("model.0.conv", 1),
+    ("model.20.cv1.conv", 1),
+    ("model.20.cv2.conv", 128),      # depthwise : peft exige rang % groups == 0
+    ("model.21.conv", 1),
+    ("model.22.conv", 256),          # depthwise
+    ("model.23.cv4.0.0.conv", 1),    # tete
+]
+
+
+def test_grouped_convolutions_are_excluded_from_lora_targets() -> None:
+    """Regression : peft refuse une depthwise si le rang n'est pas divisible par groups."""
+    from insectpose.training.patching import match_conv_targets
+
+    kept, skipped = match_conv_targets(CONVOLUTIONS, [r"^model\.(20|21|22)\..*\bconv$"])
+    assert kept == ["model.20.cv1.conv", "model.21.conv"]
+    assert skipped == ["model.20.cv2.conv", "model.22.conv"]
+    assert "model.0.conv" not in kept + skipped        # hors motif
+    assert "model.23.cv4.0.0.conv" not in kept         # la tete n'est pas adaptee
+
+
+def test_all_grouped_targets_leaves_nothing_to_adapt() -> None:
+    """Le cas doit etre detectable : sinon l'entrainement n'adapterait rien."""
+    from insectpose.training.patching import match_conv_targets
+
+    kept, skipped = match_conv_targets([("model.22.conv", 256)], [r"^model\.22\."])
+    assert kept == []
+    assert len(skipped) == 1

@@ -48,6 +48,29 @@ def match_module_names(names: Iterable[str], patterns: Iterable[str]) -> list[st
     return [name for name in names if any(c.search(name) for c in compiled)]
 
 
+def match_conv_targets(convolutions: Iterable[tuple[str, int]],
+                       patterns: Iterable[str]) -> tuple[list[str], list[str]]:
+    """Convolutions adaptables par LoRA parmi celles correspondant aux motifs.
+
+    Retourne (retenues, ecartees). Une convolution GROUPEE (depthwise, `groups > 1`)
+    est ecartee : peft exige alors un rang divisible par `groups`, ce qui imposerait un
+    rang de plusieurs dizaines pour un gain nul — une depthwise ne porte qu'une poignee
+    de parametres. Les architectures YOLO en contiennent dans le cou, d'ou la necessite
+    de ce filtre.
+
+    Fonction pure : c'est elle qui decide ou vont les adaptateurs, donc elle qu'il faut
+    tester.
+    """
+    compiled = [re.compile(p) for p in patterns]
+    kept: list[str] = []
+    skipped: list[str] = []
+    for name, groups in convolutions:
+        if not any(c.search(name) for c in compiled):
+            continue
+        (kept if int(groups) == 1 else skipped).append(name)
+    return kept, skipped
+
+
 def head_index(names: Iterable[str]) -> int:
     """Index du dernier bloc de `model.<i>` : la tete de detection/pose.
 
