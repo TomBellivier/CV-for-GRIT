@@ -76,13 +76,12 @@ def detect_scale(img_bgr: np.ndarray, scale_bar_model: YOLO | None) -> ScaleResu
     # ---- 2. ruler fallback ---------------------------------------------------
     if config.USE_RULER_FALLBACK and img_bgr is not None:
         img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-        px_per_mm, line, group_magnitudes = detect_ruler_from_rgb(
+        px_per_mm, line, conf = detect_ruler_from_rgb(
             img_rgb, ratio=config.RULER_RATIO
         )
         if px_per_mm is not None:
-            conf = confidence.ruler_confidence(group_magnitudes)
             info = (f"Ruler: {px_per_mm:.2f} px/mm at line {line}  "
-                    f"[{len(group_magnitudes)} group(s), conf={conf:.3f}]")
+                    f"[conf={conf:.3f}]")
             return ScaleResult(px_per_mm, "ruler", conf, info)
 
     # ---- 3. nothing worked ---------------------------------------------------

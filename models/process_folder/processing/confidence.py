@@ -176,53 +176,7 @@ def scale_bar_confidence(bar_box_conf: float,
 
 
 # ========================================================================== #
-# 3'. SCALE -- ruler confidence (Fourier groups)
-# ========================================================================== #
-def ruler_confidence(group_magnitudes) -> float:
-    """Confidence of a scale read from a ruler via the Fourier analysis.
-
-    The ruler detector groups image rows by their dominant spatial frequency.
-    `group_magnitudes` is the list of the groups' mean FFT magnitudes, ordered
-    so that index 0 is the MAIN group (the one used to compute px/mm) and the
-    following ones are the (up to 4) secondary groups.
-
-    Rule (as requested)
-    -------------------
-    - A single group detected  -> confidence = 1
-      (nothing competes with the ruler frequency, so it is unambiguous).
-    - Several groups detected   -> mean relative magnitude gap between the main
-      group and the n secondary groups:
-
-            confidence = (1/n) * sum_i  |M0 - Mi| / M0        for i = 1 .. n
-
-      A confidence close to 1 means the main group dominates (its magnitude is
-      far above the competitors), i.e. the detected frequency is clearly the
-      ruler. A confidence close to 0 means a secondary group is almost as strong
-      as the main one, i.e. the reading is ambiguous.
-
-    The result is clamped to [0, 1] because a secondary group could, in rare
-    cases, have a higher mean magnitude than the (most-populated) main group,
-    which would otherwise push a term above 1.
-    """
-    m = np.asarray(list(group_magnitudes), dtype=float)
-    if m.size == 0:
-        return math.nan
-    if m.size == 1:
-        return 1.0
-
-    m0 = m[0]
-    if m0 <= 0:
-        return math.nan
-
-    secondaries = m[1:]
-    n = secondaries.size
-    rel_gaps = np.abs(m0 - secondaries) / m0
-    conf = float(np.sum(rel_gaps) / n)
-    return float(min(1.0, max(0.0, conf)))
-
-
-# ========================================================================== #
-# 4. CONVERSION -- confidence of a millimetre measurement
+# 3. CONVERSION -- confidence of a millimetre measurement
 # ========================================================================== #
 def converted_measurement_confidence(measurement_conf: float,
                                      scale_conf: float,

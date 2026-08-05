@@ -37,6 +37,12 @@ Always (these columns are always in the CSV):
 Only if the matching OPTIONAL column was enabled in config before the run:
     hist_detection_confidence.png            needs OPTIONAL_COLUMNS["detection_confidence"]
     scale_type_pct.png                       needs OPTIONAL_COLUMNS["scale_method"]
+    scale_method_confusion_matrix.png        needs OPTIONAL_COLUMNS["scale_method"]
+                                             AND the manual annotation JSON
+                                             (--annotations, default
+                                             annotations.json): per-class
+                                             correct-classification rate over
+                                             the annotated images only
 
 Ground-truth error analysis (only if the YOLO label files are found under the
 datasets root; labels are datasets/<dataset>/labels/<split>/<stem>.txt):
@@ -64,6 +70,7 @@ per-keypoint figures would mean adding keypoint-confidence columns to the export
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import os
 from pathlib import Path
@@ -268,6 +275,139 @@ def fig_scale_type(df, output_dir):
         ax.text(i, val + 1, f"{val:.1f}%", ha="center", fontsize=10)
     save(fig, output_dir, "scale_type_pct.png")
     return pct.to_dict()
+
+
+# --------------------------------------------------------------------------- #
+# Scale method vs manual annotations (confusion matrix)
+# --------------------------------------------------------------------------- #
+# annotate_gui.py writes {image path: int}; 0 = nothing, 1 = scale bar, 2 = ruler.
+ANNOTATION_CLASSES = {0: "none", 1: "scale_bar", 2: "ruler"}
+
+# Everything the pipeline may write in 'scale_method', folded onto those 3 names.
+SCALE_METHOD_ALIASES = {
+    "": "none", "none": "none", "nan": "none", "no_scale": "none", "unknown": "none",
+    "scale_bar": "scale_bar", "scalebar": "scale_bar", "scale bar": "scale_bar",
+    "ruler": "ruler", "regle": "ruler", "règle": "ruler",
+}
+
+
+def load_scale_annotations(path) -> dict[str, str]:
+    """{image base name (lowercase) -> class name} read from the annotation JSON.
+
+    The JSON is keyed by full image path while the CSV only stores the file
+    name, so the join is done on the base name. Base names appearing several
+    times in the JSON with conflicting labels are dropped: they cannot be
+    matched to a CSV row without ambiguity.
+    """
+    path = Path(path)
+    if not path.is_file():
+        return {}
+    with open(path, "r", encoding="utf-8") as f:
+        raw = json.load(f)
+
+    truth: dict[str, str] = {}
+    conflicts: set[str] = set()
+    for img_path, label in raw.items():
+        # replace() so Windows-style keys still split correctly when run on Linux
+        name = Path(str(img_path).replace("\\", "/")).name.lower()
+        cls = ANNOTATION_CLASSES.get(int(label))
+        if cls is None:
+            continue
+        if name in truth and truth[name] != cls:
+            conflicts.add(name)
+        truth[name] = cls
+
+    for name in conflicts:
+        truth.pop(name, None)
+    if conflicts:
+        print(f"[gt-scale] {len(conflicts)} base name(s) annotated twice with "
+              f"different classes -> dropped (ambiguous match).")
+    return truth
+
+
+def fig_scale_method_confusion(df, output_dir, annotations_path):
+    """Confusion matrix of 'scale_method' against the manual annotations.
+
+    Only the CSV rows whose image is present in the annotation JSON are used;
+    the rest of the CSV is ignored. Cells are row-normalised, so the diagonal
+    reads directly as the per-class correct-classification rate (recall).
+    """
+    if "scale_method" not in df.columns or "image_name" not in df.columns:
+        return None
+    truth_by_name = load_scale_annotations(annotations_path)
+    if not truth_by_name:
+        print(f"[gt-scale] no usable annotations in {annotations_path} "
+              f"-> confusion matrix skipped.")
+        return None
+
+    key = df["image_name"].astype(str).map(
+        lambda s: Path(s.replace("\\", "/")).name.lower())
+    truth = key.map(truth_by_name)
+    pred = (df["scale_method"].fillna("none").astype(str).str.strip().str.lower()
+            .map(lambda v: SCALE_METHOD_ALIASES.get(v, v)))
+
+    matched = truth.notna()
+    truth, pred = truth[matched], pred[matched]
+    n = int(matched.sum())
+    print(f"[gt-scale] {len(truth_by_name)} annotated images, "
+          f"{n} matched in the CSV.")
+    if n == 0:
+        print("[gt-scale] no annotated image found in the CSV "
+              "-> confusion matrix skipped (check the image names).")
+        return None
+
+    # get the three first encountered example for each class pair (truth, pred) for the summary
+    example_names = {"none" : {"none" : [], "scale_bar": [], "ruler": []}, 
+                     "scale_bar": {"none" : [], "scale_bar": [], "ruler": []}, 
+                     "ruler": {"none" : [], "scale_bar": [], "ruler": []}}
+
+    rows = ["none", "scale_bar", "ruler"]
+    # any unexpected value in scale_method gets its own column instead of being
+    # silently folded into 'none'
+    extra = sorted(set(pred) - set(rows))
+    cols = rows + extra
+    if extra:
+        print(f"[gt-scale] unexpected scale_method value(s): {', '.join(extra)}")
+
+    cm = np.zeros((len(rows), len(cols)), dtype=int)
+    for t, p in zip(truth, pred):
+        if len(example_names[t][p]) < 3:
+            example_names[t][p].append(key[matched][(truth == t) & (pred == p)].iloc[0])
+        cm[rows.index(t), cols.index(p)] += 1
+
+    for e, v in example_names.items():
+        print(f"{e}: {v}")
+
+    support = cm.sum(axis=1)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        pct = 100.0 * cm / support[:, None]          # row-normalised
+    pct = np.where(support[:, None] > 0, pct, np.nan)
+    recall = {r: (100.0 * cm[i, cols.index(r)] / support[i]) if support[i] else float("nan")
+              for i, r in enumerate(rows)}
+    accuracy = 100.0 * sum(cm[i, cols.index(r)] for i, r in enumerate(rows)) / n
+
+    fig, ax = plt.subplots(figsize=(1.6 * len(cols) + 3, 5.5))
+    im = ax.imshow(pct, cmap="Blues", vmin=0, vmax=100, aspect="auto")
+    ax.set_xticks(range(len(cols)), cols, rotation=20, ha="right")
+    ax.set_yticks(range(len(rows)),
+                  [f"{r}\n(n={support[i]})" for i, r in enumerate(rows)])
+    ax.set_xlabel("predicted (scale_method)")
+    ax.set_ylabel("annotated (ground truth)")
+    ax.set_title(f"Scale method vs manual annotations\n"
+                 f"overall accuracy = {accuracy:.1f}%  (n = {n} annotated images)")
+
+    for i in range(len(rows)):
+        for j in range(len(cols)):
+            if support[i] == 0:
+                continue
+            ax.text(j, i, f"{cm[i, j]}\n{pct[i, j]:.1f}%", ha="center", va="center",
+                    fontsize=10, color="white" if pct[i, j] > 55 else "black")
+    fig.colorbar(im, ax=ax, label="% of the annotated class (row)")
+    save(fig, output_dir, "scale_method_confusion_matrix.png")
+
+    return {"matrix": cm.tolist(), "rows": rows, "cols": cols,
+            "support": support.tolist(), "recall": recall,
+            "accuracy": accuracy, "n": n, "n_annotated": len(truth_by_name), "example_names": example_names}
 
 
 def fig_scatter_pose_scale(df, output_dir):
@@ -914,7 +1054,7 @@ def fig_kp_mean_error(err, output_dir):
 def write_summary(df, conf_cols, output_dir, review_threshold,
                   needs_review_pct, scale_type_pct,
                   scale_stats=None, missing_rates=None, missing_denom=0,
-                  err=None, err_corr=None):
+                  err=None, err_corr=None, scale_cm=None):
     n = len(df)
     pose = _series(df, "overall_pose_confidence")
     scale = _series(df, "scale_confidence")
@@ -968,6 +1108,29 @@ def write_summary(df, conf_cols, output_dir, review_threshold,
     else:
         lines.append("  (column 'scale_method' not in CSV - enable it in "
                      "config.OPTIONAL_COLUMNS and re-run to get this breakdown)")
+    lines.append("")
+
+    lines.append("-" * 64)
+    lines.append("SCALE METHOD vs MANUAL ANNOTATIONS")
+    lines.append("-" * 64)
+    if scale_cm:
+        lines.append(f"annotated images: {scale_cm['n_annotated']}  "
+                     f"matched in the CSV: {scale_cm['n']}")
+        lines.append(f"overall accuracy: {scale_cm['accuracy']:.1f}%")
+        lines.append("")
+        header = "  " + f"{'truth \\ pred':<14}" + "".join(f"{c:>12}" for c in scale_cm["cols"])
+        lines.append(header + f"{'support':>10}")
+        for i, r in enumerate(scale_cm["rows"]):
+            cells = "".join(f"{v:>12}" for v in scale_cm["matrix"][i])
+            lines.append(f"  {r:<14}{cells}{scale_cm['support'][i]:>10}")
+        lines.append("")
+        lines.append("  correctly classified per class:")
+        for r in scale_cm["rows"]:
+            v = scale_cm["recall"][r]
+            lines.append(f"    {r:<12}: " + (f"{v:5.1f}%" if v == v else "  n/a (no annotated image)"))
+    else:
+        lines.append("  (no confusion matrix - needs 'scale_method' and 'image_name' "
+                     "in the CSV plus an annotation JSON; pass --annotations)")
     lines.append("")
 
     lines.append("-" * 64)
@@ -1075,6 +1238,9 @@ def main():
     p.add_argument("--output-dir", default="analysis_output", help="Where to write PNG/TXT.")
     p.add_argument("--review-threshold", type=float, default=0.5,
                    help="Confidence below which a row counts as 'needs review'.")
+    p.add_argument("--annotations", default="annotations.json",
+                   help="JSON of manual scale-bar annotations (from annotate_gui.py). "
+                        "Used for the scale_method confusion matrix.")
     p.add_argument("--datasets-root", default=None,
                    help="Root of the YOLO datasets (default: the project's "
                         "config.DATASETS_ROOT). Used to find the GT label files.")
@@ -1123,6 +1289,7 @@ def main():
     if scale_type_pct is None:
         print("[skip] scale_method not in CSV "
               "(enable OPTIONAL_COLUMNS['scale_method'] and re-run).")
+    scale_cm = fig_scale_method_confusion(df, args.output_dir, args.annotations)
 
     # ----- ground-truth error analysis --------------------------------------
     err, err_corr = None, None
@@ -1161,7 +1328,8 @@ def main():
     write_summary(df, conf_cols, args.output_dir, args.review_threshold,
                   needs_review_pct, scale_type_pct,
                   scale_stats=scale_stats, missing_rates=missing_rates,
-                  missing_denom=missing_denom, err=err, err_corr=err_corr)
+                  missing_denom=missing_denom, err=err, err_corr=err_corr,
+                  scale_cm=scale_cm)
     print(f"\nDone. Figures and summary in: {args.output_dir}")
 
 

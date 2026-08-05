@@ -27,6 +27,9 @@ import numpy as np
 from PIL import Image
 from scipy.signal import find_peaks, hilbert
 
+from ruler_confidence import row_spectrum, group_evidence, ruler_confidence
+
+
 warnings.filterwarnings('ignore')
 
 # --------------------------------------------------------------------------- #
@@ -252,16 +255,14 @@ def detect_ruler_from_gray(base_img_gray: np.ndarray, ratio=RATIO):
     if N_LINES is not None and N_LINES < H:
         row_indices = np.linspace(0, H - 1, N_LINES, dtype=int)
 
-    results = []
-    n_cycles = []
+    results, n_cycles, row_specs = [], [], []
     for i in row_indices:
         row = reduced_img_gray[i, :]
-        period, phase, magnitude = fft_dominant_frequency(
-            row, MIN_FREQ_RATIO, MAX_FREQ_RATIO, PEAK_PROMINENCE
-        )
-        if period is not None:
-            results.append((i, period, phase, magnitude))
-            n_cycles.append(cycles_observes(row, period))
+        rs = row_spectrum(row, MIN_FREQ_RATIO, MAX_FREQ_RATIO, PEAK_PROMINENCE)
+        if rs is not None:
+            results.append((i, rs.period_px, rs.phase_rad, rs.magnitude))
+            n_cycles.append(cycles_observes(row, rs.period_px))
+            row_specs.append(rs)
 
     # No row produced a valid dominant frequency -> no ruler.
     if len(results) == 0:
@@ -288,7 +289,8 @@ def detect_ruler_from_gray(base_img_gray: np.ndarray, ratio=RATIO):
     T_median = mean_period * ratio
     px_per_mm = T_median / GRADUATION_MM
 
-    # Per-group mean magnitude, ordered [main=0, secondary=1, 2, ...].
-    group_magnitudes = [float(mag_arr[gid == g].mean()) for g in sorted(real_groups)]
+    ev = group_evidence(gid, row_specs, rows_arr, periods_arr,
+                            reduced_img_gray, n_candidate_rows=len(row_indices))
+    conf, debug = ruler_confidence(ev)
 
-    return px_per_mm, max_line_idx * ratio, group_magnitudes
+    return px_per_mm, max_line_idx * ratio, conf

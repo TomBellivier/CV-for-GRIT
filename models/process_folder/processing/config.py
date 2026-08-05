@@ -29,11 +29,7 @@ TRAINED_MODELS_DIR = PROJECT_ROOT / "trained_models"
 
 # Exactly ONE pose model is used per run. Put its file name here.
 # (Only this model is loaded; see load_pose_model in pose_inference.py.)
-<<<<<<< HEAD
 POSE_MODEL_NAME = "model_flipping.pt"                      # <-- EDIT ME
-=======
-POSE_MODEL_NAME = "best.pt"                      # <-- EDIT ME
->>>>>>> fe4ebde3a596dd4adb7ff8f7bedbb804e4b9290d
 POSE_MODEL_PATH = TRAINED_MODELS_DIR / POSE_MODEL_NAME
 
 # YOLO scale-bar detector.

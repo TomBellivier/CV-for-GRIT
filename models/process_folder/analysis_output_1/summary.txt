@@ -1,0 +1,147 @@
+================================================================
+RESULTS SUMMARY
+================================================================
+rows (images)                  : 22925
+images with a detected pose    : 16259 (70.9%)
+images without a pose          : 6666 (29.1%)
+in_train = 1                   : 1892
+in_val = 1                     : 446
+
+----------------------------------------------------------------
+GLOBAL CONFIDENCE
+----------------------------------------------------------------
+overall_pose_confidence  mean=0.514  std=0.221  median=0.598
+scale_confidence         mean=0.770  std=0.326  median=0.948
+detection_confidence     mean=0.801  std=0.220  median=0.936
+
+----------------------------------------------------------------
+NEEDS REVIEW (threshold = 0.5)
+----------------------------------------------------------------
+flagged: 40.5% of images
+
+----------------------------------------------------------------
+SCALE METHOD
+----------------------------------------------------------------
+  ruler       : 81.5%
+  scale_bar   : 10.1%
+  none        : 8.4%
+
+----------------------------------------------------------------
+SCALE METHOD vs MANUAL ANNOTATIONS
+----------------------------------------------------------------
+annotated images: 1000  matched in the CSV: 1000
+overall accuracy: 91.2%
+
+  truth \ pred          none   scale_bar       ruler   support
+  none                    73           0          34       107
+  scale_bar               31         256          13       300
+  ruler                   10           0         583       593
+
+  correctly classified per class:
+    none        :  68.2%
+    scale_bar   :  85.3%
+    ruler       :  98.3%
+
+----------------------------------------------------------------
+SCALE px/mm DISTRIBUTION
+----------------------------------------------------------------
+  n=20988  mean=3979.37  std=417838.55  median=12.80
+  min=0.01  max=60500000.00  (a second peak in the histogram = a wrong-scale mode)
+
+----------------------------------------------------------------
+MISSING-VALUE RATE PER MEASUREMENT (posed images: 16259)
+----------------------------------------------------------------
+  total length                     0.0% missing
+  head width                       0.0% missing
+  head length                      0.0% missing
+  inter ocular distance            0.0% missing
+  right antenna length             0.0% missing
+  left antenna length              0.0% missing
+  thorax width                     0.0% missing
+  thorax length                    0.0% missing
+  abdomen width                    0.0% missing
+  abdomen length                   0.0% missing
+  intertegular distance            0.0% missing
+  left hind wing length            0.0% missing
+  right hind wing length           0.0% missing
+  left hind wing width             0.0% missing
+  right hind wing width            0.0% missing
+  left fore wing length            0.0% missing
+  right fore wing length           0.0% missing
+  left fore wing width             0.0% missing
+  right fore wing width            0.0% missing
+  left hind leg length             0.0% missing
+  left hind leg femur length       0.0% missing
+  left hind leg tibia length       0.0% missing
+  left hind leg tarsus length      0.0% missing
+  right hind leg length            0.0% missing
+  right hind leg femur length      0.0% missing
+  right hind leg tibia length      0.0% missing
+  right hind leg tarsus length     0.0% missing
+
+----------------------------------------------------------------
+PER-MEASUREMENT CONFIDENCE (mean / std / median / n)
+----------------------------------------------------------------
+  total length                   mean=0.661  std=0.291  median=0.782  n=16259
+  head width                     mean=0.750  std=0.299  median=0.897  n=16259
+  head length                    mean=0.683  std=0.295  median=0.801  n=16259
+  inter ocular distance          mean=0.673  std=0.294  median=0.776  n=16259
+  right antenna length           mean=0.458  std=0.411  median=0.336  n=16259
+  left antenna length            mean=0.682  std=0.301  median=0.833  n=16259
+  thorax width                   mean=0.811  std=0.289  median=0.973  n=16259
+  thorax length                  mean=0.690  std=0.296  median=0.807  n=16259
+  abdomen width                  mean=0.825  std=0.244  median=0.947  n=16259
+  abdomen length                 mean=0.835  std=0.225  median=0.933  n=16259
+  intertegular distance          mean=0.014  std=0.037  median=0.005  n=16259
+  left hind wing length          mean=0.834  std=0.180  median=0.894  n=16259
+  right hind wing length         mean=0.015  std=0.046  median=0.005  n=16259
+  left hind wing width           mean=0.824  std=0.258  median=0.938  n=16259
+  right hind wing width          mean=0.138  std=0.211  median=0.064  n=16259
+  left fore wing length          mean=0.690  std=0.310  median=0.846  n=16259
+  right fore wing length         mean=0.419  std=0.414  median=0.215  n=16259
+  left fore wing width           mean=0.694  std=0.268  median=0.798  n=16259
+  right fore wing width          mean=0.446  std=0.410  median=0.296  n=16259
+  left hind leg length           mean=0.389  std=0.380  median=0.223  n=16259
+  left hind leg femur length     mean=0.800  std=0.190  median=0.862  n=16259
+  left hind leg tibia length     mean=0.854  std=0.174  median=0.921  n=16259
+  left hind leg tarsus length    mean=0.429  std=0.417  median=0.227  n=16259
+  right hind leg length          mean=0.017  std=0.047  median=0.007  n=16259
+  right hind leg femur length    mean=0.017  std=0.048  median=0.007  n=16259
+  right hind leg tibia length    mean=0.167  std=0.233  median=0.084  n=16259
+  right hind leg tarsus length   mean=0.158  std=0.232  median=0.076  n=16259
+
+================================================================
+GROUND-TRUTH ERROR  (images matched to a label: 2026)
+================================================================
+per-image mean relative error: mean=0.694  median=0.476
+mean error | needs_review=False : 0.529 (n=1176)
+mean error | needs_review=True  : 0.947 (n=769)
+
+  per measurement:  MAE[px]  mean_rel_err  spearman(conf,err)  n
+  total length                       40.3        0.128             -0.301  1792
+  head width                         43.6        0.283              0.171  1831
+  head length                        22.1        0.408             -0.117  1880
+  inter ocular distance              35.8        3.147              0.019  1658
+  right antenna length               84.6        1.066             -0.422  1602
+  left antenna length                33.0        0.290             -0.112  1657
+  thorax width                       48.1        0.287             -0.086  1900
+  thorax length                      26.1        0.260              0.106  1918
+  abdomen width                      56.5        0.288             -0.157  1796
+  abdomen length                     28.6        0.167             -0.126  1852
+  intertegular distance             165.2        3.134             -0.468  551
+  left hind wing length              92.6        0.539              0.120  555
+  right hind wing length            138.7        0.807             -0.557  561
+  left hind wing width               87.1        1.320             -0.077  537
+  right hind wing width              94.7        0.764             -0.537  544
+  left fore wing length             200.7        0.790             -0.703  1917
+  right fore wing length             95.9        0.397             -0.693  1902
+  left fore wing width               60.0        0.810              0.214  1897
+  right fore wing width              58.3        0.502             -0.516  1876
+  left hind leg length              173.8        0.797             -0.451  20
+  left hind leg femur length         38.0        1.075              0.378  33
+  left hind leg tibia length         19.4        0.317             -0.001  357
+  left hind leg tarsus length        76.9        1.461              0.333  361
+  right hind leg length              68.6        0.251             -0.272  19
+  right hind leg femur length        17.3        0.315              0.039  34
+  right hind leg tibia length        17.6        0.245             -0.289  334
+  right hind leg tarsus length       23.0        0.342             -0.564  381
