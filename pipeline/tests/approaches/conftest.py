@@ -2,7 +2,13 @@
 
 Ultralytics et CUDA ne sont pas installables partout (CI legere, machine de dev). Ce
 double permet de verifier ce que NOUS controlons — arguments passes a l'entrainement,
-conversion des coordonnees, routage entre modeles — sans GPU ni poids a telecharger.
+conversion des coordonnees, routage entre modeles, gel des parametres — sans GPU ni
+poids a telecharger.
+
+Il expose aussi `ultralytics.models.yolo.pose` et `ultralytics.cfg` : les approches qui
+passent un trainer personnalise (lora, group_bn, head_only) importent `PoseTrainer`, et
+remplacer `sys.modules["ultralytics"]` par un module plat ferait echouer ces imports
+avec "ultralytics.models is not a package".
 """
 
 from __future__ import annotations
@@ -53,11 +59,47 @@ class _Result:
 
 
 class _Param:
-    def __init__(self, n: int) -> None:
+    def __init__(self, n: int, name: str = "") -> None:
         self._n = n
+        self.name = name
+        self.requires_grad = True
 
     def numel(self) -> int:
         return self._n
+
+
+class FakePoseTrainer:
+    """Trainer minimal : les approches en derivent via `make_patched_trainer`.
+
+    Il n'entraine rien, mais expose les points d'accroche que le patch surcharge, ce qui
+    permet de verifier que la chaine se construit sans erreur.
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self.args = types.SimpleNamespace(freeze=None)
+        self.model: Any = None
+        self.validator: Any = None
+
+    def get_model(self, cfg: Any = None, weights: Any = None, verbose: bool = True) -> Any:
+        return self.model
+
+    def _setup_train(self) -> None:
+        return None
+
+    def _model_train(self) -> None:
+        return None
+
+    def _build_train_pipeline(self) -> None:
+        return None
+
+    def preprocess_batch(self, batch: Any) -> Any:
+        return batch
+
+    def get_validator(self) -> Any:
+        return self.validator
+
+    def final_eval(self) -> None:
+        return None
 
 
 class FakeYOLO:
@@ -68,7 +110,12 @@ class FakeYOLO:
 
     def __init__(self, weights: str) -> None:
         self.weights = weights
-        self.model = types.SimpleNamespace(parameters=lambda: [_Param(1000), _Param(234)])
+        self.model = types.SimpleNamespace(
+            parameters=lambda: [_Param(1000), _Param(234)],
+            named_parameters=lambda: [("model.0.conv.weight", _Param(1000)),
+                                      ("model.23.cv4.0.0.conv.weight", _Param(234))],
+            named_modules=lambda: [("model.0.conv", None), ("model.23.cv4.0.0.conv", None)],
+        )
         self.trainer: Any = None
 
     def train(self, **kwargs: Any) -> None:
@@ -97,66 +144,37 @@ class FakeYOLO:
         return results
 
 
-# --- A SUBSTITUER a la fixture `fake_ultralytics` existante dans
-#     tests/approaches/conftest.py -------------------------------------------
+def _install_fake_ultralytics(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Installe `ultralytics` ET ses sous-modules dans sys.modules.
 
-class FakePoseTrainer:
-    """Trainer minimal : les approches a patch en derivent via make_patched_trainer.
-
-    Sans lui, `pose_trainer_class()` tenterait d'importer le vrai
-    `ultralytics.models.yolo.pose` et echouerait sur un module double plat.
+    Un module plat ferait echouer `from ultralytics.models.yolo.pose import PoseTrainer`
+    avec "ultralytics.models is not a package" : Python resout ces imports par
+    sys.modules, pas par attribut.
     """
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        self.args = types.SimpleNamespace(**kwargs)
-        self.model: Any = None
-
-    def get_model(self, cfg: Any = None, weights: Any = None, verbose: bool = True) -> Any:
-        return self.model
-
-    def get_validator(self) -> Any:
-        return types.SimpleNamespace(preprocess=lambda batch: batch)
-
-    def preprocess_batch(self, batch: Any) -> Any:
-        return batch
-
-    def _setup_train(self) -> None:
-        return None
-
-    def _model_train(self) -> None:
-        return None
-
-    def _build_train_pipeline(self) -> None:
-        return None
-
-    def final_eval(self) -> None:
-        return None
-
-
-@pytest.fixture()
-def fake_ultralytics(monkeypatch) -> type[FakeYOLO]:
-    """Injecte un faux `ultralytics`, sous-modules compris.
-
-    Le double doit exposer `ultralytics.models.yolo.pose.PoseTrainer` : les approches
-    a patch (head_only, lora, group_bn) en derivent leur trainer personnalise.
-    """
-    FakeYOLO.calls = []
-
     root = types.ModuleType("ultralytics")
     root.YOLO = FakeYOLO  # type: ignore[attr-defined]
+    root.__path__ = []  # type: ignore[attr-defined]
 
-    cfg = types.ModuleType("ultralytics.cfg")
-    cfg.DEFAULT_CFG_DICT = {"quantize": None}  # type: ignore[attr-defined]
-
-    modules = {"ultralytics": root, "ultralytics.cfg": cfg}
+    modules: dict[str, types.ModuleType] = {"ultralytics": root}
     for name in ("ultralytics.models", "ultralytics.models.yolo",
                  "ultralytics.models.yolo.pose"):
-        modules[name] = types.ModuleType(name)
+        module = types.ModuleType(name)
+        module.__path__ = []  # type: ignore[attr-defined]
+        modules[name] = module
     modules["ultralytics.models.yolo.pose"].PoseTrainer = FakePoseTrainer  # type: ignore[attr-defined]
-    modules["ultralytics.models.yolo"].pose = modules["ultralytics.models.yolo.pose"]  # type: ignore[attr-defined]
-    modules["ultralytics.models"].yolo = modules["ultralytics.models.yolo"]  # type: ignore[attr-defined]
-    root.models = modules["ultralytics.models"]  # type: ignore[attr-defined]
+
+    cfg = types.ModuleType("ultralytics.cfg")
+    # `quantize` present : le code doit produire {"quantize": 16}, pas {"half": True}
+    cfg.DEFAULT_CFG_DICT = {"quantize": None, "half": False}  # type: ignore[attr-defined]
+    modules["ultralytics.cfg"] = cfg
 
     for name, module in modules.items():
         monkeypatch.setitem(sys.modules, name, module)
+
+
+@pytest.fixture()
+def fake_ultralytics(monkeypatch: pytest.MonkeyPatch) -> type[FakeYOLO]:
+    """Injecte le faux module `ultralytics` pour la duree du test."""
+    FakeYOLO.calls = []
+    _install_fake_ultralytics(monkeypatch)
     return FakeYOLO
