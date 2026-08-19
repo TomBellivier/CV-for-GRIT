@@ -97,13 +97,66 @@ class FakeYOLO:
         return results
 
 
+# --- A SUBSTITUER a la fixture `fake_ultralytics` existante dans
+#     tests/approaches/conftest.py -------------------------------------------
+
+class FakePoseTrainer:
+    """Trainer minimal : les approches a patch en derivent via make_patched_trainer.
+
+    Sans lui, `pose_trainer_class()` tenterait d'importer le vrai
+    `ultralytics.models.yolo.pose` et echouerait sur un module double plat.
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self.args = types.SimpleNamespace(**kwargs)
+        self.model: Any = None
+
+    def get_model(self, cfg: Any = None, weights: Any = None, verbose: bool = True) -> Any:
+        return self.model
+
+    def get_validator(self) -> Any:
+        return types.SimpleNamespace(preprocess=lambda batch: batch)
+
+    def preprocess_batch(self, batch: Any) -> Any:
+        return batch
+
+    def _setup_train(self) -> None:
+        return None
+
+    def _model_train(self) -> None:
+        return None
+
+    def _build_train_pipeline(self) -> None:
+        return None
+
+    def final_eval(self) -> None:
+        return None
 
 
 @pytest.fixture()
 def fake_ultralytics(monkeypatch) -> type[FakeYOLO]:
-    """Injecte le faux module `ultralytics` pour la duree du test."""
+    """Injecte un faux `ultralytics`, sous-modules compris.
+
+    Le double doit exposer `ultralytics.models.yolo.pose.PoseTrainer` : les approches
+    a patch (head_only, lora, group_bn) en derivent leur trainer personnalise.
+    """
     FakeYOLO.calls = []
-    module = types.ModuleType("ultralytics")
-    module.YOLO = FakeYOLO  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "ultralytics", module)
+
+    root = types.ModuleType("ultralytics")
+    root.YOLO = FakeYOLO  # type: ignore[attr-defined]
+
+    cfg = types.ModuleType("ultralytics.cfg")
+    cfg.DEFAULT_CFG_DICT = {"quantize": None}  # type: ignore[attr-defined]
+
+    modules = {"ultralytics": root, "ultralytics.cfg": cfg}
+    for name in ("ultralytics.models", "ultralytics.models.yolo",
+                 "ultralytics.models.yolo.pose"):
+        modules[name] = types.ModuleType(name)
+    modules["ultralytics.models.yolo.pose"].PoseTrainer = FakePoseTrainer  # type: ignore[attr-defined]
+    modules["ultralytics.models.yolo"].pose = modules["ultralytics.models.yolo.pose"]  # type: ignore[attr-defined]
+    modules["ultralytics.models"].yolo = modules["ultralytics.models.yolo"]  # type: ignore[attr-defined]
+    root.models = modules["ultralytics.models"]  # type: ignore[attr-defined]
+
+    for name, module in modules.items():
+        monkeypatch.setitem(sys.modules, name, module)
     return FakeYOLO
