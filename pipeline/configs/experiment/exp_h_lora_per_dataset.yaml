@@ -1,0 +1,11 @@
+# @package _global_
+# Experience H : tronc commun + adaptateurs LoRA par ordre d'insecte.
+defaults:
+  - override /data: pooled
+  - override /approach: lora_per_dataset
+  - override /cv: kfold5_grouped
+  - override /eval: default
+  - override /tuning: optuna_default
+
+tag: lora_per_dataset
+seed: 42

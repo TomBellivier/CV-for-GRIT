@@ -21,7 +21,7 @@ TAG="surface_f${FOLD}"
 LOG_DIR="logs/surface_$(date +%Y%m%d_%H%M)"
 
 : "${APPROACHES:=exp_a_yolo_pooled exp_b_yolo_per_dataset exp_c_detect_then_pose \
-exp_d_lora exp_e_group_bn exp_f_yolo_reduced exp_g_head_only}"
+exp_d_lora exp_e_group_bn exp_f_yolo_reduced exp_g_head_only exp_h_lora_per_dataset}"
 
 mkdir -p "$LOG_DIR"
 EXTRA=()

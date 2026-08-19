@@ -1,0 +1,78 @@
+# @package _global_
+# Approche H : adaptateurs LoRA par groupe d'insecte (ADR-0036).
+# Categorie "poids partiels par groupe" : un tronc commun, N jeux d'adaptateurs.
+# Pendant economique de l'approche B — 4 jeux d'adaptateurs pesent < 1 % du reseau
+# la ou 4 modeles complets le quadruplent.
+approach:
+  name: lora_per_dataset
+  _target_: insectpose.approaches.lora_per_dataset.LoraPerDatasetApproach
+
+  weights: yolo26n-pose.pt      # ADR-0033 : meme base que les autres approches
+  prunable: false
+
+  # Repartition du budget d'epoques entre les deux phases. Le TOTAL egale
+  # `train.epochs` : sans cette contrainte, H disposerait de plus de calcul que les
+  # autres approches et gagnerait par la, pas par la methode (§6.3).
+  #   0.6 => 60 epoques pour le tronc commun, 40 par groupe d'insecte.
+  epoch_split: 0.6
+
+  lora:
+    r: 8
+    # alpha = alpha_ratio x r (ADR-0031) : le prefacteur alpha/r rend le taux
+    # d'apprentissage optimal quasi independant du rang, donc chercher les deux
+    # explorerait une redondance.
+    alpha_ratio: 2.0
+    alpha: null
+    dropout: 0.0
+    neck_blocks: 3
+    # Sans effet ici : la phase 1 entraine TOUT (tetes comprises) et la phase 2 ne
+    # laisse QUE les adaptateurs entrainables. Conserve pour compatibilite avec D.
+    train_head: true
+
+  # --- inference ---
+  max_det: 1                    # ADR-0017 : une image = un insecte
+  conf: 0.001                   # seuil BAS : ne jamais tronquer les courbes AP (§3.4)
+  iou: 0.7
+  inference_precision: fp16
+  predict_chunk_size: 16        # ADR-0021 : inference bornee en memoire
+
+  # --- optimisation ---
+  optimizer: auto
+  lr0: 0.01
+  lrf: 0.01
+  momentum: 0.937
+  weight_decay: 0.0005
+  warmup_epochs: 3.0
+  cos_lr: false
+
+  # --- ponderation des pertes ---
+  box: 7.5
+  pose: 12.0
+  kobj: 1.0
+  cls: 0.5
+  dfl: 1.5
+
+  # --- augmentation : FIXE (ADR-0032), identique aux autres approches ---
+  fliplr: 0.5
+  flipud: 0.0
+  degrees: 10.0
+  translate: 0.1
+  scale: 0.5
+  shear: 0.0
+  perspective: 0.0
+  hsv_h: 0.015
+  hsv_s: 0.7
+  hsv_v: 0.4
+  mosaic: 1.0
+  close_mosaic: 10
+  mixup: 0.0
+  erasing: 0.0
+
+  # ADR-0031 : QUATRE hyperparametres, budget identique aux autres approches.
+  # `epoch_split` remplace `kobj` : c'est le parametre propre a cette approche, et
+  # l'arbitrage tronc/adaptateurs est precisement ce qu'elle doit calibrer.
+  search_space:
+    lr0: {type: float, low: 1.0e-4, high: 5.0e-2, log: true}
+    pose: {type: float, low: 4.0, high: 30.0}
+    lora.r: {type: categorical, choices: [4, 8, 16, 32]}
+    epoch_split: {type: float, low: 0.3, high: 0.8}
