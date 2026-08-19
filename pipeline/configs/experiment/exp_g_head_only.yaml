@@ -1,0 +1,11 @@
+# @package _global_
+# Experience G : tetes seules. Temoin de l'experience D (LoRA).
+defaults:
+  - override /data: pooled
+  - override /approach: head_only
+  - override /cv: kfold5_grouped
+  - override /eval: default
+  - override /tuning: optuna_default
+
+tag: head_only
+seed: 42
