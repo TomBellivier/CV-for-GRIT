@@ -102,18 +102,48 @@ class FakePoseTrainer:
         return None
 
 
-class _FakeCheckpointModule:
-    """Module minimal picklable, imitant l'interface attendue d'un checkpoint YOLO."""
+class FakeLoraLayer:
+    """Couche LoRA minimale, fusionnable et picklable.
 
-    def __init__(self) -> None:
-        self.children: dict[str, Any] = {}
+    Les approches D et H fusionnent leurs adaptateurs dans les poids de base avant
+    sauvegarde (ADR-0025), et refusent un checkpoint qui n'en contient aucun — c'est
+    un garde-fou legitime du code reel. Le double doit donc en produire.
+    """
+
+    def __init__(self, name: str = "conv") -> None:
+        self.base = _FakeBaseLayer(name)
+        self.merged = False
 
     def named_children(self) -> list[tuple[str, Any]]:
-        return list(self.children.items())
+        return [("base_layer", self.base)]
+
+    def merge(self) -> None:
+        self.merged = True
+
+    def get_base_layer(self) -> Any:
+        return self.base
+
+
+class _FakeBaseLayer:
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def named_children(self) -> list[tuple[str, Any]]:
+        return []
+
+
+class _FakeCheckpointModule:
+    """Module picklable imitant l'arborescence d'un checkpoint YOLO patche."""
+
+    def __init__(self) -> None:
+        self.conv = FakeLoraLayer("model.20.conv")
+
+    def named_children(self) -> list[tuple[str, Any]]:
+        return [("conv", self.conv)]
 
 
 def _write_fake_checkpoint(path: Path) -> None:
-    """Ecrit un checkpoint lisible par torch.load, ou pickle en repli.
+    """Ecrit un checkpoint lisible par torch.load, contenant une couche LoRA.
 
     Effet de bord : cree `path`.
     """
@@ -174,6 +204,25 @@ class FakeYOLO:
         return results
 
 
+class _FakeLoraConfig:
+    """Config LoRA minimale : le double n'en lit que les champs journalises."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        self.__dict__.update(kwargs)
+
+
+def _fake_inject(config: Any, model: Any, **kwargs: Any) -> Any:
+    """Injection simulee : rend quelques parametres 'lora_' visibles sur le modele.
+
+    Suffit a verifier que le gel epargne bien les adaptateurs et fige le reste.
+    """
+    existing = list(model.named_parameters()) if hasattr(model, "named_parameters") else []
+    adapters = [("model.20.conv.lora_A.default.weight", _Param(64)),
+                ("model.20.conv.lora_B.default.weight", _Param(64))]
+    model.named_parameters = lambda: [*existing, *adapters]  # type: ignore[attr-defined]
+    return model
+
+
 def _install_fake_ultralytics(monkeypatch: pytest.MonkeyPatch) -> None:
     """Installe `ultralytics` ET ses sous-modules dans sys.modules.
 
@@ -197,6 +246,21 @@ def _install_fake_ultralytics(monkeypatch: pytest.MonkeyPatch) -> None:
     # `quantize` present : le code doit produire {"quantize": 16}, pas {"half": True}
     cfg.DEFAULT_CFG_DICT = {"quantize": None, "half": False}  # type: ignore[attr-defined]
     modules["ultralytics.cfg"] = cfg
+
+    # `peft` : les approches D et H l'importent pour injecter puis fusionner les
+    # adaptateurs. Le faux `LoraLayer` doit etre la classe dont herite FakeLoraLayer,
+    # sinon `merge_lora_weights` — qui teste isinstance — ne reconnaitrait rien et
+    # refuserait le checkpoint.
+    peft_layer = types.ModuleType("peft.tuners.lora.layer")
+    peft_layer.LoraLayer = FakeLoraLayer  # type: ignore[attr-defined]
+    for name in ("peft", "peft.tuners", "peft.tuners.lora"):
+        module = types.ModuleType(name)
+        module.__path__ = []  # type: ignore[attr-defined]
+        modules[name] = module
+    modules["peft"].LoraConfig = _FakeLoraConfig  # type: ignore[attr-defined]
+    modules["peft"].inject_adapter_in_model = _fake_inject  # type: ignore[attr-defined]
+    modules["peft.tuners.lora"].LoraLayer = FakeLoraLayer  # type: ignore[attr-defined]
+    modules["peft.tuners.lora.layer"] = peft_layer
 
     for name, module in modules.items():
         monkeypatch.setitem(sys.modules, name, module)

@@ -1,281 +1,113 @@
-"""Double d'Ultralytics partage par les tests des approches YOLO.
+"""Fixtures partagees : mini-corpus synthetique et projet jetable.
 
-Ultralytics et CUDA ne sont pas installables partout (CI legere, machine de dev). Ce
-double permet de verifier ce que NOUS controlons — arguments passes a l'entrainement,
-conversion des coordonnees, routage entre modeles, gel des parametres — sans GPU ni
-poids a telecharger.
-
-Il expose aussi `ultralytics.models.yolo.pose` et `ultralytics.cfg` : les approches qui
-passent un trainer personnalise (lora, group_bn, head_only) importent `PoseTrainer`, et
-remplacer `sys.modules["ultralytics"]` par un module plat ferait echouer ces imports
-avec "ultralytics.models is not a package".
+Le smoke test tourne de bout en bout sur ces fixtures en quelques secondes (§10.3).
 """
 
 from __future__ import annotations
 
-import sys
-import types
+import shutil
 from pathlib import Path
-from typing import Any
 
-import numpy as np
 import pytest
+from omegaconf import DictConfig, OmegaConf
 
+from insectpose.data.adapters.synthetic import SyntheticAdapter
+from insectpose.paths import ProjectPaths
 from insectpose.registry import load_all_plugins
 
 # Les plugins sont charges A L'IMPORT : la parametrisation de tests/test_smoke.py et
-# de tests/approaches/*.py lit le registre au moment de la COLLECTE pytest, avant
-# toute fixture. Un chargement differe laisserait le registre vide.
+# des tests d'approches lit le registre au moment de la COLLECTE pytest, avant toute
+# fixture. Un chargement differe laisserait le registre vide et ferait echouer toutes
+# les fixtures qui en dependent.
 load_all_plugins()
 
-
-class _Arr:
-    """Minimal shim exposant l'interface `.cpu().numpy()` des tenseurs torch."""
-
-    def __init__(self, values: np.ndarray) -> None:
-        self._values = np.asarray(values, dtype=float)
-
-    def cpu(self) -> _Arr:
-        return self
-
-    def numpy(self) -> np.ndarray:
-        return self._values
-
-    def __len__(self) -> int:
-        return len(self._values)
-
-
-class _Boxes:
-    def __init__(self, xywh: np.ndarray, conf: np.ndarray) -> None:
-        self.xywh = _Arr(xywh)
-        self.conf = _Arr(conf)
-
-    def __len__(self) -> int:
-        return len(self.xywh)
-
-
-class _Keypoints:
-    def __init__(self, data: np.ndarray) -> None:
-        self.data = _Arr(data)
-
-
-class _Result:
-    def __init__(self, boxes: _Boxes, keypoints: _Keypoints) -> None:
-        self.boxes = boxes
-        self.keypoints = keypoints
-
-
-class _Param:
-    def __init__(self, n: int, name: str = "") -> None:
-        self._n = n
-        self.name = name
-        self.requires_grad = True
-
-    def numel(self) -> int:
-        return self._n
-
-
-class FakePoseTrainer:
-    """Trainer minimal : les approches en derivent via `make_patched_trainer`.
-
-    Il n'entraine rien, mais expose les points d'accroche que le patch surcharge, ce qui
-    permet de verifier que la chaine se construit sans erreur.
-    """
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        self.args = types.SimpleNamespace(freeze=None)
-        self.model: Any = None
-        self.validator: Any = None
-
-    def get_model(self, cfg: Any = None, weights: Any = None, verbose: bool = True) -> Any:
-        return self.model
-
-    def _setup_train(self) -> None:
-        return None
-
-    def _model_train(self) -> None:
-        return None
-
-    def _build_train_pipeline(self) -> None:
-        return None
-
-    def preprocess_batch(self, batch: Any) -> Any:
-        return batch
-
-    def get_validator(self) -> Any:
-        return self.validator
-
-    def final_eval(self) -> None:
-        return None
-
-
-class FakeLoraLayer:
-    """Couche LoRA minimale, fusionnable et picklable.
-
-    Les approches D et H fusionnent leurs adaptateurs dans les poids de base avant
-    sauvegarde (ADR-0025), et refusent un checkpoint qui n'en contient aucun — c'est
-    un garde-fou legitime du code reel. Le double doit donc en produire.
-    """
-
-    def __init__(self, name: str = "conv") -> None:
-        self.base = _FakeBaseLayer(name)
-        self.merged = False
-
-    def named_children(self) -> list[tuple[str, Any]]:
-        return [("base_layer", self.base)]
-
-    def merge(self) -> None:
-        self.merged = True
-
-    def get_base_layer(self) -> Any:
-        return self.base
-
-
-class _FakeBaseLayer:
-    def __init__(self, name: str) -> None:
-        self.name = name
-
-    def named_children(self) -> list[tuple[str, Any]]:
-        return []
-
-
-class _FakeCheckpointModule:
-    """Module picklable imitant l'arborescence d'un checkpoint YOLO patche."""
-
-    def __init__(self) -> None:
-        self.conv = FakeLoraLayer("model.20.conv")
-
-    def named_children(self) -> list[tuple[str, Any]]:
-        return [("conv", self.conv)]
-
-
-def _write_fake_checkpoint(path: Path) -> None:
-    """Ecrit un checkpoint lisible par torch.load, contenant une couche LoRA.
-
-    Effet de bord : cree `path`.
-    """
-    payload = {"model": _FakeCheckpointModule(), "ema": None, "epoch": -1}
-    try:
-        import torch
-
-        torch.save(payload, path)
-    except ImportError:
-        import pickle
-
-        with path.open("wb") as handle:
-            pickle.dump(payload, handle)
-
-
-class FakeYOLO:
-    """Double d'Ultralytics : enregistre les appels, renvoie des sorties plausibles."""
-
-    calls: list[dict[str, Any]] = []
-    n_keypoints = 42
-
-    def __init__(self, weights: str) -> None:
-        self.weights = weights
-        self.model = types.SimpleNamespace(
-            parameters=lambda: [_Param(1000), _Param(234)],
-            named_parameters=lambda: [("model.0.conv.weight", _Param(1000)),
-                                      ("model.23.cv4.0.0.conv.weight", _Param(234))],
-            named_modules=lambda: [("model.0.conv", None), ("model.23.cv4.0.0.conv", None)],
-        )
-        self.trainer: Any = None
-
-    def train(self, **kwargs: Any) -> None:
-        FakeYOLO.calls.append({"kind": "train", **kwargs})
-        best = Path(kwargs["project"]) / "train" / "weights" / "best.pt"
-        best.parent.mkdir(parents=True, exist_ok=True)
-        # Un checkpoint PICKLABLE : les approches qui fusionnent leurs adaptateurs
-        # (lora, lora_per_dataset) le rechargent avec torch.load avant de le reecrire.
-        # Un simple b"fake-weights" ferait echouer le depickling.
-        _write_fake_checkpoint(best)
-        self.trainer = types.SimpleNamespace(best=str(best))
-
-    def predict(self, source: list[str], **kwargs: Any) -> list[_Result]:
-        FakeYOLO.calls.append({"kind": "predict", "n_sources": len(source), **kwargs})
-        assert kwargs.get("stream") is True, (
-            "predict() doit etre streame : sinon Ultralytics garde un Results par image "
-            "(image d'origine comprise) et le processus se fait tuer par l'OOM killer."
-        )
-        assert "half" not in kwargs, "'half' est deprecie : utiliser 'quantize'."
-        results = []
-        for i in range(len(source)):
-            # bbox CENTREE, comme Ultralytics : centre (60, 80), taille 40 x 20
-            boxes = _Boxes(np.array([[60.0, 80.0, 40.0, 20.0]]), np.array([0.9 - i * 0.001]))
-            kpts = np.zeros((1, self.n_keypoints, 3))
-            kpts[0, :, 0] = np.linspace(45, 75, self.n_keypoints)
-            kpts[0, :, 1] = np.linspace(72, 88, self.n_keypoints)
-            kpts[0, :, 2] = 0.8
-            results.append(_Result(boxes, _Keypoints(kpts)))
-        return results
-
-
-class _FakeLoraConfig:
-    """Config LoRA minimale : le double n'en lit que les champs journalises."""
-
-    def __init__(self, **kwargs: Any) -> None:
-        self.__dict__.update(kwargs)
-
-
-def _fake_inject(config: Any, model: Any, **kwargs: Any) -> Any:
-    """Injection simulee : rend quelques parametres 'lora_' visibles sur le modele.
-
-    Suffit a verifier que le gel epargne bien les adaptateurs et fige le reste.
-    """
-    existing = list(model.named_parameters()) if hasattr(model, "named_parameters") else []
-    adapters = [("model.20.conv.lora_A.default.weight", _Param(64)),
-                ("model.20.conv.lora_B.default.weight", _Param(64))]
-    model.named_parameters = lambda: [*existing, *adapters]  # type: ignore[attr-defined]
-    return model
-
-
-def _install_fake_ultralytics(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Installe `ultralytics` ET ses sous-modules dans sys.modules.
-
-    Un module plat ferait echouer `from ultralytics.models.yolo.pose import PoseTrainer`
-    avec "ultralytics.models is not a package" : Python resout ces imports par
-    sys.modules, pas par attribut.
-    """
-    root = types.ModuleType("ultralytics")
-    root.YOLO = FakeYOLO  # type: ignore[attr-defined]
-    root.__path__ = []  # type: ignore[attr-defined]
-
-    modules: dict[str, types.ModuleType] = {"ultralytics": root}
-    for name in ("ultralytics.models", "ultralytics.models.yolo",
-                 "ultralytics.models.yolo.pose"):
-        module = types.ModuleType(name)
-        module.__path__ = []  # type: ignore[attr-defined]
-        modules[name] = module
-    modules["ultralytics.models.yolo.pose"].PoseTrainer = FakePoseTrainer  # type: ignore[attr-defined]
-
-    cfg = types.ModuleType("ultralytics.cfg")
-    # `quantize` present : le code doit produire {"quantize": 16}, pas {"half": True}
-    cfg.DEFAULT_CFG_DICT = {"quantize": None, "half": False}  # type: ignore[attr-defined]
-    modules["ultralytics.cfg"] = cfg
-
-    # `peft` : les approches D et H l'importent pour injecter puis fusionner les
-    # adaptateurs. Le faux `LoraLayer` doit etre la classe dont herite FakeLoraLayer,
-    # sinon `merge_lora_weights` — qui teste isinstance — ne reconnaitrait rien et
-    # refuserait le checkpoint.
-    peft_layer = types.ModuleType("peft.tuners.lora.layer")
-    peft_layer.LoraLayer = FakeLoraLayer  # type: ignore[attr-defined]
-    for name in ("peft", "peft.tuners", "peft.tuners.lora"):
-        module = types.ModuleType(name)
-        module.__path__ = []  # type: ignore[attr-defined]
-        modules[name] = module
-    modules["peft"].LoraConfig = _FakeLoraConfig  # type: ignore[attr-defined]
-    modules["peft"].inject_adapter_in_model = _fake_inject  # type: ignore[attr-defined]
-    modules["peft.tuners.lora"].LoraLayer = FakeLoraLayer  # type: ignore[attr-defined]
-    modules["peft.tuners.lora.layer"] = peft_layer
-
-    for name, module in modules.items():
-        monkeypatch.setitem(sys.modules, name, module)
+REPO_ROOT = Path(__file__).resolve().parents[1]
+DATASETS = ["coleoptera", "diptera"]
+SCHEMA = "insect42_v1"   # ADR-0006 : schema commun aux 4 datasets
+N_KPTS = 42
+# ADR-0016 : le corpus de test reproduit l'absence de certains points selon l'ordre
+# (ici : pas d'ailes posterieures annotees chez les "diptera" du corpus jouet).
+ABSENT_KEYPOINTS = {"coleoptera": [], "diptera": list(range(26, 34))}
 
 
 @pytest.fixture()
-def fake_ultralytics(monkeypatch: pytest.MonkeyPatch) -> type[FakeYOLO]:
-    """Injecte le faux module `ultralytics` pour la duree du test."""
-    FakeYOLO.calls = []
-    _install_fake_ultralytics(monkeypatch)
-    return FakeYOLO
+def project(tmp_path: Path) -> ProjectPaths:
+    """Projet jetable : configs reelles copiees, donnees synthetiques."""
+    shutil.copytree(REPO_ROOT / "configs", tmp_path / "configs")
+    paths = ProjectPaths.default(tmp_path)
+    paths.ensure_writable_dirs()
+    for dataset in DATASETS:
+        adapter = SyntheticAdapter(
+            dataset=dataset,
+            source_dir=paths.raw_dir(dataset),
+            options={
+                "n_images": 24, "n_keypoints": N_KPTS, "n_groups": 8, "seed": 7,
+                "keypoint_schema": SCHEMA, "image_size": 192,
+                "absent_keypoints": ABSENT_KEYPOINTS[dataset],
+                # Images reelles : l'export qualitatif (§8.4) fait partie du smoke test.
+                "write_images": True, "images_root": str(paths.data),
+            },
+        )
+        adapter.run(paths)
+    return paths
+
+
+@pytest.fixture()
+def raw_coco(project: ProjectPaths) -> ProjectPaths:
+    """Ajoute des annotations COCO brutes, pour tester la chaine `prepare` complete."""
+    import json
+
+    import numpy as np
+
+    from insectpose.utils.io import read_parquet
+
+    for dataset in DATASETS:
+        annotations = read_parquet(project.annotations(dataset))
+        images, anns = [], []
+        for i, row in enumerate(annotations.itertuples(index=False)):
+            images.append({"id": i, "file_name": f"{Path(row.image_path).stem}.png",
+                           "width": int(row.image_width), "height": int(row.image_height)})
+            kpts = np.asarray(row.kpts_xy, float).reshape(-1, 2)
+            vis = np.asarray(row.kpts_vis, int).reshape(-1, 1)
+            anns.append({"id": i, "image_id": i,
+                         "keypoints": np.hstack([kpts, vis]).reshape(-1).tolist(),
+                         "bbox": [float(v) for v in row.bbox_xywh], "area": float(row.area)})
+        (project.raw_dir(dataset) / "annotations.json").write_text(
+            json.dumps({"images": images, "annotations": anns}), encoding="utf-8"
+        )
+    return project
+
+
+@pytest.fixture()
+def config_factory(project: ProjectPaths):
+    """Fabrique de configs pointant vers le projet jetable.
+
+    Changer d'approche EXIGE de recomposer le groupe Hydra (`approach=<nom>`) : patcher
+    `approach.name` laisserait les cles de l'approche precedente en place, ce qui est
+    une source d'erreurs silencieuses.
+    """
+    from insectpose.cli import load_config
+
+    def build(extra: list[str] | None = None) -> DictConfig:
+        overrides = [
+            f"paths.root={project.root}",
+            "data=pooled",
+            f"data.datasets=[{','.join(DATASETS)}]",
+            "cv=kfold5_grouped",
+            "cv.n_folds=3",
+            "mode=smoke",
+            "tag=test",
+            "train.epochs=1",
+            *(extra or []),
+        ]
+        config = load_config(overrides, config_dir=project.configs)
+        OmegaConf.set_struct(config, False)
+        return config
+
+    return build
+
+
+@pytest.fixture()
+def cfg(config_factory) -> DictConfig:
+    """Config par defaut (approche de reference)."""
+    return config_factory()
