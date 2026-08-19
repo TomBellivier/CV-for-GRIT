@@ -8,10 +8,16 @@ l'approche B (un modele entier par groupe) — quatre jeux d'adaptateurs pesent 
 Entrainement en DEUX PHASES, dans un seul run :
 
 1. **Tronc commun** — le modele entier (backbone, cou, tetes) est entraine sur TOUT le
-   train du fold, adaptateurs inclus. Budget : `epoch_split` des epoques.
-2. **Adaptateurs par groupe** — le tronc et les tetes sont geles ; pour chaque ordre
-   d'insecte, un jeu d'adaptateurs neuf est entraine sur TOUT le train de cet ordre.
-   Budget : le reste des epoques, par groupe.
+   train du fold, SANS adaptateur. Budget : `epoch_split` des epoques. Cette phase
+   produit un YOLO standard, qui sert de point de depart commun.
+2. **Adaptateurs par groupe** — le tronc est recharge, des adaptateurs NEUFS y sont
+   injectes, puis tout est gele sauf eux. Pour chaque ordre d'insecte, ils sont
+   entraines sur TOUT le train de cet ordre. Budget : le reste des epoques, par groupe.
+
+Point d'implementation decisif : les adaptateurs sont **injectes en phase 2, jamais en
+phase 1**. Les injecter des le depart ne servirait a rien, puisque la sauvegarde les
+fusionne dans les poids de base (ADR-0025) : le tronc recharge ne contiendrait alors
+plus aucune couche LoRA a specialiser, et le gel de phase 2 ne trouverait rien.
 
 Trois points de protocole, tous deliberes :
 
@@ -108,22 +114,15 @@ class LoraPerDatasetApproach(LoraApproach):
         sinon `requires_grad` sur les parametres geles.
         """
         parameters = dict(model.named_parameters())
-        for name in freeze_patterns_for(parameters, [r"lora_[AB]"]):
+        frozen = freeze_patterns_for(parameters, [r"lora_[AB]"])
+        if len(frozen) == len(parameters):
+            raise RuntimeError(
+                "Aucune couche LoRA dans le modele de phase 2 : l'injection n'a pas eu "
+                "lieu. Le tronc sauvegarde a ses adaptateurs FUSIONNES (ADR-0025), donc "
+                "la phase 2 doit en INJECTER de nouveaux, pas esperer les retrouver."
+            )
+        for name in frozen:
             parameters[name].requires_grad_(False)
-
-    def _reset_adapters(self, model: Any) -> int:
-        """Reinitialise les adaptateurs avant de specialiser un nouveau groupe.
-
-        Sans cela, chaque groupe partirait des adaptateurs du groupe precedent et
-        l'ordre de traitement influencerait les resultats.
-        """
-        count = 0
-        for module in model.modules():
-            if hasattr(module, "reset_lora_parameters"):
-                for adapter in getattr(module, "lora_A", {}):
-                    module.reset_lora_parameters(adapter, init_lora_weights=True)
-                    count += 1
-        return count
 
     # --- entrainement -------------------------------------------------------
     def fit(self, data: FoldData, ctx: RunContext) -> None:
@@ -142,24 +141,18 @@ class LoraPerDatasetApproach(LoraApproach):
         started = time.perf_counter()
 
         # --- phase 1 : tronc commun, sur TOUT le train du fold ---
+        # Aucun adaptateur ici : la sauvegarde les fusionnerait dans les poids de base,
+        # et le tronc recharge n'aurait plus rien a specialiser en phase 2.
         trunk_data = export_fold(data, self.schema, ctx.subdir("yolo_dataset/trunk"),
                                  splits=("train", "val"))
         ctx.logger.info("Phase 1 : tronc commun, %d epoque(s) sur %d image(s).",
                         stage1_epochs, len(data.train))
         model = YOLO(str(self.cfg.approach.weights))
-        report: dict[str, Any] = {}
         model.train(
             data=str(trunk_data), project=str(ctx.subdir("logs/trunk")), name="train",
             exist_ok=True, seed=ctx.seed("trunk"), device=device, amp=amp,
             deterministic=str(self.cfg.mode) == "debug", verbose=False,
-            epochs=stage1_epochs,
-            # Phase 1 : les adaptateurs sont injectes mais RIEN n'est gele — le tronc
-            # et les tetes doivent apprendre le domaine avant qu'on les fige.
-            trainer=make_patched_trainer(
-                pose_trainer_class(), patch=self._apply_lora, report=report,
-                skip_final_eval=True,
-            ),
-            **self._train_kwargs(),
+            epochs=stage1_epochs, **self._train_kwargs(),
         )
         trunk_weights = ctx.subdir("weights/trunk") / "best.pt"
         trunk_weights.write_bytes(Path(model.trainer.best).read_bytes())
@@ -189,8 +182,10 @@ class LoraPerDatasetApproach(LoraApproach):
                 name="train", exist_ok=True, seed=ctx.seed(f"adapters_{dataset}"),
                 device=device, amp=amp, deterministic=str(self.cfg.mode) == "debug",
                 verbose=False, epochs=stage2_epochs,
+                # Chaque groupe repart d'adaptateurs NEUFS injectes dans le tronc :
+                # sans cela, l'ordre de traitement des groupes influencerait le resultat.
                 trainer=make_patched_trainer(
-                    pose_trainer_class(), patch=self._reset_adapters,
+                    pose_trainer_class(), patch=self._apply_lora,
                     freeze=self._freeze_all_but_adapters, report=group_report,
                     skip_final_eval=True,
                 ),
@@ -223,7 +218,6 @@ class LoraPerDatasetApproach(LoraApproach):
             "device": device_info(device),
             "lora_rank": int(self.cfg.approach.lora.r),
             "lora_alpha": self._alpha(),
-            "trunk_report": dict(report),
             "lora_final_report": parameter_report(first.model),
         })
 

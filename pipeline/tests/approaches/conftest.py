@@ -102,6 +102,33 @@ class FakePoseTrainer:
         return None
 
 
+class _FakeCheckpointModule:
+    """Module minimal picklable, imitant l'interface attendue d'un checkpoint YOLO."""
+
+    def __init__(self) -> None:
+        self.children: dict[str, Any] = {}
+
+    def named_children(self) -> list[tuple[str, Any]]:
+        return list(self.children.items())
+
+
+def _write_fake_checkpoint(path: Path) -> None:
+    """Ecrit un checkpoint lisible par torch.load, ou pickle en repli.
+
+    Effet de bord : cree `path`.
+    """
+    payload = {"model": _FakeCheckpointModule(), "ema": None, "epoch": -1}
+    try:
+        import torch
+
+        torch.save(payload, path)
+    except ImportError:
+        import pickle
+
+        with path.open("wb") as handle:
+            pickle.dump(payload, handle)
+
+
 class FakeYOLO:
     """Double d'Ultralytics : enregistre les appels, renvoie des sorties plausibles."""
 
@@ -122,7 +149,10 @@ class FakeYOLO:
         FakeYOLO.calls.append({"kind": "train", **kwargs})
         best = Path(kwargs["project"]) / "train" / "weights" / "best.pt"
         best.parent.mkdir(parents=True, exist_ok=True)
-        best.write_bytes(b"fake-weights")
+        # Un checkpoint PICKLABLE : les approches qui fusionnent leurs adaptateurs
+        # (lora, lora_per_dataset) le rechargent avec torch.load avant de le reecrire.
+        # Un simple b"fake-weights" ferait echouer le depickling.
+        _write_fake_checkpoint(best)
         self.trainer = types.SimpleNamespace(best=str(best))
 
     def predict(self, source: list[str], **kwargs: Any) -> list[_Result]:

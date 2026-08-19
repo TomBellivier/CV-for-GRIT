@@ -87,6 +87,24 @@ def test_search_space_has_four_dimensions(cfg_h) -> None:
 
 
 @pytest.mark.smoke
+def test_adapters_are_injected_in_phase_two_only(
+    fake_ultralytics, cfg_h, project  # noqa: ARG001
+) -> None:
+    """Le tronc sauvegarde a ses adaptateurs FUSIONNES : la phase 2 doit en injecter
+    de nouveaux, pas esperer les retrouver (ADR-0036)."""
+    from insectpose.approaches.lora_per_dataset import LoraPerDatasetApproach
+
+    approach = LoraPerDatasetApproach(cfg_h)
+
+    class _Sans:
+        def named_parameters(self):
+            return [("model.0.conv.weight", object())]
+
+    with pytest.raises(RuntimeError, match="Aucune couche LoRA"):
+        approach._freeze_all_but_adapters(_Sans())
+
+
+@pytest.mark.smoke
 def test_two_phases_produce_one_model_per_group(
     fake_ultralytics, cfg_h, project  # noqa: ARG001
 ) -> None:
