@@ -21,6 +21,13 @@ from typing import Any
 import numpy as np
 import pytest
 
+from insectpose.registry import load_all_plugins
+
+# Les plugins sont charges A L'IMPORT : la parametrisation de tests/test_smoke.py et
+# de tests/approaches/*.py lit le registre au moment de la COLLECTE pytest, avant
+# toute fixture. Un chargement differe laisserait le registre vide.
+load_all_plugins()
+
 
 class _Arr:
     """Minimal shim exposant l'interface `.cpu().numpy()` des tenseurs torch."""
