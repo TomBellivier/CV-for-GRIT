@@ -35,6 +35,28 @@ CORRECTIONS PAR RAPPORT A LA VERSION D'ORIGINE
    `cls` voit un recadrage central que `detect`/`pose` ne voient pas, et
    comparer leurs cartes de saillance n'a plus de sens.
 
+8bis. NOUVEAU — `link_mode` : les IMAGES sont posees en lien symbolique au lieu
+   d'etre copiees (gain de place, generation quasi instantanee). Trois limites
+   incontournables, appliquees automatiquement :
+
+   - Les LABELS ne peuvent JAMAIS etre des liens. Ils sont reecrits (remappage
+     du class_id, troncature des keypoints pour `detect`). Un lien ferait
+     ecrire ces modifications DANS LES DATASETS SOURCES, qui seraient corrompus
+     de facon irreversible. Les labels restent donc des fichiers reels.
+
+   - Le dataset `cls` avec `letterbox=True` produit des images TRANSFORMEES :
+     elles ne peuvent pas etre des liens non plus. Passer `letterbox_cls=False`
+     rend le lien possible, au prix du recadrage central d'Ultralytics (cf.
+     correction 7) qui casse la comparabilite des cartes de saillance. Le choix
+     par defaut privilegie la correction methodologique.
+
+   - `erase=True` devient interdit en mode lien : supprimer les datasets
+     sources laisserait des liens morts.
+
+   Repli automatique symlink -> hardlink -> copie (Windows sans mode
+   developpeur refuse les symlinks mais accepte les hardlinks sur le meme
+   volume).
+
 8. NOUVEAU — `write_cls_names()` ecrit `classes.txt`. Ultralytics ordonne les
    classes de classification par ORDRE ALPHABETIQUE des dossiers, pas par
    l'ordre de `dataset_list`. Avec des groupes en minuscules, `background`
@@ -42,7 +64,9 @@ CORRECTIONS PAR RAPPORT A LA VERSION D'ORIGINE
    `model.names` et remappe, mais ce fichier documente l'ordre attendu.
 """
 
+from collections import Counter
 from pathlib import Path
+import os
 import shutil
 
 import tqdm
@@ -219,6 +243,45 @@ def _unique_name(name: str, dataset: str, taken: set) -> str:
     return candidate
 
 
+_LINK_WARNED = set()
+
+
+def _place(src, dst, mode="symlink"):
+    """Pose `src` en `dst` : lien symbolique, lien physique, ou copie.
+
+    Repli automatique : un systeme qui refuse les symlinks (Windows sans mode
+    developpeur) accepte generalement les hardlinks sur le meme volume. On
+    n'echoue jamais, on degrade.
+    """
+    src, dst = Path(src).resolve(), Path(dst)
+    if dst.is_symlink() or dst.exists():
+        dst.unlink()
+
+    if mode == "symlink":
+        try:
+            dst.symlink_to(src)
+            return "symlink"
+        except (OSError, NotImplementedError):
+            if "symlink" not in _LINK_WARNED:
+                _LINK_WARNED.add("symlink")
+                print("  [info] symlinks indisponibles (droits ou systeme de "
+                      "fichiers) -> repli sur les liens physiques.")
+            mode = "hardlink"
+
+    if mode == "hardlink":
+        try:
+            os.link(src, dst)
+            return "hardlink"
+        except OSError:
+            if "hardlink" not in _LINK_WARNED:
+                _LINK_WARNED.add("hardlink")
+                print("  [info] liens physiques indisponibles (volumes "
+                      "differents ?) -> repli sur la copie.")
+
+    shutil.copy2(src, dst)
+    return "copy"
+
+
 def _rewrite_label(src, dst, new_class_id, keep_kpts):
     lines = []
     for line in Path(src).read_text().strip().splitlines():
@@ -231,11 +294,17 @@ def _rewrite_label(src, dst, new_class_id, keep_kpts):
     Path(dst).write_text("\n".join(lines) + ("\n" if lines else ""))
 
 
-def _copy_geometric(dataset_list, final_folder, dataset_folder, keep_kpts, remap_class):
-    """Copie images + labels APPARIES (correction : plus de dedup separee)."""
+def _copy_geometric(dataset_list, final_folder, dataset_folder, keep_kpts, remap_class,
+                    link_mode="symlink"):
+    """Place images + labels APPARIES (correction : plus de dedup separee).
+
+    Images -> lien (`link_mode`). Labels -> TOUJOURS des fichiers reels : ils
+    sont reecrits, un lien corromprait les datasets sources.
+    """
     final_folder = Path(final_folder)
     taken = {s: set() for s in SPLITS}
     stats = {}
+    modes = Counter()
 
     for cid, dataset in enumerate(tqdm.tqdm(dataset_list, colour="red", desc="datasets")):
         dpath = Path(dataset_folder) / dataset
@@ -254,7 +323,9 @@ def _copy_geometric(dataset_list, final_folder, dataset_folder, keep_kpts, remap
                     continue
                 new_name = _unique_name(img.name, dataset, taken[split])
                 taken[split].add(new_name)
-                shutil.copy(img, final_folder / "images" / split / new_name)
+                modes[_place(img, final_folder / "images" / split / new_name,
+                             link_mode)] += 1
+                # label : fichier reel, jamais un lien (voir docstring)
                 _rewrite_label(lbl,
                                final_folder / "labels" / split / f"{Path(new_name).stem}.txt",
                                cid if remap_class else 0, keep_kpts)
@@ -263,27 +334,29 @@ def _copy_geometric(dataset_list, final_folder, dataset_folder, keep_kpts, remap
 
     print("\nrecapitulatif :")
     for d, (ok, skip) in stats.items():
-        print(f"  {d:<22} {ok:5d} paires copiees"
+        print(f"  {d:<22} {ok:5d} paires"
               + (f"  ({skip} images sans label, ignorees)" if skip else ""))
+    print(f"  images : {dict(modes)}   |   labels : fichiers reels (reecrits)")
     return stats
 
 
 def create_pose_dataset(dataset_list, final_folder, dataset_folder="./models/datasets/",
-                        cls=False, filter_keywords=()):
+                        cls=False, filter_keywords=(), link_mode="symlink"):
     _copy_geometric(dataset_list, final_folder, dataset_folder,
-                    keep_kpts=True, remap_class=cls)
+                    keep_kpts=True, remap_class=cls, link_mode=link_mode)
     make_pose_config_file(final_folder, filter_keywords,
                           cls_groups=dataset_list if cls else ())
 
 
-def create_detect_dataset(dataset_list, final_folder, dataset_folder="./models/datasets/"):
+def create_detect_dataset(dataset_list, final_folder, dataset_folder="./models/datasets/",
+                          link_mode="symlink"):
     _copy_geometric(dataset_list, final_folder, dataset_folder,
-                    keep_kpts=False, remap_class=True)
+                    keep_kpts=False, remap_class=True, link_mode=link_mode)
     make_detect_config_file(final_folder, dataset_list)
 
 
 def create_cls_dataset(dataset_list, final_folder, dataset_folder="./models/datasets/",
-                       letterbox=True, imgsz=IMGSZ):
+                       letterbox=True, imgsz=IMGSZ, link_mode="symlink"):
     """Arborescence `split/groupe/*.png`.
 
     NOUVEAU : `letterbox=True` ecrit des images carrees. Ultralytics applique
@@ -291,10 +364,19 @@ def create_cls_dataset(dataset_list, final_folder, dataset_folder="./models/data
     transformation devient l'identite, et le modele `cls` voit exactement le
     meme cadrage que `detect`/`pose`. Sans cela, comparer leurs cartes de
     saillance revient a comparer deux cadrages differents.
+
+    `letterbox=True` implique d'ECRIRE des images transformees : aucun lien
+    possible. `letterbox=False` autorise les liens mais reintroduit le
+    recadrage central -> les cartes de saillance de `cls` ne sont alors plus
+    superposables a celles de `detect`/`pose`.
     """
     final_folder = Path(final_folder)
     taken = {s: set() for s in SPLITS}
     total = 0
+    modes = Counter()
+    if letterbox and link_mode != "copy":
+        print("  [info] letterbox=True : les images sont transformees, "
+              "les liens ne s'appliquent pas au dataset cls.")
     for dataset in tqdm.tqdm(dataset_list, colour="red", desc="datasets"):
         dpath = Path(dataset_folder) / dataset
         for split in SPLITS:
@@ -309,13 +391,17 @@ def create_cls_dataset(dataset_list, final_folder, dataset_folder="./models/data
                     continue
                 new_name = _unique_name(img.name, dataset, taken[split])
                 taken[split].add(new_name)
+                dst = dst_dir / new_name
                 if letterbox:
-                    letterbox_pil(Image.open(img), imgsz).save(dst_dir / new_name)
+                    if dst.is_symlink() or dst.exists():
+                        dst.unlink()
+                    letterbox_pil(Image.open(img), imgsz).save(dst)
+                    modes["ecrite (letterbox)"] += 1
                 else:
-                    shutil.copy(img, dst_dir / new_name)
+                    modes[_place(img, dst, link_mode)] += 1
                 total += 1
     write_cls_names(final_folder, dataset_list)
-    print(f"\n{total} images copiees" + (" (letterboxees)" if letterbox else ""))
+    print(f"\n{total} images   |   {dict(modes)}")
 
 
 def write_cls_names(final_folder, dataset_list):
@@ -339,7 +425,21 @@ def write_cls_names(final_folder, dataset_list):
 
 # ======================================================================
 def fuze(dataset_name, dataset_list, dataset_folder="./models/datasets/",
-         erase=False, task="pose", increment=True, letterbox_cls=True):
+         erase=False, task="pose", increment=True, letterbox_cls=True,
+         link_mode="symlink"):
+    """`link_mode` : "symlink" (defaut) | "hardlink" | "copy".
+
+    Ne concerne que les IMAGES. Les labels sont toujours reecrits en fichiers
+    reels, sans quoi le remappage des class_id modifierait les datasets sources.
+    """
+    if link_mode not in ("symlink", "hardlink", "copy"):
+        raise ValueError(f"link_mode '{link_mode}' inconnu")
+    if erase and link_mode != "copy":
+        raise ValueError(
+            "erase=True est incompatible avec link_mode='%s' : supprimer les "
+            "datasets sources laisserait des liens morts. Utiliser "
+            "link_mode='copy', ou erase=False." % link_mode)
+
     f = Path(dataset_folder) / dataset_name
     if increment:
         f = Path(increment_path(f))       # CORRECTION : desormais optionnel
@@ -355,29 +455,65 @@ def fuze(dataset_name, dataset_list, dataset_folder="./models/datasets/",
                 (f / split / dataset).mkdir(parents=True, exist_ok=True)
 
     if task == "pose":
-        create_pose_dataset(dataset_list, f, dataset_folder)
+        create_pose_dataset(dataset_list, f, dataset_folder, link_mode=link_mode)
     elif task == "pose+cls":
-        create_pose_dataset(dataset_list, f, dataset_folder, cls=True)
+        create_pose_dataset(dataset_list, f, dataset_folder, cls=True, link_mode=link_mode)
     elif task == "detect":
-        create_detect_dataset(dataset_list, f, dataset_folder)
+        create_detect_dataset(dataset_list, f, dataset_folder, link_mode=link_mode)
     elif task == "cls":
-        create_cls_dataset(dataset_list, f, dataset_folder, letterbox=letterbox_cls)
+        create_cls_dataset(dataset_list, f, dataset_folder, letterbox=letterbox_cls,
+                           link_mode=link_mode)
     else:
         raise ValueError(f"task '{task}' non supportee")
 
     if erase and input("Supprimer les datasets sources ? (y/n) ") == "y":
         for dataset in dataset_list:
             shutil.rmtree(Path(dataset_folder) / dataset)
+    check_links(f, task)
     return f
 
 
+def check_links(dataset_dir, task="pose"):
+    """Verifie qu'aucun lien n'est mort et qu'aucun label n'est un lien.
+
+    Un lien mort ne se voit qu'au moment de l'entrainement, sous la forme d'une
+    erreur de lecture d'image peu explicite. Autant le detecter tout de suite.
+    """
+    dataset_dir = Path(dataset_dir)
+    img_root = dataset_dir if task == "cls" else dataset_dir / "images"
+    dead = [p for p in img_root.rglob("*")
+            if p.is_symlink() and not p.resolve().exists()]
+    linked_labels = [p for p in (dataset_dir / "labels").rglob("*.txt")
+                     if p.is_symlink()] if (dataset_dir / "labels").exists() else []
+
+    n_links = sum(1 for p in img_root.rglob("*") if p.is_symlink())
+    print(f"verification : {n_links} liens symboliques, {len(dead)} morts")
+    if dead:
+        print("  ATTENTION : liens morts (source deplacee ou supprimee) :")
+        for p in dead[:5]:
+            print(f"    {p} -> {os.readlink(p)}")
+    if linked_labels:
+        raise RuntimeError(
+            f"{len(linked_labels)} labels sont des liens : le remappage des "
+            "class_id ecrirait dans les datasets sources. Regenerer le dataset.")
+    return not dead
+
+
 if __name__ == "__main__":
-    GROUPS = ["coleoptera", "diptera", "hymenoptera", "lepidoptera"]
+    GROUPS = ["Coleoptera", "Hymenoptera", "Lepidoptera"]
     ROOT = "./models/datasets/"
 
     # `pose+cls` et non `pose` : le modele pose doit avoir 4 classes (une par
     # groupe) pour produire une prediction image-level comparable a `cls`.
-    fuze("AllSpecies-pose",   GROUPS, ROOT, task="pose+cls", increment=False)
-    fuze("AllSpecies-detect", GROUPS, ROOT, task="detect",   increment=False)
-    fuze("AllSpecies-cls",    GROUPS, ROOT, task="cls",      increment=False)
+    # link_mode="symlink" : les images ne sont pas dupliquees.
+    # Ne PAS deplacer ni supprimer les datasets sources apres coup.
+    fuze("AllSpecies-pose",   GROUPS, ROOT, task="pose+cls", increment=False,
+         link_mode="symlink")
+    fuze("AllSpecies-detect", GROUPS, ROOT, task="detect",   increment=False,
+         link_mode="symlink")
+    # cls : letterbox_cls=True ecrit des images transformees (pas de lien
+    # possible). letterbox_cls=False autoriserait les liens, au prix du
+    # recadrage central qui casse la comparabilite des cartes de saillance.
+    fuze("AllSpecies-cls",    GROUPS, ROOT, task="cls",      increment=False,
+         link_mode="symlink", letterbox_cls=True)
     # puis : python create_background_class.py

@@ -45,6 +45,19 @@ CORRECTIONS PAR RAPPORT A LA VERSION D'ORIGINE
 
 9. NOUVEAU — sortie letterboxee, coherente avec `create_cls_dataset`.
 
+12. NOUVEAU — le dataset avec classe `background` est ECRIT A COTE
+   (`AllSpecies-cls-bg`) au lieu d'etre ajoute en place dans `AllSpecies-cls`.
+
+   La version d'origine modifiait `AllSpecies-cls` sur place. Consequences :
+   impossible de reentrainer la version sans `background` sans regenerer le
+   dataset, ordre d'execution critique (entrainer AVANT de lancer ce script,
+   sinon la reference est perdue), et resultat non reproductible.
+
+   Les deux datasets coexistent desormais et peuvent etre entraines dans
+   n'importe quel ordre. Les images des 3 groupes sont liees, pas copiees :
+   le cout disque du second dataset se limite aux images `background`.
+   `IN_PLACE = True` retablit l'ancien comportement.
+
 POURQUOI PLUSIEURS METHODES
 ---------------------------
 Ta methode d'origine (couleur moyenne + bruit + flou) ne reconstruit pas le
@@ -72,8 +85,12 @@ from PIL import Image, ImageFilter
 # ======================================================================
 DATASET_DIR = Path("./models/datasets/")
 POSE_DATASET = DATASET_DIR / "AllSpecies-pose"
-CLS_DATASET = DATASET_DIR / "AllSpecies-cls"
+CLS_DATASET = DATASET_DIR / "AllSpecies-cls"          # 3 groupes, sans background
+CLS_BG_DATASET = DATASET_DIR / "AllSpecies-cls-bg"    # 3 groupes + background
 COUNTERFACTUAL_DIR = DATASET_DIR / "counterfactual"
+
+IN_PLACE = False   # True -> ancien comportement (ajout dans AllSpecies-cls)
+LINK_MODE = "symlink"  # "symlink" | "hardlink" | "copy" (cf. fuze_datasets._place)
 
 IMGSZ = 640                  # identique a fuze_datasets.py et au notebook
 LETTERBOX = True
@@ -258,11 +275,47 @@ def generate(method: str, out_root: Path, subdir: str = "", splits=SPLITS,
     print(f"{method} : {kept}/{total} images -> {out_root}")
 
 
-def report_balance():
-    """Verifie l'equilibre des classes du dataset cls (CORRECTION 7)."""
-    print("\nequilibre du dataset de classification :")
+def build_cls_with_background(src=CLS_DATASET, dst=CLS_BG_DATASET,
+                              link_mode=LINK_MODE, method="mean_noise",
+                              ratio=BACKGROUND_RATIO):
+    """Construit `dst` = `src` + une classe `background`, sans toucher a `src`.
+
+    Les images des groupes existants sont LIEES (pas copiees) : le second
+    dataset ne coute en disque que ses images `background`. Les deux peuvent
+    donc etre entraines dans n'importe quel ordre, autant de fois que voulu.
+    """
+    from fuze_datasets import _place       # meme repli symlink -> hardlink -> copie
+
+    src, dst = Path(src), Path(dst)
+    if not src.exists():
+        raise FileNotFoundError(f"{src} introuvable — lancer fuze_datasets.py d'abord.")
+
+    n_link = 0
     for split in SPLITS:
-        d = CLS_DATASET / split
+        sdir = src / split
+        if not sdir.exists():
+            continue
+        for cls_dir in sorted(p for p in sdir.iterdir() if p.is_dir()):
+            if cls_dir.name == "background":
+                continue                    # regenere, jamais recopie
+            out = dst / split / cls_dir.name
+            out.mkdir(parents=True, exist_ok=True)
+            for img in cls_dir.iterdir():
+                if img.suffix.lower() in IMG_EXT:
+                    _place(img, out / img.name, link_mode)
+                    n_link += 1
+    print(f"{n_link} images des groupes liees ({link_mode}) -> {dst}")
+
+    generate(method, dst, subdir="background", ratio=ratio)
+    return dst
+
+
+def report_balance(dataset=None):
+    """Verifie l'equilibre des classes du dataset cls (CORRECTION 7)."""
+    dataset = Path(dataset or (CLS_DATASET if IN_PLACE else CLS_BG_DATASET))
+    print(f"\nequilibre de {dataset.name} :")
+    for split in SPLITS:
+        d = dataset / split
         if not d.exists():
             continue
         counts = {p.name: sum(1 for f in p.iterdir() if f.suffix.lower() in IMG_EXT)
@@ -276,10 +329,18 @@ def report_balance():
 
 
 if __name__ == "__main__":
-    # 1. Classe `background` du dataset de classification.
-    #    Sous-echantillonnee (BACKGROUND_RATIO) pour ne pas ecraser les 3 groupes.
+    # 1. Dataset de classification AVEC la classe `background`.
+    #    Ecrit a cote de AllSpecies-cls, qui reste intact : les deux datasets
+    #    coexistent et peuvent etre entraines dans n'importe quel ordre.
     #    Methode `mean_noise` : c'est celle qui entre dans l'ENTRAINEMENT de cls.
-    generate("mean_noise", CLS_DATASET, subdir="background", ratio=BACKGROUND_RATIO)
+    if IN_PLACE:
+        print("mode IN_PLACE : AllSpecies-cls est modifie, la version sans "
+              "background sera perdue.")
+        generate("mean_noise", CLS_DATASET, subdir="background", ratio=BACKGROUND_RATIO)
+        report_balance(CLS_DATASET)
+    else:
+        build_cls_with_background()
+        report_balance(CLS_BG_DATASET)
 
     # 2. Jeux contre-factuels, split test uniquement, sans sous-echantillonnage.
     #    `mean_noise` = meme methode que l'entrainement (cls l'a deja vue)
@@ -288,5 +349,3 @@ if __name__ == "__main__":
     #    L'ecart entre les trois est ce qui rend le test interpretable.
     for method in ("mean_noise", "telea", "gray"):
         generate(method, COUNTERFACTUAL_DIR / method, splits=("test",), ratio=1.0)
-
-    report_balance()
