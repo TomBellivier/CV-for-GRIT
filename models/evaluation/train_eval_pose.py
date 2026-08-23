@@ -35,10 +35,10 @@ from ultralytics import YOLO
 # Default group -> data.yaml mapping, used when no --data-config file is given.
 # Replace the paths with the actual location of each group's dataset.
 DEFAULT_GROUPS = {
-    "Coleoptera": "models/datasets/Coleoptera/yolo-config.yaml",
-    "Diptera": "models/datasets/Diptera/yolo-config.yaml",
-    "Hymenoptera": "models/datasets/Hymenoptera/yolo-config.yaml",
-    "Lepidoptera": "models/datasets/Lepidoptera/yolo-config.yaml",
+    "Coleoptera": "models/datasets/coleoptera/yolo-config.yaml",
+    "Diptera": "models/datasets/diptera/yolo-config.yaml",
+    "Hymenoptera": "models/datasets/hymenoptera/yolo-config.yaml",
+    "Lepidoptera": "models/datasets/lepidoptera/yolo-config.yaml",
 }
 
 # PCK thresholds, expressed as a fraction of the ground-truth bbox diagonal.
