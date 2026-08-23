@@ -504,10 +504,17 @@ def _cost_scatter(master: pd.DataFrame, costs: pd.DataFrame, metric: str, cost_c
     from insectpose.evaluation.aggregate import model_label
 
     data = _select(master, metric, split, scope="overall")
-    if data.empty or costs.empty:
+    if data.empty or costs.empty or cost_column not in costs.columns:
         return None
-    data = data.merge(costs, on="run_id", how="left").dropna(subset=[cost_column])
+    # `master.parquet` remonte deja certains champs de manifeste (dont train_time_s) :
+    # sans ce retrait, la fusion produirait `train_time_s_x`/`_y` et la colonne demandee
+    # n'existerait plus. On garde la valeur de `costs`, qui vient directement du manifeste.
+    doublons = [c for c in costs.columns if c != "run_id" and c in data.columns]
+    data = data.drop(columns=doublons).merge(costs, on="run_id", how="left")
+    data = data.dropna(subset=[cost_column])
     if data.empty:
+        log.info("Aucun cout '%s' exploitable pour '%s' : figure ignoree.",
+                 cost_column, metric)
         return None
     data = data.copy()
     data["model"] = model_label(data)
