@@ -1,8 +1,9 @@
 """Figures du rapport (CONVENTIONS.md §8.3).
 
 Toutes les figures sont produites a partir des ARTEFACTS : `results/master.parquet`,
-les rapports de couverture, les predictions et les journaux d'entrainement. Aucune ne
-recalcule une metrique — sans quoi deux chiffres du meme rapport pourraient diverger.
+les rapports de couverture, les predictions, les manifestes et les journaux
+d'entrainement. Aucune ne recalcule une metrique — sans quoi deux chiffres du meme
+rapport pourraient diverger.
 
 Les runs d'HPO sont exclus par `final_runs` : ce sont des essais, pas des resultats.
 """
@@ -23,7 +24,7 @@ from insectpose.data.keypoints import KeypointSchema, load_schema  # noqa: E402
 from insectpose.data.measurements import load_measurements, measure_all  # noqa: E402
 from insectpose.evaluation.aggregate import final_runs  # noqa: E402
 from insectpose.paths import ProjectPaths  # noqa: E402
-from insectpose.utils.io import read_parquet  # noqa: E402
+from insectpose.utils.io import read_json, read_parquet  # noqa: E402
 from insectpose.utils.logging import get_logger  # noqa: E402
 
 log = get_logger("figures")
@@ -454,6 +455,135 @@ def fig_symmetry_scatter(paths: ProjectPaths, master: pd.DataFrame, cfg: Any,
     return _save(fig, out_dir / "symmetry_pairs.png", dpi)
 
 
+# --- 9. performance vs cout -------------------------------------------------
+def _run_costs(paths: ProjectPaths, master: pd.DataFrame) -> pd.DataFrame:
+    """Couts par run, lus dans les MANIFESTES (§7.2).
+
+    `master.parquet` ne porte pas tous les couts : les champs propres a une approche
+    (`n_models`, `n_adapter_sets`, ratios de parametres entrainables) vivent dans les
+    manifestes. On les lit ici plutot que de les recalculer.
+    """
+    lignes: list[dict[str, Any]] = []
+    for run_id in final_runs(master)["run_id"].dropna().unique():
+        manifest = paths.manifest(str(run_id))
+        if not manifest.exists():
+            continue
+        meta = read_json(manifest)
+
+        # Parametres reellement ENTRAINES. `model_params` ne convient pas : apres fusion
+        # des adaptateurs, un modele LoRA compte autant de parametres qu'un modele
+        # entraine entierement (ADR-0025). Le champ differe selon l'approche.
+        trainable = None
+        for prefixe in ("lora", "head", "head_only"):
+            if meta.get(f"{prefixe}_trainable_params") is not None:
+                trainable = meta[f"{prefixe}_trainable_params"]
+                break
+        if trainable is None:
+            rapport = meta.get("lora_final_report") or {}
+            trainable = rapport.get("trainable_params") or meta.get("model_params")
+
+        # Parametres qui VARIENT d'un groupe a l'autre : c'est le cout de la
+        # specialisation, nul pour une approche a modele unique.
+        copies = int(meta.get("n_models") or meta.get("n_adapter_sets") or 1)
+        specialises = int(trainable or 0) * copies if copies > 1 else 0
+
+        lignes.append({
+            "run_id": str(run_id),
+            "train_time_s": meta.get("train_time_s") or meta.get("duration_s"),
+            "trainable_params": trainable,
+            "specialised_params": specialises,
+            "n_copies": copies,
+        })
+    return pd.DataFrame(lignes)
+
+
+def _cost_scatter(master: pd.DataFrame, costs: pd.DataFrame, metric: str, cost_column: str,
+                  xlabel: str, title: str, path: Path, split: str = "test",
+                  log_x: bool = False, dpi: int = 150) -> Path | None:
+    """Nuage performance vs cout, un point par modele, barres d'erreur inter-folds."""
+    from insectpose.evaluation.aggregate import model_label
+
+    data = _select(master, metric, split, scope="overall")
+    if data.empty or costs.empty:
+        return None
+    data = data.merge(costs, on="run_id", how="left").dropna(subset=[cost_column])
+    if data.empty:
+        return None
+    data = data.copy()
+    data["model"] = model_label(data)
+
+    stats = data.groupby("model").agg(
+        perf=("value", "mean"), erreur=("value", "std"),
+        cout=(cost_column, "mean"), folds=("value", "size"),
+    ).reset_index()
+    if log_x:
+        # Une approche a modele unique a un cout de specialisation NUL : en echelle log
+        # elle disparaitrait, alors que c'est justement le point de reference. On la
+        # place a gauche de l'axe, une decade sous le plus petit cout non nul.
+        positifs = stats.loc[stats["cout"] > 0, "cout"]
+        plancher = float(positifs.min()) / 10 if len(positifs) else 1.0
+        stats["cout"] = stats["cout"].replace(0, plancher)
+
+    fig, ax = plt.subplots(figsize=(8, 5.5))
+    couleurs = plt.get_cmap("tab10")
+    for i, ligne in enumerate(stats.itertuples(index=False)):
+        ax.errorbar(ligne.cout, ligne.perf,
+                    yerr=ligne.erreur if np.isfinite(ligne.erreur) else None,
+                    fmt="o", ms=9, capsize=4, color=couleurs(i % 10), label=ligne.model)
+        ax.annotate(str(ligne.model).split(" · ")[0], (ligne.cout, ligne.perf),
+                    textcoords="offset points", xytext=(8, 5), fontsize=8)
+    if log_x:
+        ax.set_xscale("log")
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(metric)
+    ax.grid(alpha=0.3)
+    ax.set_title(title)
+    ax.legend(fontsize=8, loc="best")
+    return _save(fig, path, dpi)
+
+
+def fig_performance_vs_training_cost(paths: ProjectPaths, master: pd.DataFrame, out_dir: Path,
+                                     metric: str = "oks_ap", split: str = "test",
+                                     dpi: int = 150) -> Path | None:
+    """Performance vs temps d'entrainement.
+
+    C'est l'axe de cout ou les approches se separent reellement. Le temps d'INFERENCE
+    est quasi identique partout — un modele LoRA fusionne fait le meme forward qu'un
+    modele entraine entierement — alors que le cout d'adaptation varie d'un facteur 2.
+    Cette figure repond a "laquelle deployer ?" plutot qu'a "laquelle est la meilleure ?".
+    """
+    return _cost_scatter(
+        master, _run_costs(paths, master), metric, "train_time_s",
+        xlabel="training time (s)",
+        title=f"{metric} vs training cost ({split} split, mean ± std over folds)",
+        path=out_dir / f"cost_training_{metric.replace('@', '')}.png",
+        split=split, dpi=dpi,
+    )
+
+
+def fig_performance_vs_specialisation(paths: ProjectPaths, master: pd.DataFrame, out_dir: Path,
+                                      metric: str = "oks_ap", split: str = "test",
+                                      dpi: int = 150) -> Path | None:
+    """Performance vs nombre de parametres SPECIALISES par groupe d'insecte.
+
+    Isole le cout de la specialisation : nul pour une approche a modele unique, de
+    l'ordre de 10^4 pour une normalisation par groupe, 10^5 pour des adaptateurs par
+    groupe, 10^7 pour N modeles complets. Echelle logarithmique, ces ordres de grandeur
+    couvrant trois decades.
+    """
+    costs = _run_costs(paths, master)
+    if costs.empty or (costs["specialised_params"] == 0).all():
+        log.info("Aucune approche specialisee par groupe : figure de specialisation ignoree.")
+        return None
+    return _cost_scatter(
+        master, costs, metric, "specialised_params",
+        xlabel="parameters specialised per insect group (log scale, 0 shown at left)",
+        title=f"{metric} vs specialisation cost ({split} split)",
+        path=out_dir / f"cost_specialisation_{metric.replace('@', '')}.png",
+        split=split, log_x=True, dpi=dpi,
+    )
+
+
 # --- point d'entree ----------------------------------------------------------
 def write_figures(paths: ProjectPaths, cfg: Any, master: pd.DataFrame,
                   out_dir: Path | None = None) -> list[Path]:
@@ -483,6 +613,14 @@ def write_figures(paths: ProjectPaths, cfg: Any, master: pd.DataFrame,
 
     if bool(cfg.eval.measurements.enabled):
         written.append(fig_symmetry_scatter(paths, master, cfg, out_dir, split, dpi))
+
+    # Cout : DEUX axes, car aucun ne suffit seul. Le temps d'entrainement separe les
+    # approches ; le nombre de parametres specialises isole le cout de la specialisation.
+    primary = str(cfg.eval.primary_metric)
+    written.append(fig_performance_vs_training_cost(paths, master, out_dir, primary,
+                                                    split, dpi))
+    written.append(fig_performance_vs_specialisation(paths, master, out_dir, primary,
+                                                     split, dpi))
 
     produced = [p for p in written if p is not None]
     log.info("%d figure(s) ecrite(s) dans %s", len(produced), out_dir)
