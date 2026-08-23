@@ -745,7 +745,8 @@ def fig_performance_vs_specialisation(paths: ProjectPaths, master: pd.DataFrame,
 
 # --- 10. PCK par keypoint, trie -------------------------------------------
 def fig_keypoint_pck_bars(master: pd.DataFrame, out_dir: Path, split: str = "test",
-                          dataset: str | None = None, dpi: int = 150) -> Path | None:
+                          dataset: str | None = None, dpi: int = 150,
+                          alpha: float | None = None) -> Path | None:
     """PCK de chaque keypoint, trie par ordre croissant, couleurs d'annotation.
 
     Le tri met les points problematiques en tete de lecture : c'est la figure qui
@@ -753,45 +754,64 @@ def fig_keypoint_pck_bars(master: pd.DataFrame, out_dir: Path, split: str = "tes
     d'annotation, pour que cette figure et une capture d'ecran d'annotation se lisent
     ensemble sans effort de correspondance.
 
+    Un panneau par dataset quand `dataset` est None : les ordres d'insectes n'ont ni
+    les memes points annotes ni les memes difficultes, et les melanger effacerait
+    justement ce que la figure doit montrer.
+
     A croiser avec `pck_vs_coverage.png` : un point en tete de liste ET rarement
     annote n'est pas un echec du modele (ADR-0016).
     """
-    data = _keypoint_pck(master, split)
+    data = final_runs(master)
+    prefixe = "pck@" if alpha is None else f"pck@{alpha:g}"
+    data = data[data["scope"].str.startswith("keypoint:") & (data["split"] == split)
+                & data["metric"].str.startswith(prefixe)]
     if data.empty:
+        log.info("Aucune metrique '%s*' par keypoint sur le split '%s' : figure ignoree.",
+                 prefixe, split)
         return None
+
+    data = data.copy()
+    data["dataset"] = data["scope"].map(_dataset_of)
+    data["keypoint"] = data["scope"].map(lambda s: str(s).split(":")[-1])
     if dataset is not None:
         data = data[data["dataset"] == dataset]
         if data.empty:
             return None
 
-    stats = (data.groupby("keypoint")["value"]
-             .agg(pck="mean", ecart="std", n="size")
-             .reset_index()
-             .sort_values("pck"))
+    stats = (data.groupby(["dataset", "keypoint"])["value"]
+             .agg(pck="mean", ecart="std", folds="size")
+             .reset_index())
 
-    fig, ax = plt.subplots(figsize=(max(8.0, 0.32 * len(stats) + 3), 5.5))
-    positions = np.arange(len(stats))
-    couleurs = [keypoint_color(nom) for nom in stats["keypoint"]]
-    erreurs = stats["ecart"].to_numpy() if (stats["n"] > 1).any() else None
-    ax.bar(positions, stats["pck"], color=couleurs, edgecolor="black", linewidth=0.4,
-           yerr=erreurs, capsize=2, error_kw={"lw": 0.8})
+    datasets = sorted(stats["dataset"].unique())
+    largeur = max(8.0, 0.32 * stats["keypoint"].nunique() + 3)
+    fig, axes = plt.subplots(len(datasets), 1, squeeze=False,
+                             figsize=(largeur, 4.6 * len(datasets)))
 
-    ax.set_xticks(positions)
-    ax.set_xticklabels(stats["keypoint"], rotation=90, fontsize=7)
-    ax.set_ylabel("PCK")
-    ax.set_ylim(0, 1.02)
-    ax.grid(axis="y", alpha=0.3)
-    # Moyenne de reference : separe d'un coup d'oeil les points au-dessus et en dessous.
-    moyenne = float(stats["pck"].mean())
-    ax.axhline(moyenne, color="grey", ls="--", lw=1,
-               label=f"mean {moyenne:.3f}")
-    # Etiquette placee hors du trace : posee sur la ligne, elle chevaucherait les
-    # dernieres barres, qui sont justement les plus hautes.
-    ax.text(1.005, moyenne, f"mean\n{moyenne:.3f}", transform=ax.get_yaxis_transform(),
-            va="center", fontsize=8, color="grey")
+    for ax, nom in zip(axes.flat, datasets, strict=True):
+        sub = stats[stats["dataset"] == nom].sort_values("pck").reset_index(drop=True)
+        positions = np.arange(len(sub))
+        couleurs = [keypoint_color(point) for point in sub["keypoint"]]
+        # Barres d'erreur seulement si plusieurs folds : sur un fold unique, l'ecart-type
+        # vaut NaN et matplotlib tracerait des moustaches vides.
+        erreurs = sub["ecart"].to_numpy() if (sub["folds"] > 1).any() else None
+        ax.bar(positions, sub["pck"], color=couleurs, edgecolor="black", linewidth=0.4,
+               yerr=erreurs, capsize=2, error_kw={"lw": 0.8})
 
-    perimetre = dataset or "all datasets"
-    ax.set_title(f"Keypoint PCK, sorted ({perimetre}, {split} split)")
+        ax.set_xticks(positions)
+        ax.set_xticklabels(sub["keypoint"], rotation=90, fontsize=7)
+        ax.set_ylabel("PCK")
+        ax.set_ylim(0, 1.02)
+        ax.grid(axis="y", alpha=0.3)
+        moyenne = float(sub["pck"].mean())
+        ax.axhline(moyenne, color="grey", ls="--", lw=1)
+        # Etiquette hors du trace : posee sur la ligne, elle chevaucherait les dernieres
+        # barres, qui sont justement les plus hautes.
+        ax.text(1.005, moyenne, f"mean\n{moyenne:.3f}", transform=ax.get_yaxis_transform(),
+                va="center", fontsize=8, color="grey")
+        ax.set_title(f"{nom} ({len(sub)} keypoints)", fontsize=10)
+
+    seuil = "" if alpha is None else f"@{alpha:g}"
+    fig.suptitle(f"Keypoint PCK{seuil}, sorted ({split} split)")
     suffixe = f"_{dataset}" if dataset else ""
     return _save(fig, out_dir / f"keypoint_pck_sorted{suffixe}.png", dpi)
 
@@ -813,8 +833,11 @@ def write_figures(paths: ProjectPaths, cfg: Any, master: pd.DataFrame,
 
     written.append(fig_confidence_vs_error(master, out_dir, split, dpi))
     written.append(fig_pck_curve(master, out_dir, split, dpi))
+    # Arguments NOMMES : le 4e positionnel est `dataset`, et y passer l'alpha filtrait
+    # sur un dataset nomme "0.25" — la figure sortait vide sans le moindre message.
     written.append(fig_keypoint_pck_bars(
-        master, out_dir, split, float(cfg.eval.pck.reference_alpha), dpi))
+        master, out_dir, split=split, dpi=dpi,
+        alpha=float(cfg.eval.pck.reference_alpha)))
     written.append(fig_training_curves(paths, master, out_dir, dpi))
 
     coverage_file = paths.processed / "coverage_keypoints.parquet"
