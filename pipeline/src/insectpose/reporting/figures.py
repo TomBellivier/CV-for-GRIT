@@ -456,6 +456,11 @@ def fig_symmetry_scatter(paths: ProjectPaths, master: pd.DataFrame, cfg: Any,
 
 
 # --- 9. performance vs cout -------------------------------------------------
+def _higher_is_better(metric: str) -> bool:
+    """Sens de la metrique. Le front de Pareto s'inverserait sinon."""
+    from insectpose.reporting.compare import LOWER_IS_BETTER
+
+    return metric not in LOWER_IS_BETTER
 def _run_costs(paths: ProjectPaths, master: pd.DataFrame) -> pd.DataFrame:
     """Couts par run, lus dans les MANIFESTES (§7.2).
 
@@ -497,10 +502,39 @@ def _run_costs(paths: ProjectPaths, master: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(lignes)
 
 
+def pareto_front(costs: np.ndarray, performances: np.ndarray,
+                 higher_is_better: bool = True) -> np.ndarray:
+    """Indices des points non domines, tries par cout croissant.
+
+    Un point est domine s'il existe un autre point a la fois moins couteux ET au moins
+    aussi performant. Le front relie donc les seuls choix defendables : tout ce qui est
+    en dessous peut etre remplace par une option strictement meilleure.
+
+    Fonction pure, testable sans matplotlib.
+    """
+    ordre = np.argsort(costs, kind="stable")
+    front: list[int] = []
+    meilleur = -np.inf if higher_is_better else np.inf
+    for indice in ordre:
+        valeur = performances[indice]
+        if not np.isfinite(valeur):
+            continue
+        gagne = valeur > meilleur if higher_is_better else valeur < meilleur
+        if gagne or not front:
+            front.append(int(indice))
+            meilleur = valeur
+    return np.asarray(front, dtype=int)
+
+
 def _cost_scatter(master: pd.DataFrame, costs: pd.DataFrame, metric: str, cost_column: str,
                   xlabel: str, title: str, path: Path, split: str = "test",
-                  log_x: bool = False, dpi: int = 150) -> Path | None:
-    """Nuage performance vs cout, un point par modele, barres d'erreur inter-folds."""
+                  log_x: bool = False, dpi: int = 150,
+                  higher_is_better: bool = True) -> Path | None:
+    """Nuage performance vs cout, un point etiquete par modele, avec front de Pareto.
+
+    Pas de legende : chaque point porte son nom, et une legende dupliquerait
+    l'information tout en mangeant la surface utile.
+    """
     from insectpose.evaluation.aggregate import model_label
 
     data = _select(master, metric, split, scope="overall")
@@ -533,19 +567,31 @@ def _cost_scatter(master: pd.DataFrame, costs: pd.DataFrame, metric: str, cost_c
 
     fig, ax = plt.subplots(figsize=(8, 5.5))
     couleurs = plt.get_cmap("tab10")
+
+    couts = stats["cout"].to_numpy(dtype=float)
+    perfs = stats["perf"].to_numpy(dtype=float)
+    front = pareto_front(couts, perfs, higher_is_better)
+    if len(front) > 1:
+        ax.plot(couts[front], perfs[front], "--", color="grey", lw=1.2, zorder=1)
+
     for i, ligne in enumerate(stats.itertuples(index=False)):
+        sur_le_front = i in set(front.tolist())
         ax.errorbar(ligne.cout, ligne.perf,
                     yerr=ligne.erreur if np.isfinite(ligne.erreur) else None,
-                    fmt="o", ms=9, capsize=4, color=couleurs(i % 10), label=ligne.model)
+                    fmt="o", ms=10 if sur_le_front else 7, capsize=4,
+                    color=couleurs(i % 10), zorder=3,
+                    markeredgecolor="black" if sur_le_front else "none",
+                    markeredgewidth=1.0 if sur_le_front else 0)
         ax.annotate(str(ligne.model).split(" · ")[0], (ligne.cout, ligne.perf),
-                    textcoords="offset points", xytext=(8, 5), fontsize=8)
+                    textcoords="offset points", xytext=(9, 5), fontsize=8)
+
     if log_x:
         ax.set_xscale("log")
+    ax.margins(x=0.12, y=0.12)   # de la place pour les etiquettes
     ax.set_xlabel(xlabel)
     ax.set_ylabel(metric)
     ax.grid(alpha=0.3)
     ax.set_title(title)
-    ax.legend(fontsize=8, loc="best")
     return _save(fig, path, dpi)
 
 
@@ -564,7 +610,7 @@ def fig_performance_vs_training_cost(paths: ProjectPaths, master: pd.DataFrame, 
         xlabel="training time (s)",
         title=f"{metric} vs training cost ({split} split, mean ± std over folds)",
         path=out_dir / f"cost_training_{metric.replace('@', '')}.png",
-        split=split, dpi=dpi,
+        split=split, dpi=dpi, higher_is_better=_higher_is_better(metric),
     )
 
 
@@ -587,7 +633,7 @@ def fig_performance_vs_specialisation(paths: ProjectPaths, master: pd.DataFrame,
         xlabel="parameters specialised per insect group (log scale, 0 shown at left)",
         title=f"{metric} vs specialisation cost ({split} split)",
         path=out_dir / f"cost_specialisation_{metric.replace('@', '')}.png",
-        split=split, log_x=True, dpi=dpi,
+        split=split, log_x=True, dpi=dpi, higher_is_better=_higher_is_better(metric),
     )
 
 
