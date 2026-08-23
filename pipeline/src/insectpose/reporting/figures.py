@@ -43,6 +43,46 @@ _GROUP_RULES: tuple[tuple[str, str], ...] = (
     ("neck", "head"),
 )
 
+# Couleurs de l'interface d'annotation (Label Studio), pour que les figures et
+# l'outil d'annotation parlent le meme langage visuel. Declarees en **BGR**, comme
+# dans l'interface : la conversion vers RGB est faite une seule fois, ci-dessous.
+_KEYPOINT_COLORS_BGR: dict[str, tuple[int, int, int]] = {
+    "head-top": (0, 0, 255), "head-left": (75, 0, 225), "head-right": (0, 75, 225),
+    "left-eye": (220, 200, 200), "right-eye": (200, 220, 200), "neck": (0, 0, 200),
+    "thorax-left": (50, 150, 255), "thorax-right": (0, 200, 255),
+    "thorax-bottom": (0, 255, 255),
+    "body-left": (100, 200, 100), "body-right": (0, 255, 100), "body-tip": (0, 255, 0),
+    "left-antenna-0": (255, 255, 0), "left-antenna-1": (255, 255, 150),
+    "left-antenna-2": (255, 255, 200), "right-antenna-0": (200, 255, 0),
+    "right-antenna-1": (200, 255, 150), "right-antenna-2": (200, 255, 200),
+    "left-forewing-base": (255, 0, 200), "left-forewing-tip": (150, 0, 200),
+    "left-forewing-front": (200, 0, 255), "left-forewing-rear": (175, 0, 150),
+    "right-forewing-base": (150, 50, 200), "right-forewing-tip": (150, 150, 200),
+    "right-forewing-front": (150, 100, 255), "right-forewing-rear": (150, 100, 150),
+    "left-hindwing-base": (150, 100, 100), "left-hindwing-tip": (255, 100, 100),
+    "left-hindwing-front": (200, 100, 150), "left-hindwing-rear": (200, 100, 50),
+    "right-hindwing-base": (255, 150, 150), "right-hindwing-tip": (150, 150, 150),
+    "right-hindwing-front": (200, 150, 200), "right-hindwing-rear": (200, 150, 100),
+    "left-leg-0": (255, 200, 0), "left-leg-1": (255, 200, 125),
+    "left-leg-2": (255, 200, 175), "left-leg-3": (255, 200, 255),
+    "right-leg-0": (200, 200, 0), "right-leg-1": (200, 200, 125),
+    "right-leg-2": (200, 200, 175), "right-leg-3": (200, 200, 255),
+}
+
+
+def keypoint_color(name: str) -> tuple[float, float, float]:
+    """Couleur RGB normalisee d'un keypoint, selon la palette de l'annotation.
+
+    La table est en BGR (convention OpenCV, celle de l'interface) : l'inversion est
+    faite ici, une fois pour toutes. Un point inconnu retombe sur la couleur de son
+    groupe anatomique, ce qui evite un gris uniforme si le schema evolue.
+    """
+    bgr = _KEYPOINT_COLORS_BGR.get(name)
+    if bgr is None:
+        return matplotlib.colors.to_rgb(group_color(keypoint_group(name)))
+    return tuple(canal / 255 for canal in reversed(bgr))
+
+
 _GROUP_COLORS = {
     "head": "#d62728", "eyes": "#7f7f7f", "antennae": "#17becf",
     "thorax": "#ff7f0e", "abdomen": "#2ca02c", "forewings": "#e377c2",
@@ -71,6 +111,71 @@ def group_color(group: str) -> str:
     """Couleur stable d'un groupe anatomique, cote inclus ou non."""
     base = group.replace("left ", "").replace("right ", "")
     return _GROUP_COLORS.get(base, _GROUP_COLORS["other"])
+
+
+# Palette des keypoints, reprise de l'interface d'annotation (Label Studio) pour que
+# les figures et les captures d'ecran d'annotation se lisent ensemble.
+#
+# ATTENTION : les valeurs source sont en **BGR** (convention OpenCV). Les utiliser
+# telles quelles inverserait rouge et bleu — head-top passerait de rouge a bleu — sans
+# qu'aucune erreur ne soit levee. `_bgr` fait la conversion en un seul endroit.
+_KEYPOINT_BGR: dict[str, tuple[int, int, int]] = {
+    "head-top": (0, 0, 255),
+    "head-left": (75, 0, 225),
+    "head-right": (0, 75, 225),
+    "left-eye": (220, 200, 200),
+    "right-eye": (200, 220, 200),
+    "neck": (0, 0, 200),
+    "thorax-left": (50, 150, 255),
+    "thorax-right": (0, 200, 255),
+    "thorax-bottom": (0, 255, 255),
+    "body-left": (100, 200, 100),
+    "body-right": (0, 255, 100),
+    "body-tip": (0, 255, 0),
+    "left-antenna-0": (255, 255, 0),
+    "left-antenna-1": (255, 255, 150),
+    "left-antenna-2": (255, 255, 200),
+    "right-antenna-0": (200, 255, 0),
+    "right-antenna-1": (200, 255, 150),
+    "right-antenna-2": (200, 255, 200),
+    "left-forewing-base": (255, 0, 200),
+    "left-forewing-tip": (150, 0, 200),
+    "left-forewing-front": (200, 0, 255),
+    "left-forewing-rear": (175, 0, 150),
+    "right-forewing-base": (150, 50, 200),
+    "right-forewing-tip": (150, 150, 200),
+    "right-forewing-front": (150, 100, 255),
+    "right-forewing-rear": (150, 100, 150),
+    "left-hindwing-base": (150, 100, 100),
+    "left-hindwing-tip": (255, 100, 100),
+    "left-hindwing-front": (200, 100, 150),
+    "left-hindwing-rear": (200, 100, 50),
+    "right-hindwing-base": (255, 150, 150),
+    "right-hindwing-tip": (150, 150, 150),
+    "right-hindwing-front": (200, 150, 200),
+    "right-hindwing-rear": (200, 150, 100),
+    "left-leg-0": (255, 200, 0),
+    "left-leg-1": (255, 200, 125),
+    "left-leg-2": (255, 200, 175),
+    "left-leg-3": (255, 200, 255),
+    "right-leg-0": (200, 200, 0),
+    "right-leg-1": (200, 200, 125),
+    "right-leg-2": (200, 200, 175),
+    "right-leg-3": (200, 200, 255),
+}
+
+
+def _bgr(triplet: tuple[int, int, int]) -> tuple[float, float, float]:
+    """BGR entier (0-255) -> RGB flottant (0-1), le format attendu par matplotlib."""
+    bleu, vert, rouge = triplet
+    return (rouge / 255, vert / 255, bleu / 255)
+
+
+KEYPOINT_COLORS: dict[str, tuple[float, float, float]] = {
+    nom: _bgr(valeur) for nom, valeur in _KEYPOINT_BGR.items()
+}
+
+
 
 
 # --- helpers ----------------------------------------------------------------
@@ -637,6 +742,62 @@ def fig_performance_vs_specialisation(paths: ProjectPaths, master: pd.DataFrame,
     )
 
 
+
+# --- 10. PCK par keypoint, trie -------------------------------------------
+def fig_keypoint_pck_bars(master: pd.DataFrame, out_dir: Path, split: str = "test",
+                          dataset: str | None = None, dpi: int = 150) -> Path | None:
+    """PCK de chaque keypoint, trie par ordre croissant, couleurs d'annotation.
+
+    Le tri met les points problematiques en tete de lecture : c'est la figure qui
+    designe ou porter l'effort. Les couleurs reprennent celles de l'interface
+    d'annotation, pour que cette figure et une capture d'ecran d'annotation se lisent
+    ensemble sans effort de correspondance.
+
+    A croiser avec `pck_vs_coverage.png` : un point en tete de liste ET rarement
+    annote n'est pas un echec du modele (ADR-0016).
+    """
+    data = _keypoint_pck(master, split)
+    if data.empty:
+        return None
+    if dataset is not None:
+        data = data[data["dataset"] == dataset]
+        if data.empty:
+            return None
+
+    stats = (data.groupby("keypoint")["value"]
+             .agg(pck="mean", ecart="std", n="size")
+             .reset_index()
+             .sort_values("pck"))
+
+    fig, ax = plt.subplots(figsize=(max(8.0, 0.32 * len(stats) + 3), 5.5))
+    positions = np.arange(len(stats))
+    couleurs = [keypoint_color(nom) for nom in stats["keypoint"]]
+    erreurs = stats["ecart"].to_numpy() if (stats["n"] > 1).any() else None
+    ax.bar(positions, stats["pck"], color=couleurs, edgecolor="black", linewidth=0.4,
+           yerr=erreurs, capsize=2, error_kw={"lw": 0.8})
+
+    ax.set_xticks(positions)
+    ax.set_xticklabels(stats["keypoint"], rotation=90, fontsize=7)
+    ax.set_ylabel("PCK")
+    ax.set_ylim(0, 1.02)
+    ax.grid(axis="y", alpha=0.3)
+    # Moyenne de reference : separe d'un coup d'oeil les points au-dessus et en dessous.
+    moyenne = float(stats["pck"].mean())
+    ax.axhline(moyenne, color="grey", ls="--", lw=1,
+               label=f"mean {moyenne:.3f}")
+    # Etiquette placee hors du trace : posee sur la ligne, elle chevaucherait les
+    # dernieres barres, qui sont justement les plus hautes.
+    ax.text(1.005, moyenne, f"mean\n{moyenne:.3f}", transform=ax.get_yaxis_transform(),
+            va="center", fontsize=8, color="grey")
+
+    perimetre = dataset or "all datasets"
+    ax.set_title(f"Keypoint PCK, sorted ({perimetre}, {split} split)")
+    suffixe = f"_{dataset}" if dataset else ""
+    return _save(fig, out_dir / f"keypoint_pck_sorted{suffixe}.png", dpi)
+
+
+
+
 # --- point d'entree ----------------------------------------------------------
 def write_figures(paths: ProjectPaths, cfg: Any, master: pd.DataFrame,
                   out_dir: Path | None = None) -> list[Path]:
@@ -652,6 +813,8 @@ def write_figures(paths: ProjectPaths, cfg: Any, master: pd.DataFrame,
 
     written.append(fig_confidence_vs_error(master, out_dir, split, dpi))
     written.append(fig_pck_curve(master, out_dir, split, dpi))
+    written.append(fig_keypoint_pck_bars(
+        master, out_dir, split, float(cfg.eval.pck.reference_alpha), dpi))
     written.append(fig_training_curves(paths, master, out_dir, dpi))
 
     coverage_file = paths.processed / "coverage_keypoints.parquet"
