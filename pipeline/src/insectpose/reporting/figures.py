@@ -816,6 +816,178 @@ def fig_keypoint_pck_bars(master: pd.DataFrame, out_dir: Path, split: str = "tes
     return _save(fig, out_dir / f"keypoint_pck_sorted{suffixe}.png", dpi)
 
 
+# --- 11. PCK moyen sur les datasets ------------------------------------------
+def fig_keypoint_pck_bars_pooled(master: pd.DataFrame, out_dir: Path, split: str = "test",
+                                 alpha: float | None = None, dpi: int = 150) -> Path | None:
+    """PCK par keypoint, MOYENNE sur les datasets, en un seul panneau.
+
+    Complement de `keypoint_pck_sorted.png`, qui separe les ordres : cette vue-ci
+    repond a "quels points sont difficiles en general ?", l'autre a "quels points sont
+    difficiles chez cet ordre ?".
+
+    La moyenne est ponderee par le nombre d'instances (`n`) et non par dataset : sans
+    cela, Hymenoptera (192 images) pèserait autant que Coleoptera (1026), et la figure
+    decrirait un corpus qui n'existe pas. Un point absent d'un ordre ne fausse donc
+    rien — il n'y contribue simplement pas.
+    """
+    data = final_runs(master)
+    prefixe = "pck@" if alpha is None else f"pck@{alpha:g}"
+    data = data[data["scope"].str.startswith("keypoint:") & (data["split"] == split)
+                & data["metric"].str.startswith(prefixe)]
+    if data.empty:
+        log.info("Aucune metrique '%s*' par keypoint : figure poolee ignoree.", prefixe)
+        return None
+
+    data = data.copy()
+    data["keypoint"] = data["scope"].map(lambda scope: str(scope).split(":")[-1])
+    data["poids"] = data["n"].fillna(1).clip(lower=1)
+    data["produit"] = data["value"] * data["poids"]
+
+    stats = data.groupby("keypoint").agg(
+        produit=("produit", "sum"), poids=("poids", "sum"),
+        ecart=("value", "std"), datasets=("scope", "nunique"),
+    ).reset_index()
+    stats["pck"] = stats["produit"] / stats["poids"]
+    stats = stats.sort_values("pck").reset_index(drop=True)
+
+    fig, ax = plt.subplots(figsize=(max(9.0, 0.34 * len(stats) + 3), 5.5))
+    positions = np.arange(len(stats))
+    couleurs = [keypoint_color(nom) for nom in stats["keypoint"]]
+    erreurs = stats["ecart"].to_numpy()
+    ax.bar(positions, stats["pck"], color=couleurs, edgecolor="black", linewidth=0.4,
+           yerr=erreurs if np.isfinite(erreurs).any() else None,
+           capsize=2, error_kw={"lw": 0.8})
+
+    ax.set_xticks(positions)
+    ax.set_xticklabels(stats["keypoint"], rotation=90, fontsize=7)
+    ax.set_ylabel("PCK")
+    ax.set_ylim(0, 1.02)
+    ax.grid(axis="y", alpha=0.3)
+    moyenne = float((stats["produit"].sum() / stats["poids"].sum()))
+    ax.axhline(moyenne, color="grey", ls="--", lw=1)
+    ax.text(1.005, moyenne, f"mean\n{moyenne:.3f}", transform=ax.get_yaxis_transform(),
+            va="center", fontsize=8, color="grey")
+
+    seuil = "" if alpha is None else f"@{alpha:g}"
+    ax.set_title(f"Keypoint PCK{seuil}, all datasets pooled ({split} split, "
+                 "weighted by instance count)")
+    return _save(fig, out_dir / "keypoint_pck_pooled.png", dpi)
+
+
+# --- 12. squelette moyen, erreur encodee ------------------------------------
+# Gabarit anatomique schematique, en unites de demi-longueur de corps (x vers la
+# droite, y vers le bas). Il ne pretend pas a l'exactitude morphologique : son role est
+# de placer les 42 points de facon LISIBLE — aucun chevauchement, cotes gauche et droit
+# distincts — pour qu'une erreur elevee saute aux yeux a l'endroit du corps concerne.
+_BODY_LAYOUT: dict[str, tuple[float, float]] = {
+    "head-top": (0.00, -1.20), "head-left": (-0.26, -0.94), "head-right": (0.26, -0.94),
+    "left-eye": (-0.10, -1.03), "right-eye": (0.10, -1.03), "neck": (0.00, -0.78),
+    "thorax-left": (-0.26, -0.50), "thorax-right": (0.26, -0.50),
+    "thorax-bottom": (0.00, -0.22),
+    "body-left": (-0.21, 0.18), "body-right": (0.21, 0.18), "body-tip": (0.00, 0.72),
+    "left-antenna-0": (-0.18, -1.30), "left-antenna-1": (-0.38, -1.54),
+    "left-antenna-2": (-0.58, -1.68),
+    "right-antenna-0": (0.18, -1.30), "right-antenna-1": (0.38, -1.54),
+    "right-antenna-2": (0.58, -1.68),
+    "left-forewing-base": (-0.44, -0.60), "left-forewing-tip": (-1.44, -1.16),
+    "left-forewing-front": (-0.96, -1.06), "left-forewing-rear": (-0.94, -0.54),
+    "right-forewing-base": (0.44, -0.60), "right-forewing-tip": (1.44, -1.16),
+    "right-forewing-front": (0.96, -1.06), "right-forewing-rear": (0.94, -0.54),
+    "left-hindwing-base": (-0.32, -0.18), "left-hindwing-tip": (-1.20, -0.20),
+    "left-hindwing-front": (-0.82, -0.34), "left-hindwing-rear": (-0.78, 0.14),
+    "right-hindwing-base": (0.32, -0.18), "right-hindwing-tip": (1.20, -0.20),
+    "right-hindwing-front": (0.82, -0.34), "right-hindwing-rear": (0.78, 0.14),
+    # Pattes dirigees vers le bas et l'exterieur, sous les ailes : anatomiquement
+    # plus juste, et cela evite qu'elles chevauchent les bases d'ailes.
+    "left-leg-0": (-0.30, 0.02), "left-leg-1": (-0.52, 0.34),
+    "left-leg-2": (-0.72, 0.70), "left-leg-3": (-0.88, 1.06),
+    "right-leg-0": (0.30, 0.02), "right-leg-1": (0.52, 0.34),
+    "right-leg-2": (0.72, 0.70), "right-leg-3": (0.88, 1.06),
+}
+
+
+def fig_error_skeleton(master: pd.DataFrame, out_dir: Path, schema: KeypointSchema,
+                       split: str = "test", dpi: int = 150) -> Path | None:
+    """Squelette schematique dont chaque point encode l'erreur mediane par sa couleur
+    et sa taille.
+
+    Un tableau de 42 lignes ne dit pas OU se situent les difficultes sur l'animal ;
+    cette figure le montre d'un coup d'oeil. Les aretes reprennent le squelette declare
+    dans le schema de keypoints, donc elles suivent l'anatomie reelle.
+
+    L'erreur portee est la NME — erreur normalisee par la largeur du thorax — moyennee
+    sur les datasets et ponderee par le nombre d'instances. Un point sans mesure reste
+    trace en gris clair : son absence est une information, pas un trou a masquer.
+    """
+    data = final_runs(master)
+    data = data[data["scope"].str.startswith("keypoint:") & (data["split"] == split)
+                & (data["metric"] == "nme")]
+    if data.empty:
+        log.info("Metrique 'nme' par keypoint absente : squelette d'erreur ignore.")
+        return None
+
+    data = data.copy()
+    data["keypoint"] = data["scope"].map(lambda scope: str(scope).split(":")[-1])
+    data["poids"] = data["n"].fillna(1).clip(lower=1)
+    stats = data.groupby("keypoint").apply(
+        lambda g: np.average(g["value"], weights=g["poids"]), include_groups=False
+    ).rename("erreur").reset_index()
+    erreurs = dict(zip(stats["keypoint"], stats["erreur"], strict=True))
+
+    manquants = [n for n in schema.names if n not in _BODY_LAYOUT]
+    if manquants:
+        log.warning("%d keypoint(s) absent(s) du gabarit de dessin : %s. Le squelette "
+                    "sera incomplet.", len(manquants), manquants[:5])
+
+    positions = {n: _BODY_LAYOUT[n] for n in schema.names if n in _BODY_LAYOUT}
+    if not positions:
+        return None
+
+    valeurs = np.array([erreurs.get(n, np.nan) for n in positions])
+    finies = valeurs[np.isfinite(valeurs)]
+    if finies.size == 0:
+        return None
+    # Bornes au 5e/95e centile : une seule valeur aberrante ecraserait toute l'echelle
+    # de couleur et rendrait la figure illisible.
+    vmin, vmax = float(np.percentile(finies, 5)), float(np.percentile(finies, 95))
+    if vmin >= vmax:
+        vmin, vmax = float(finies.min()), float(finies.max() + 1e-9)
+    norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
+    cmap = plt.get_cmap("RdYlGn_r")   # vert = precis, rouge = imprecis
+
+    fig, ax = plt.subplots(figsize=(9, 8))
+    index = {nom: i for i, nom in enumerate(schema.names)}
+    for a, b in schema.skeleton:
+        noms = (schema.names[a], schema.names[b])
+        if all(n in positions for n in noms):
+            xs = [positions[n][0] for n in noms]
+            ys = [positions[n][1] for n in noms]
+            ax.plot(xs, ys, color="#bbbbbb", lw=1.2, zorder=1)
+
+    for nom, (x, y) in positions.items():
+        valeur = erreurs.get(nom, np.nan)
+        if np.isfinite(valeur):
+            # Taille ET couleur portent la meme information : la redondance rend la
+            # figure lisible en niveaux de gris comme pour un daltonien.
+            taille = 90 + 420 * float(np.clip(norm(valeur), 0, 1))
+            couleur, bord = cmap(norm(valeur)), "black"
+        else:
+            taille, couleur, bord = 60, "#eeeeee", "#999999"
+        ax.scatter(x, y, s=taille, color=couleur, edgecolors=bord, linewidths=0.8,
+                   zorder=3)
+        ax.annotate(nom, (x, y), textcoords="offset points", xytext=(0, -13),
+                    ha="center", fontsize=5.5, color="#444444")
+
+    ax.set_aspect("equal")
+    ax.invert_yaxis()          # y vers le bas dans le gabarit : la tete doit rester en haut
+    ax.axis("off")
+    ax.margins(0.12)
+    fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm, cmap=cmap), ax=ax,
+                 shrink=0.7, label="median normalised error (NME)")
+    ax.set_title(f"Error map on a schematic body ({split} split)\n"
+                 "point size and colour encode the error; grey = not measured",
+                 fontsize=11)
+    return _save(fig, out_dir / "error_skeleton.png", dpi)
 
 
 # --- point d'entree ----------------------------------------------------------
@@ -835,9 +1007,13 @@ def write_figures(paths: ProjectPaths, cfg: Any, master: pd.DataFrame,
     written.append(fig_pck_curve(master, out_dir, split, dpi))
     # Arguments NOMMES : le 4e positionnel est `dataset`, et y passer l'alpha filtrait
     # sur un dataset nomme "0.25" — la figure sortait vide sans le moindre message.
+    reference_alpha = float(cfg.eval.pck.reference_alpha)
+    # Arguments NOMMES : le 4e positionnel est `dataset`, et y passer l'alpha filtrait
+    # sur un dataset nomme "0.25" — la figure sortait vide sans le moindre message.
     written.append(fig_keypoint_pck_bars(
-        master, out_dir, split=split, dpi=dpi,
-        alpha=float(cfg.eval.pck.reference_alpha)))
+        master, out_dir, split=split, dpi=dpi, alpha=reference_alpha))
+    written.append(fig_keypoint_pck_bars_pooled(
+        master, out_dir, split=split, dpi=dpi, alpha=reference_alpha))
     written.append(fig_training_curves(paths, master, out_dir, dpi))
 
     coverage_file = paths.processed / "coverage_keypoints.parquet"
@@ -847,8 +1023,9 @@ def write_figures(paths: ProjectPaths, cfg: Any, master: pd.DataFrame,
 
     schema_name = cfg.data.get("keypoint_schema")
     if schema_name:
-        written.append(fig_pck_vs_difficulty(
-            master, load_schema(str(schema_name), paths.configs), out_dir, split, dpi))
+        schema = load_schema(str(schema_name), paths.configs)
+        written.append(fig_pck_vs_difficulty(master, schema, out_dir, split, dpi))
+        written.append(fig_error_skeleton(master, out_dir, schema, split, dpi))
 
     if bool(cfg.eval.measurements.enabled):
         written.append(fig_symmetry_scatter(paths, master, cfg, out_dir, split, dpi))
