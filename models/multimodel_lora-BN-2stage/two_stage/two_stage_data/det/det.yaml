@@ -1,8 +1,0 @@
-path: /home/tombellivier/Documents/CV/CV-for-GRIT/models/multimodel_lora-BN-2stage/two_stage/two_stage_data/det
-train: images/train
-val: images/val
-names:
-  0: Coleoptera
-  1: Diptera
-  2: Hymenoptera
-  3: Lepidoptera
