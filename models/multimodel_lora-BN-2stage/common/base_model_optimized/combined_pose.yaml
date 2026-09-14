@@ -1,0 +1,103 @@
+path: /home/tombellivier/Documents/CV/CV-for-GRIT/models/multimodel_lora-BN-2stage/common/base_model_optimized
+train:
+- /home/tombellivier/Documents/CV/CV-for-GRIT/models/datasets/Coleoptera/images/train
+- /home/tombellivier/Documents/CV/CV-for-GRIT/models/datasets/Diptera/images/train
+- /home/tombellivier/Documents/CV/CV-for-GRIT/models/datasets/Hymenoptera/images/train
+- /home/tombellivier/Documents/CV/CV-for-GRIT/models/datasets/Lepidoptera/images/train
+val:
+- /home/tombellivier/Documents/CV/CV-for-GRIT/models/datasets/Coleoptera/images/val
+- /home/tombellivier/Documents/CV/CV-for-GRIT/models/datasets/Diptera/images/val
+- /home/tombellivier/Documents/CV/CV-for-GRIT/models/datasets/Hymenoptera/images/val
+- /home/tombellivier/Documents/CV/CV-for-GRIT/models/datasets/Lepidoptera/images/val
+kpt_shape:
+- 42
+- 3
+names:
+  0: insects
+flip_idx:
+- 0
+- 2
+- 1
+- 4
+- 3
+- 5
+- 7
+- 6
+- 8
+- 10
+- 9
+- 11
+- 15
+- 16
+- 17
+- 12
+- 13
+- 14
+- 22
+- 23
+- 24
+- 25
+- 18
+- 19
+- 20
+- 21
+- 30
+- 31
+- 32
+- 33
+- 26
+- 27
+- 28
+- 29
+- 38
+- 39
+- 40
+- 41
+- 34
+- 35
+- 36
+- 37
+kpt_names:
+  0:
+  - head-top
+  - head-left
+  - head-right
+  - left-eye
+  - right-eye
+  - neck
+  - thorax-left
+  - thorax-right
+  - thorax-bottom
+  - body-left
+  - body-right
+  - body-tip
+  - left-antenna-0
+  - left-antenna-1
+  - left-antenna-2
+  - right-antenna-0
+  - right-antenna-1
+  - right-antenna-2
+  - left-forewing-base
+  - left-forewing-tip
+  - left-forewing-front
+  - left-forewing-rear
+  - right-forewing-base
+  - right-forewing-tip
+  - right-forewing-front
+  - right-forewing-rear
+  - left-hindwing-base
+  - left-hindwing-tip
+  - left-hindwing-front
+  - left-hindwing-rear
+  - right-hindwing-base
+  - right-hindwing-tip
+  - right-hindwing-front
+  - right-hindwing-rear
+  - left-leg-0
+  - left-leg-1
+  - left-leg-2
+  - left-leg-3
+  - right-leg-0
+  - right-leg-1
+  - right-leg-2
+  - right-leg-3

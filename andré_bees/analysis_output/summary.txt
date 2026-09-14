@@ -1,0 +1,98 @@
+================================================================
+RESULTS SUMMARY
+================================================================
+rows (images)                  : 3
+images with a detected pose    : 1 (33.3%)
+images without a pose          : 2 (66.7%)
+in_train = 1                   : 0
+in_val = 1                     : 0
+
+----------------------------------------------------------------
+GLOBAL CONFIDENCE
+----------------------------------------------------------------
+overall_pose_confidence  mean=0.262  std=nan  median=0.262
+scale_confidence         mean=0.341  std=0.221  median=0.354
+detection_confidence     mean=0.598  std=nan  median=0.598
+
+----------------------------------------------------------------
+NEEDS REVIEW (threshold = 0.5)
+----------------------------------------------------------------
+flagged: 66.7% of images
+
+----------------------------------------------------------------
+SCALE METHOD
+----------------------------------------------------------------
+  ruler       : 100.0%
+
+----------------------------------------------------------------
+SCALE METHOD vs MANUAL ANNOTATIONS
+----------------------------------------------------------------
+  (no confusion matrix - needs 'scale_method' and 'image_name' in the CSV plus an annotation JSON; pass --annotations)
+
+----------------------------------------------------------------
+SCALE px/mm DISTRIBUTION
+----------------------------------------------------------------
+  n=3  mean=22.54  std=5.27  median=20.53
+  min=18.57  max=28.52  (a second peak in the histogram = a wrong-scale mode)
+
+----------------------------------------------------------------
+MISSING-VALUE RATE PER MEASUREMENT (posed images: 1)
+----------------------------------------------------------------
+  total length                     0.0% missing
+  head width                       0.0% missing
+  head length                      0.0% missing
+  inter ocular distance            0.0% missing
+  right antenna length             0.0% missing
+  left antenna length              0.0% missing
+  thorax width                     0.0% missing
+  thorax length                    0.0% missing
+  abdomen width                    0.0% missing
+  abdomen length                   0.0% missing
+  intertegular distance            0.0% missing
+  left hind wing length            0.0% missing
+  right hind wing length           0.0% missing
+  left hind wing width             0.0% missing
+  right hind wing width            0.0% missing
+  left fore wing length            0.0% missing
+  right fore wing length           0.0% missing
+  left fore wing width             0.0% missing
+  right fore wing width            0.0% missing
+  left hind leg length             0.0% missing
+  left hind leg femur length       0.0% missing
+  left hind leg tibia length       0.0% missing
+  left hind leg tarsus length      0.0% missing
+  right hind leg length            0.0% missing
+  right hind leg femur length      0.0% missing
+  right hind leg tibia length      0.0% missing
+  right hind leg tarsus length     0.0% missing
+
+----------------------------------------------------------------
+PER-MEASUREMENT CONFIDENCE (mean / std / median / n)
+----------------------------------------------------------------
+  total length                   mean=0.054  std=nan  median=0.054  n=1
+  head width                     mean=0.113  std=nan  median=0.113  n=1
+  head length                    mean=0.054  std=nan  median=0.054  n=1
+  inter ocular distance          mean=0.033  std=nan  median=0.033  n=1
+  right antenna length           mean=0.033  std=nan  median=0.033  n=1
+  left antenna length            mean=0.026  std=nan  median=0.026  n=1
+  thorax width                   mean=0.858  std=nan  median=0.858  n=1
+  thorax length                  mean=0.424  std=nan  median=0.424  n=1
+  abdomen width                  mean=0.970  std=nan  median=0.970  n=1
+  abdomen length                 mean=0.984  std=nan  median=0.984  n=1
+  intertegular distance          mean=0.912  std=nan  median=0.912  n=1
+  left hind wing length          mean=0.541  std=nan  median=0.541  n=1
+  right hind wing length         mean=0.461  std=nan  median=0.461  n=1
+  left hind wing width           mean=0.375  std=nan  median=0.375  n=1
+  right hind wing width          mean=0.327  std=nan  median=0.327  n=1
+  left fore wing length          mean=0.492  std=nan  median=0.492  n=1
+  right fore wing length         mean=0.319  std=nan  median=0.319  n=1
+  left fore wing width           mean=0.515  std=nan  median=0.515  n=1
+  right fore wing width          mean=0.486  std=nan  median=0.486  n=1
+  left hind leg length           mean=0.054  std=nan  median=0.054  n=1
+  left hind leg femur length     mean=0.054  std=nan  median=0.054  n=1
+  left hind leg tibia length     mean=0.168  std=nan  median=0.168  n=1
+  left hind leg tarsus length    mean=0.213  std=nan  median=0.213  n=1
+  right hind leg length          mean=0.067  std=nan  median=0.067  n=1
+  right hind leg femur length    mean=0.067  std=nan  median=0.067  n=1
+  right hind leg tibia length    mean=0.219  std=nan  median=0.219  n=1
+  right hind leg tarsus length   mean=0.229  std=nan  median=0.229  n=1

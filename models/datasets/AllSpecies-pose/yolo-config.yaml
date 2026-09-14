@@ -1,4 +1,4 @@
-path: models/datasets/AllSpecies
+path: /home/tombellivier/Documents/CV/CV-for-GRIT/models/datasets/AllSpecies-pose
 train: images/train
 val: images/val
 test: images/test
@@ -58,29 +58,17 @@ skeleton:
 flip_idx: [0, 2, 1, 4, 3, 5, 7, 6, 8, 10, 9, 11, 15, 16, 17, 12, 13, 14, 22, 23, 24,
   25, 18, 19, 20, 21, 30, 31, 32, 33, 26, 27, 28, 29, 38, 39, 40, 41, 34, 35, 36,
   37]
-names: {0: Coleoptera, 1: Hymenoptera, 2: Lepidoptera}
+names: {0: coleoptera, 1: diptera, 2: hymenoptera, 3: lepidoptera}
 kpt_names:
-  0: [head-top, head-left, head-right, left-eye, right-eye, neck, thorax-left, thorax-right,
-    thorax-bottom, body-left, body-right, body-tip, left-antenna-0, left-antenna-1,
-    left-antenna-2, right-antenna-0, right-antenna-1, right-antenna-2, left-forewing-base,
-    left-forewing-tip, left-forewing-front, left-forewing-rear, right-forewing-base,
-    right-forewing-tip, right-forewing-front, right-forewing-rear, left-hindwing-base,
-    left-hindwing-tip, left-hindwing-front, left-hindwing-rear, right-hindwing-base,
-    right-hindwing-tip, right-hindwing-front, right-hindwing-rear, left-leg-0, left-leg-1,
-    left-leg-2, left-leg-3, right-leg-0, right-leg-1, right-leg-2, right-leg-3]
-  1: [head-top, head-left, head-right, left-eye, right-eye, neck, thorax-left, thorax-right,
-    thorax-bottom, body-left, body-right, body-tip, left-antenna-0, left-antenna-1,
-    left-antenna-2, right-antenna-0, right-antenna-1, right-antenna-2, left-forewing-base,
-    left-forewing-tip, left-forewing-front, left-forewing-rear, right-forewing-base,
-    right-forewing-tip, right-forewing-front, right-forewing-rear, left-hindwing-base,
-    left-hindwing-tip, left-hindwing-front, left-hindwing-rear, right-hindwing-base,
-    right-hindwing-tip, right-hindwing-front, right-hindwing-rear, left-leg-0, left-leg-1,
-    left-leg-2, left-leg-3, right-leg-0, right-leg-1, right-leg-2, right-leg-3]
-  2: [head-top, head-left, head-right, left-eye, right-eye, neck, thorax-left, thorax-right,
-    thorax-bottom, body-left, body-right, body-tip, left-antenna-0, left-antenna-1,
-    left-antenna-2, right-antenna-0, right-antenna-1, right-antenna-2, left-forewing-base,
-    left-forewing-tip, left-forewing-front, left-forewing-rear, right-forewing-base,
-    right-forewing-tip, right-forewing-front, right-forewing-rear, left-hindwing-base,
-    left-hindwing-tip, left-hindwing-front, left-hindwing-rear, right-hindwing-base,
-    right-hindwing-tip, right-hindwing-front, right-hindwing-rear, left-leg-0, left-leg-1,
-    left-leg-2, left-leg-3, right-leg-0, right-leg-1, right-leg-2, right-leg-3]
+  0: &id001 [head-top, head-left, head-right, left-eye, right-eye, neck, thorax-left,
+    thorax-right, thorax-bottom, body-left, body-right, body-tip, left-antenna-0,
+    left-antenna-1, left-antenna-2, right-antenna-0, right-antenna-1, right-antenna-2,
+    left-forewing-base, left-forewing-tip, left-forewing-front, left-forewing-rear,
+    right-forewing-base, right-forewing-tip, right-forewing-front, right-forewing-rear,
+    left-hindwing-base, left-hindwing-tip, left-hindwing-front, left-hindwing-rear,
+    right-hindwing-base, right-hindwing-tip, right-hindwing-front, right-hindwing-rear,
+    left-leg-0, left-leg-1, left-leg-2, left-leg-3, right-leg-0, right-leg-1, right-leg-2,
+    right-leg-3]
+  1: *id001
+  2: *id001
+  3: *id001

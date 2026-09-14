@@ -16,6 +16,7 @@ Why an array and not a path?
 from __future__ import annotations
 
 import math
+import time
 from dataclasses import dataclass
 
 import numpy as np
@@ -56,8 +57,12 @@ def _measurement_confidences_tta(pose_model, img_bgr) -> dict[str, float]:
 
 
 def process_image(img_bgr: np.ndarray, image_name: str,
-                  models: Models, membership) -> dict:
+                  models: Models, membership,
+                  measurement_classifiers=None, group_index=None) -> dict:
     """Run the whole pipeline on one decoded image and return a CSV record."""
+    timings: dict[str, float] = {}
+    t_start = time.perf_counter()
+
     record: dict = {
         "image_name": image_name,
         "in_train": membership.in_train(image_name),
@@ -68,16 +73,28 @@ def process_image(img_bgr: np.ndarray, image_name: str,
         "overall_pose_confidence": math.nan,
         "scale_px_per_mm": None,
         "scale_confidence": 0.0,
+        "group_one_hot": {},
+        "measure_valid": {},
     }
 
+    # ---- 0. insect group (independent of pose/scale) ------------------------
+    if group_index is not None:
+        record["group_one_hot"] = group_index.one_hot(image_name)
+
     # ---- 1. scale (independent of the pose) ---------------------------------
+    t0 = time.perf_counter()
     scale = detect_scale(img_bgr, models.scale_bar_model)
+    timings["scale"] = time.perf_counter() - t0
     record["scale_px_per_mm"] = scale.px_per_mm
     record["scale_confidence"] = scale.scale_conf
 
     # ---- 2. pose inference ---------------------------------------------------
+    t0 = time.perf_counter()
     pose = run_pose_on_array(models.pose_model, img_bgr)
+    timings["pose"] = time.perf_counter() - t0
     if pose is None:
+        timings["total"] = time.perf_counter() - t_start
+        record["timings"] = timings
         _fill_optional_columns(record, img_bgr, pose, scale)
         return record
 
@@ -85,10 +102,13 @@ def process_image(img_bgr: np.ndarray, image_name: str,
     record["keypoints"] = keypoints           # exported as raw kp columns (x,y,conf)
 
     # ---- 3. pixel measurements ----------------------------------------------
+    t0 = time.perf_counter()
     pixels = compute_measurements(keypoints)
+    timings["measurements"] = time.perf_counter() - t0
     record["pixels"] = pixels
 
     # ---- 4. measurement confidences (selected signal) -----------------------
+    t0 = time.perf_counter()
     if config.MEASUREMENT_CONFIDENCE_SIGNAL == "tta":
         record["conf"] = _measurement_confidences_tta(models.pose_model, img_bgr)
     else:  # "keypoint" (default)
@@ -99,15 +119,29 @@ def process_image(img_bgr: np.ndarray, image_name: str,
         detection_conf=pose.detection_conf,
         keypoint_confidences=keypoints[:, 2],
     )
+    timings["confidence"] = time.perf_counter() - t0
 
     # ---- 6. convert to millimetres ------------------------------------------
+    t0 = time.perf_counter()
     px_per_mm = scale.px_per_mm
+    # A scale implying an unrealistic photographed extent (too zoomed in OR
+    # out, relative to the image's own resolution -- see config for the
+    # rationale) is a scale-detection glitch, not a real close-up/wide shot.
+    # scale_px_per_mm/scale_confidence are left untouched (still diagnostic);
+    # only the mm conversion is skipped.
+    if px_per_mm is not None and img_bgr is not None:
+        image_size = max(img_bgr.shape[0], img_bgr.shape[1])
+        lo = config.MIN_SCALE_PX_PER_MM_FRACTION * image_size
+        hi = config.MAX_SCALE_PX_PER_MM_FRACTION * image_size
+        if not (lo <= px_per_mm <= hi):
+            px_per_mm = None
     for name in MEASUREMENT_NAMES:
         px_val = pixels.get(name, math.nan)
         if px_per_mm and px_per_mm > 0 and not math.isnan(px_val):
             record["mm"][name] = px_val / px_per_mm
         else:
             record["mm"][name] = math.nan
+    timings["mm_conversion"] = time.perf_counter() - t0
 
     # To report the COMBINED (measurement + scale) confidence for the mm values
     # instead of the raw measurement confidence, uncomment:
@@ -115,8 +149,23 @@ def process_image(img_bgr: np.ndarray, image_name: str,
     #     record["conf"][name] = confidence.converted_measurement_confidence(
     #         record["conf"][name], scale.scale_conf)
 
+    # ---- 7. measurement-validity classifier (pre-trained, inference only) ---
+    t0 = time.perf_counter()
+    if config.RUN_MEASUREMENT_CLASSIFIER and measurement_classifiers is not None:
+        group = group_index.group_of(image_name) if group_index is not None else None
+        record["measure_valid"] = measurement_classifiers.score(keypoints, group)
+    timings["measurement_classifier"] = time.perf_counter() - t0
+
+    timings["total"] = time.perf_counter() - t_start
+    record["timings"] = timings
+
     _fill_optional_columns(record, img_bgr, pose, scale)
     return record
+
+
+def _format_box(box) -> str | None:
+    """(x1, y1, x2, y2) -> 'x1,y1,x2,y2', or None if no box."""
+    return ",".join(str(int(v)) for v in box) if box is not None else None
 
 
 def _fill_optional_columns(record, img_bgr, pose, scale):
@@ -128,6 +177,20 @@ def _fill_optional_columns(record, img_bgr, pose, scale):
         record["n_instances"] = pose.n_instances if pose is not None else 0
     if opt.get("detection_confidence"):
         record["detection_confidence"] = pose.detection_conf if pose is not None else math.nan
+    if opt.get("scale_bar_confidence"):
+        record["scale_bar_confidence"] = scale.scale_bar_conf if scale is not None else math.nan
+    if opt.get("ruler_confidence"):
+        record["ruler_confidence"] = scale.ruler_conf if scale is not None else math.nan
+    if opt.get("scale_bar_box"):
+        record["scale_bar_box"] = _format_box(scale.bar_box) if scale is not None else None
+    if opt.get("scale_text_box"):
+        record["scale_text_box"] = _format_box(scale.text_box) if scale is not None else None
+    if opt.get("scale_ocr_text"):
+        record["scale_ocr_text"] = scale.ocr_text if scale is not None else None
+    if opt.get("ruler_line"):
+        record["ruler_line"] = scale.ruler_line if scale is not None else math.nan
+    if opt.get("ruler_orientation"):
+        record["ruler_orientation"] = scale.ruler_orientation if scale is not None else None
     if opt.get("image_width") or opt.get("image_height"):
         h, w = (img_bgr.shape[0], img_bgr.shape[1]) if img_bgr is not None else (None, None)
         if opt.get("image_width"):

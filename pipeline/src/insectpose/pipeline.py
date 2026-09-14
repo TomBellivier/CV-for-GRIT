@@ -220,7 +220,7 @@ def cmd_train(cfg: DictConfig, extra: dict[str, Any] | None = None,
     if do_evaluate:
         annotations, schemas = _load_context_data(cfg, ctx.paths)
         evaluate_run(ctx.run_id, ctx.paths, annotations, schemas, cfg.eval,
-                     approach=str(cfg.approach.name))
+                     approach=str(cfg.approach.name), split_id=ctx.split_id)
         _export_qualitative(ctx, data, schemas)
     ctx.write_manifest()   # ecrit EN DERNIER : marque le run comme complet
     return ctx
@@ -268,7 +268,13 @@ def cmd_tune(cfg: DictConfig) -> dict[str, Any]:
     En mode `tune_once`, l'etape 1 n'est faite que sur `tuning.tuning_outer_fold` et le
     resultat est reutilise pour tous les folds externes (moins couteux, a documenter).
     """
-    from insectpose.tuning.objective import build_study, make_objective, save_best
+    from insectpose.tuning.objective import (
+        build_study,
+        completed_trials,
+        make_objective,
+        remaining_trials,
+        save_best,
+    )
 
     paths = ProjectPaths.from_config(cfg)
     outer_split_id = make_split_id(cfg)
@@ -292,11 +298,21 @@ def cmd_tune(cfg: DictConfig) -> dict[str, Any]:
             return _run_trial_fold(base_cfg, overrides)
 
         study = build_study(search_cfg, paths, suffix=f"outer{outer_fold}")
-        study.optimize(
-            make_objective(search_cfg, run_fn),
-            n_trials=int(cfg.tuning.n_trials),
-            timeout=cfg.tuning.get("timeout_s"),
-        )
+        budget = int(cfg.tuning.n_trials)
+        todo = remaining_trials(study, budget)
+        if todo == 0:
+            log.info("Fold externe %d : budget deja atteint (%d/%d trials), rien a faire.",
+                     outer_fold, completed_trials(study), budget)
+        else:
+            if completed_trials(study) > 0:
+                log.info("Fold externe %d : reprise, %d trial(s) deja termine(s), %d a faire "
+                         "pour atteindre le budget de %d.",
+                         outer_fold, completed_trials(study), todo, budget)
+            study.optimize(
+                make_objective(search_cfg, run_fn),
+                n_trials=todo,
+                timeout=cfg.tuning.get("timeout_s"),
+            )
         best = save_best(study, search_cfg, paths)
         results["outer"][outer_fold] = best
         log.info("Fold externe %d | meilleur %s interne = %s",

@@ -114,10 +114,19 @@ def test_qualitative_export_is_produced(cfg, project) -> None:
     index = read_json(project.run_dir(ctx.run_id) / "figures" / "qualitative_index.json")
     reasons = [e["reason"] for e in index["examples"]]
     assert reasons.count("worst") == int(cfg.eval.qualitative.n_worst)
-    # Les pires cas sont bien les moins bons OKS
-    worst = [e["oks"] for e in index["examples"] if e["reason"] == "worst"]
-    others = [e["oks"] for e in index["examples"] if e["reason"] == "random"]
-    assert not others or max(worst) <= min(others)
+
+    scores = {r: [e["oks"] for e in index["examples"] if e["reason"] == r]
+              for r in ("worst", "best", "random")}
+    # Les pires cas sont bien les moins bons, les meilleurs bien les meilleurs
+    assert not scores["random"] or max(scores["worst"]) <= min(scores["random"])
+    assert not scores["random"] or min(scores["best"]) >= max(scores["random"])
+
+    # Un meilleur cas par dataset (§8.5) : le meilleur global viendrait toujours du
+    # dataset le plus facile.
+    best_datasets = [e["dataset"] for e in index["examples"] if e["reason"] == "best"]
+    assert len(best_datasets) == len(set(best_datasets))
+    assert set(best_datasets) == set(
+        e["dataset"] for e in index["examples"]) & set(best_datasets)
 
 
 @pytest.mark.smoke
@@ -145,3 +154,76 @@ def test_approach_config_matches_its_name(config_factory, approach_name) -> None
     assert str(cfg.approach._target_).rsplit(".", 1)[0].endswith(
         APPROACHES.get(approach_name).__module__.rsplit(".", 1)[-1]
     )
+
+
+@pytest.mark.smoke
+def test_best_examples_are_one_per_dataset() -> None:
+    """Les meilleurs cas sont choisis PAR dataset, pas globalement."""
+    from insectpose.reporting.qualitative import select_examples
+
+    scores = pd.DataFrame({
+        "image_id": [f"i{i}" for i in range(8)],
+        "dataset": ["coleoptera"] * 4 + ["diptera"] * 4,
+        "gt_row": range(8), "pred_row": range(8),
+        # Coleoptera est globalement meilleur : sans selection par dataset, les deux
+        # "best" viendraient de lui et diptera n'aurait aucune reference.
+        "oks": [0.90, 0.92, 0.94, 0.96, 0.30, 0.40, 0.50, 0.60],
+    })
+    selection = select_examples(scores, n_examples=6, n_worst=2, seed=0,
+                                n_best_per_dataset=1)
+    best = selection[selection["reason"] == "best"]
+    assert set(best["dataset"]) == {"coleoptera", "diptera"}
+    assert best.loc[best["dataset"] == "coleoptera", "oks"].iloc[0] == pytest.approx(0.96)
+    assert best.loc[best["dataset"] == "diptera", "oks"].iloc[0] == pytest.approx(0.60)
+    assert len(selection) == 6
+
+
+@pytest.mark.smoke
+def test_best_selection_can_be_disabled() -> None:
+    from insectpose.reporting.qualitative import select_examples
+
+    scores = pd.DataFrame({
+        "image_id": [f"i{i}" for i in range(6)], "dataset": ["coleoptera"] * 6,
+        "gt_row": range(6), "pred_row": range(6),
+        "oks": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
+    })
+    selection = select_examples(scores, n_examples=4, n_worst=2, seed=0,
+                                n_best_per_dataset=0)
+    assert set(selection["reason"]) == {"worst", "random"}
+    assert len(selection) == 4
+
+
+@pytest.mark.smoke
+def test_a_model_that_detects_nothing_yields_zero_metrics(cfg, project, monkeypatch) -> None:
+    """Zero prediction est un RESULTAT mesurable, pas une erreur de pipeline.
+
+    Un modele sous-entraine ou mal regle ne detecte rien. L'evaluation doit alors
+    publier des metriques nulles : interrompre le pipeline laisserait croire a un run
+    casse alors que le modele est simplement mauvais.
+    """
+    from insectpose.registry import APPROACHES
+    from insectpose.utils.io import read_parquet
+
+    # Patcher la classe CONCRETE : chaque approche surcharge `predict_instances`,
+    # donc patcher BaseApproach serait sans effet.
+    approach_cls = APPROACHES.get(str(cfg.approach.name))
+    monkeypatch.setattr(
+        approach_cls, "predict_instances",
+        lambda _self, _images, _ctx: pd.DataFrame(), raising=False)
+
+    pipeline.cmd_split(cfg)
+    ctx = pipeline.cmd_train(cfg)
+
+    # Le run reste COMPLET : manifeste ecrit, donc agregeable et auditable
+    assert project.manifest(ctx.run_id).exists()
+
+    predictions = read_parquet(project.predictions(ctx.run_id, "test", ctx.fold),
+                               artifact="predictions", validate=True)
+    assert predictions.empty
+
+    metrics = read_parquet(project.metrics(ctx.run_id))
+    primary = metrics[(metrics["metric"] == str(cfg.eval.primary_metric))
+                      & (metrics["scope"] == "overall") & (metrics["split"] == "test")]
+    assert len(primary) == 1
+    assert primary["value"].iloc[0] == 0.0
+    assert primary["n"].iloc[0] > 0        # le denominateur reste celui des GT

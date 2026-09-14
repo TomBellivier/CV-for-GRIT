@@ -30,7 +30,7 @@ approach:
 
   # --- detecteur (images entieres, une classe, sans keypoints) ---
   detector:
-    weights: yolo11n.pt
+    weights: yolo26n.pt        # ADR-0033
     lr0: 0.01
     lrf: 0.01
     momentum: 0.937
@@ -51,7 +51,7 @@ approach:
 
   # --- modele de pose (crops normalises) ---
   pose:
-    weights: yolo11n-pose.pt
+    weights: yolo26n-pose.pt   # ADR-0033
     lr0: 0.01
     lrf: 0.01
     momentum: 0.937
@@ -74,13 +74,11 @@ approach:
     hsv_v: 0.4
 
   # Budget identique a celui des autres approches (§6.3). L'espace couvre les deux
-  # modeles : ne pas l'elargir sans elargir aussi celui des approches concurrentes.
+  # ADR-0031 : QUATRE hyperparametres. Avec un insecte par image (ADR-0017), la
+  # detection est quasi triviale : `detector.lr0` est donc fige et le budget va au
+  # modele de pose et a la geometrie du recadrage, qui est ce qui distingue C de A.
   search_space:
-    detector.lr0: {type: float, low: 1.0e-5, high: 1.0e-1, log: true}
-    detector.box: {type: float, low: 2.0, high: 12.0}
-    pose.lr0: {type: float, low: 1.0e-5, high: 1.0e-1, log: true}
-    pose.pose: {type: float, low: 4.0, high: 24.0}
-    pose.scale: {type: float, low: 0.0, high: 0.5}
-    pose.degrees: {type: float, low: 0.0, high: 30.0}
+    pose.lr0: {type: float, low: 1.0e-4, high: 5.0e-2, log: true}
+    pose.pose: {type: float, low: 4.0, high: 30.0}
     crop.padding: {type: float, low: 0.0, high: 0.4}
     crop.jitter_scale: {type: float, low: 0.0, high: 0.3}

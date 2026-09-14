@@ -299,9 +299,9 @@ def fig_confidence_vs_error(master: pd.DataFrame, out_dir: Path, split: str = "t
 
     handles, labels = axes.flat[0].get_legend_handles_labels()
     if handles:
-        fig.legend(handles, labels, loc="lower center", ncol=min(len(labels), 6),
-                   frameon=False, bbox_to_anchor=(0.5, -0.02))
+        fig.legend(handles, labels, loc="lower center", ncol=min(len(labels), 6))
     fig.suptitle("Predicted confidence vs error, per keypoint")
+    fig.tight_layout()
     return _save(fig, out_dir / "keypoint_confidence_vs_error.png", dpi)
 
 

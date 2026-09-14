@@ -139,21 +139,22 @@ def _heatmap(matrix: pd.DataFrame, title: str, path: Path, lower_is_better: bool
     image = ax.imshow(values, cmap=cmap, norm=norm, aspect="auto")
 
     ax.set_xticks(range(len(matrix.columns)))
-    ax.set_xticklabels(matrix.columns, rotation=30, ha="right")
+    ax.set_xticklabels(matrix.columns, rotation=30, ha="right", fontsize=14)
     ax.set_yticks(range(len(matrix)))
-    ax.set_yticklabels(matrix.index, fontsize=8)
+    ax.set_yticklabels(matrix.index, fontsize=14)
 
     for i in range(values.shape[0]):
         for j in range(values.shape[1]):
             value = values[i, j]
             if not np.isfinite(value):
-                ax.text(j, i, "-", ha="center", va="center", fontsize=7, color="grey")
+                ax.text(j, i, "-", ha="center", va="center", fontsize=14, color="grey")
                 continue
             ax.text(j, i, value_format.format(value), ha="center", va="center",
-                    fontsize=7, color=text_color(cmap(norm(value))))
+                    fontsize=14, color=text_color(cmap(norm(value))))
 
     fig.colorbar(image, ax=ax, shrink=0.8)
-    ax.set_title(title + ("  (lower is better)" if lower_is_better else ""))
+    ax.set_title(title + ("  (lower is better)" if lower_is_better else ""), fontsize=14)
+    fig.tight_layout()
     return _save(fig, path, dpi)
 
 

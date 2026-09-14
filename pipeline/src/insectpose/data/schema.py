@@ -105,6 +105,11 @@ def _validate_geometry(df: pd.DataFrame, artifact: str) -> None:
     if bad_bbox.any():
         raise ContractError(f"[{artifact}] bbox_xywh doit contenir 4 valeurs (xywh).")
 
+    # Ce controle vient EN PREMIER : il nomme les fichiers fautifs, la ou les suivants
+    # ne rapportent que des tailles. Sur des donnees reelles, c'est cette difference qui
+    # evite une enquete manuelle.
+    _validate_schema_consistency(df, artifact)
+
     n_kpts = df["kpts_xy"].map(len)
     if (n_kpts % 2 != 0).any():
         raise ContractError(f"[{artifact}] kpts_xy doit contenir 2K valeurs.")
@@ -118,13 +123,33 @@ def _validate_geometry(df: pd.DataFrame, artifact: str) -> None:
             f"(K deduit={sorted(set(k))[:3]}, trouve={sorted(set(n_second))[:3]})."
         )
 
-    per_schema = df.groupby("keypoint_schema")["kpts_xy"].apply(lambda s: {len(v) for v in s})
-    for schema_name, sizes in per_schema.items():
-        if len(sizes) > 1:
-            raise ContractError(
-                f"[{artifact}] le schema '{schema_name}' apparait avec plusieurs tailles "
-                f"de keypoints : {sorted(sizes)}. L'ordre et le nombre de points sont figes."
-            )
+
+def _validate_schema_consistency(df: pd.DataFrame, artifact: str) -> None:
+    """Refuse un schema de keypoints presentant plusieurs tailles, en nommant les fautifs.
+
+    L'ordre et le nombre de points sont figes a vie (ADR-0006) : une divergence signale
+    des labels d'un autre schema, ou un fichier mal forme.
+    """
+    sizes = df["kpts_xy"].map(len)
+    for schema_name, group in df.groupby("keypoint_schema"):
+        counts = sizes[group.index].value_counts()
+        if len(counts) <= 1:
+            continue
+        # La taille majoritaire est presumee correcte ; on nomme celles qui en devient.
+        expected = int(counts.idxmax())
+        outliers = group[sizes[group.index] != expected]
+        column = "image_path" if "image_path" in outliers.columns else "instance_id"
+        examples = "\n  ".join(
+            f"{row[column]} : {len(row['kpts_xy']) // 2} keypoints"
+            for _, row in outliers.head(5).iterrows()
+        )
+        raise ContractError(
+            f"[{artifact}] le schema '{schema_name}' apparait avec plusieurs tailles de "
+            f"keypoints : {sorted(int(v) // 2 for v in counts.index)} points. L'ordre et "
+            f"le nombre de points sont figes.\n"
+            f"Attendu {expected // 2} points ({int(counts.max())} instances). "
+            f"{len(outliers)} instance(s) divergente(s), par exemple :\n  {examples}"
+        )
 
 
 def validate_single_instance(df: pd.DataFrame) -> None:

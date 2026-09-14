@@ -21,8 +21,5 @@ grid:
   model:
     - yolo11n-pose.pt
     - yolov8n-pose.pt
-    - yolo26n-pose.pt
-    - yolo11s-pose.pt
-    - yolov8s-pose.pt
-    - yolo26s-pose.pt
+    - yolo26m-pose.pt
 

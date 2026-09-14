@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Dict, Iterable, List, Optional, Sequence
 
 import numpy as np
@@ -177,7 +177,8 @@ def load_annotations(data_dir: Path, stem_to_group: Dict[str, str]) -> pd.DataFr
     LOGGER.info("Loaded %d annotation rows from %d files", len(annotations), len(files))
 
     annotations = annotations.rename(columns={"image": "image_name"})
-    stems = annotations["image_name"].map(lambda p: Path(str(p)).stem)
+    stems = annotations["image_name"].map(lambda p: PurePath(str(p).replace("\\", "/")).stem)
+
     annotations["image_name"] = stems
     annotations["group"] = stems.map(stem_to_group)
 
@@ -238,6 +239,10 @@ def build_dataset(
     stem_to_group = index_image_database(database_dir)
     annotations = load_annotations(data_dir, stem_to_group)
     results = load_pose_results(results_path)
+
+    print(annotations.head())
+    print(results.head())
+
 
     merged = annotations.merge(results, how="inner", on="image_name", suffixes=("", "_pose"))
     LOGGER.info(

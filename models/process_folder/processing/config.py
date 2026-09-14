@@ -29,15 +29,15 @@ TRAINED_MODELS_DIR = PROJECT_ROOT / "trained_models"
 
 # Exactly ONE pose model is used per run. Put its file name here.
 # (Only this model is loaded; see load_pose_model in pose_inference.py.)
-POSE_MODEL_NAME = "model_flipping.pt"                      # <-- EDIT ME
+POSE_MODEL_NAME = "yolo_pooled_tuned.pt"                      # <-- EDIT ME
 POSE_MODEL_PATH = TRAINED_MODELS_DIR / POSE_MODEL_NAME
 
 # YOLO scale-bar detector.
 SCALE_BAR_MODEL_PATH = PROJECT_ROOT.parent / "scale_bar_detection" / "best.pt"
 
 # Folder of images to process, and where to write the CSV.
-INPUT_FOLDER = PROJECT_ROOT.parent.parent / "databases"   # <-- EDIT ME if needed
-OUTPUT_CSV = PROJECT_ROOT / "results.csv"
+INPUT_FOLDER = PROJECT_ROOT.parent.parent / "andré_bees"   # <-- EDIT ME if needed
+OUTPUT_CSV = INPUT_FOLDER / "results.csv"
 
 # Crash safety: force the CSV to disk every N rows (file.flush + os.fsync), so a
 # crash loses at most the last N rows. 1 = safest (durable write per image);
@@ -137,7 +137,7 @@ OVERALL_POSE_METHOD = "det_x_kp"         # "det_x_kp" | "min"
 # --------------------------------------------------------------------------- #
 # Scale bar
 # --------------------------------------------------------------------------- #
-SCALE_BAR_CONF_THRESHOLD = 0.25
+SCALE_BAR_CONF_THRESHOLD = 0.1
 SCALE_BAR_PADDING = 20
 
 # The scale-bar model is expected to detect TWO boxes: the bar and the text.
@@ -155,12 +155,28 @@ SCALE_BAR_MISSING_BOX_CONF = 1.0         # neutral value when a box is absent
 # --------------------------------------------------------------------------- #
 RULER_RATIO = 5                          # image sub-sampling factor
 RULER_GRADUATION_MM = 1.0                # physical spacing of the ruler ticks
+RULER_CONF_THRESHOLD = 0.03
+
+HORIZONTAL_RULER_ONLY = True
+
+# results_7 : threshold = 0.1
+# results_8 : threshold = 0.05
+# results_9 : threshold = 0.03
+# results_10 : threshold = 0.02
 
 # --------------------------------------------------------------------------- #
 # Scale strategy
 # --------------------------------------------------------------------------- #
 USE_SCALE_BAR = True                     # try the scale bar first
 USE_RULER_FALLBACK = True                # if the bar fails, try the ruler
+
+# The ruler detector now runs twice per call (horizontal + vertical), so it is
+# worth skipping entirely once the scale bar has already succeeded -- UNLESS
+# we are evaluating against the manual scale annotations (set from
+# --only_scale_annotated in process_folder.py), which needs the raw ruler
+# confidence on every image, win or lose, for analyze_results.py's
+# fig_scale_method_confidence / scale_*_confusion_matrix figures.
+ONLY_SCALE_ANNOTATED = False
 
 # --------------------------------------------------------------------------- #
 # Converted-measurement confidence (millimetres)
@@ -170,6 +186,23 @@ USE_RULER_FALLBACK = True                # if the bar fails, try the ruler
 #   "min"     -> min(measurement_conf, scale_conf)      [conservative, simple]
 #   "product" -> measurement_conf * scale_conf
 CONVERTED_CONF_METHOD = "min"
+
+# A detected scale that implies an unrealistic photographed extent is a
+# scale-detection glitch rather than a real value: the mm conversion is
+# skipped (mm -> NaN) for that image. scale_px_per_mm / scale_confidence
+# themselves are left untouched (still diagnostic).
+#
+# Both bounds are expressed as a FRACTION of the image's largest dimension
+# (image_size = max(width, height) in px), not a fixed absolute px/mm, so
+# they scale with whatever resolution the photos actually are:
+#   scale_px_per_mm > MAX_SCALE_PX_PER_MM_FRACTION * image_size
+#       -> too zoomed IN (e.g. at 50%, one measured mm would already be half
+#          the image -- implausible for a whole-insect photo)
+#   scale_px_per_mm < MIN_SCALE_PX_PER_MM_FRACTION * image_size
+#       -> too zoomed OUT (e.g. at 0.1%, one measured mm barely covers a
+#          thousandth of the image -- implausibly far away / low-res)
+MIN_SCALE_PX_PER_MM_FRACTION = 0.005     # 0.5% of image size
+MAX_SCALE_PX_PER_MM_FRACTION = 0.5       # 50% of image size
 
 # --------------------------------------------------------------------------- #
 # Optional CSV columns
@@ -183,9 +216,40 @@ OPTIONAL_COLUMNS = {
     "image_width":          True,
     "image_height":         True,
     "needs_review":         True,   # derived boolean from confidence thresholds
+    "scale_bar_confidence" :  True,
+    "ruler_confidence" : True,
+    "scale_bar_box":        True,   # scale-bar detection box, 'x1,y1,x2,y2'
+    "scale_text_box":       True,   # scale-bar text box, 'x1,y1,x2,y2' (blank if no text class)
+    "scale_ocr_text":       True,   # scale-bar raw OCR read
+    "ruler_line":           True,   # ruler: row/col index the reading was taken at
+    "ruler_orientation":    True,   # ruler: "horizontal" | "vertical"
 }
 
 # Threshold used only if OPTIONAL_COLUMNS["needs_review"] is True:
 # a row is flagged when the overall pose confidence OR the scale confidence
 # falls below this value.
 NEEDS_REVIEW_THRESHOLD = 0.5
+
+# --------------------------------------------------------------------------- #
+# Measurement-validity classifier (pre-trained, inference only)
+# --------------------------------------------------------------------------- #
+# Per-measurement random forests (trained offline, see ../conf_classifier/
+# measure_validity_classifiers.ipynb) that predict whether a measurement is
+# trustworthy from the keypoint confidences of its anatomical neighbourhood
+# plus the insect's taxonomic group. Nothing is trained here -- the saved
+# models are only loaded and queried.
+RUN_MEASUREMENT_CLASSIFIER = True
+
+# Where each image's taxonomic group is looked up: DATABASE_DIR/<group>/...
+# Used both as a classifier input and for the '<group>_one_hot' CSV columns.
+DATABASE_DIR = PROJECT_ROOT.parent.parent / "databases" / "full databases"
+
+MEASUREMENT_CLASSIFIER_DIR = TRAINED_MODELS_DIR / "measurement_classification_models"
+MEASUREMENT_CLASSIFIER_METRICS_CSV = PROJECT_ROOT.parent / "conf_classifier" / "outputs" / "metrics.csv"
+
+# --------------------------------------------------------------------------- #
+# Per-stage processing time
+# --------------------------------------------------------------------------- #
+# Export the wall-clock time of every pipeline stage for one image, in seconds:
+#   '<stage> time [s]'
+EXPORT_TIMINGS = True

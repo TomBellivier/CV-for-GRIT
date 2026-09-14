@@ -131,13 +131,28 @@ class LoraApproach(YoloPooledApproach):
 
         targets = self._target_modules(model)
         lora = self.cfg.approach.lora
+        alpha = self._alpha()
         config = LoraConfig(
-            r=int(lora.r), lora_alpha=float(lora.alpha), lora_dropout=float(lora.dropout),
+            r=int(lora.r), lora_alpha=alpha, lora_dropout=float(lora.dropout),
             target_modules=targets, bias="none",
         )
         inject_adapter_in_model(config, model)
         log.info("LoRA injecte sur %d convolution(s), rang %d.", len(targets), int(lora.r))
         self._lora_targets = targets
+
+    def _alpha(self) -> float:
+        """Facteur d'echelle des adaptateurs.
+
+        Derive du rang (`alpha = alpha_ratio x r`) sauf si `alpha` est renseigne
+        explicitement. peft divise la contribution par alpha/r : a ratio constant, le
+        taux d'apprentissage optimal reste quasi independant du rang, ce qui evite de
+        depenser une dimension de recherche sur une redondance (ADR-0031).
+        """
+        lora = self.cfg.approach.lora
+        explicit = lora.get("alpha")
+        if explicit is not None:
+            return float(explicit)
+        return float(lora.get("alpha_ratio", 2.0)) * int(lora.r)
 
     def _freeze(self, model: Any) -> None:
         """Gele tout sauf les adaptateurs et la tete.
@@ -192,6 +207,7 @@ class LoraApproach(YoloPooledApproach):
         report = ctx.extra.pop("lora_report", {})
         ctx.extra.update({f"lora_{k}": v for k, v in report.items()})
         ctx.extra["lora_rank"] = int(self.cfg.approach.lora.r)
+        ctx.extra["lora_alpha"] = self._alpha()
         ctx.extra["lora_targets"] = getattr(self, "_lora_targets", [])
         ctx.extra["lora_skipped_grouped"] = len(getattr(self, "_lora_skipped", []))
         if self.model is not None:

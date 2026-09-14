@@ -71,3 +71,17 @@ def test_single_instance_dataset_passes(project) -> None:
     from insectpose.data.schema import validate_single_instance
 
     validate_single_instance(read_parquet(project.annotations("coleoptera")))
+
+
+def test_keypoint_count_mismatch_names_the_offending_files(project) -> None:
+    """Un message qui ne nomme pas les coupables oblige a une enquete manuelle."""
+    df = read_parquet(project.annotations("coleoptera"))
+    df.at[0, "kpts_xy"] = [0.0] * 256          # 128 keypoints au lieu de 42
+    with pytest.raises(ContractError) as excinfo:
+        validate_frame(df, "annotations")
+
+    message = str(excinfo.value)
+    assert "42 points" in message
+    assert "1 instance(s) divergente(s)" in message
+    assert str(df.at[0, "image_path"]) in message
+    assert "128 keypoints" in message

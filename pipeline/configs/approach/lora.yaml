@@ -4,12 +4,25 @@ approach:
   name: lora
   _target_: insectpose.approaches.lora.LoraApproach
 
-  weights: yolo11n-pose.pt      # ADR-0025 : on part des poids COCO, pas du modele poule
+  # ADR-0033 : yolo26n est le modele de base FIGE des six approches. Une taille
+  # differente changerait la capacite du reseau, et la comparaison porterait alors sur
+  # elle plutot que sur la methode. Pour comparer des poids de depart (etude annexe,
+  # hors tableau principal) :
+  #   python -m insectpose.cli train experiment=exp_a_yolo_pooled \
+  #       approach.weights=yolo11n-pose.pt tag=yolo11n
+  # Le `tag` est OBLIGATOIRE : sans lui, les deux variantes seraient distinguees par
+  # leur variant_hash mais porteraient la meme etiquette dans les figures.
+  weights: yolo26n-pose.pt
   prunable: false
 
   lora:
     r: 8                        # rang des adaptateurs
-    alpha: 16.0
+    # ADR-0031 : alpha n'est PAS cherche separement. La litterature converge : alpha=2r
+    # est crucial aux rangs eleves, et le prefacteur alpha/r rend le taux d'apprentissage
+    # optimal quasi independant du rang. Chercher alpha en plus de r explorerait une
+    # redondance et gaspillerait une dimension du budget.
+    alpha_ratio: 2.0            # alpha = alpha_ratio x r, calcule a l'execution
+    alpha: null                 # renseigne => ecrase le ratio (etude annexe)
     dropout: 0.0
     # Nombre de blocs, en fin de cou, recevant les adaptateurs. Les index sont calcules
     # depuis la structure du modele : changer de taille (n/s/m/l) ne casse rien.
@@ -49,13 +62,14 @@ approach:
   hsv_s: 0.7
   hsv_v: 0.4
 
-  # Budget identique aux autres approches (§6.3).
+  # ADR-0031 : QUATRE hyperparametres, budget identique aux autres approches.
+  # `lora.r` fixe la capacite de l'adaptateur, `neck_blocks` son etendue, et `lr0` reste
+  # le levier dominant — la litterature recommande de balayer le taux d'apprentissage en
+  # retenant la plus haute valeur qui reste stable. Plage relevee par rapport au socle :
+  # le taux optimal en LoRA est typiquement bien superieur a celui d'un entrainement
+  # complet, a nombre de parametres entraines bien moindre.
   search_space:
-    lr0: {type: float, low: 1.0e-5, high: 1.0e-1, log: true}
+    lr0: {type: float, low: 1.0e-4, high: 1.0e-1, log: true}
     lora.r: {type: categorical, choices: [4, 8, 16, 32]}
-    lora.alpha: {type: float, low: 4.0, high: 64.0, log: true}
     lora.neck_blocks: {type: int, low: 1, high: 5}
-    pose: {type: float, low: 4.0, high: 24.0}
-    weight_decay: {type: float, low: 1.0e-5, high: 1.0e-2, log: true}
-    degrees: {type: float, low: 0.0, high: 30.0}
-    scale: {type: float, low: 0.0, high: 0.7}
+    pose: {type: float, low: 4.0, high: 30.0}

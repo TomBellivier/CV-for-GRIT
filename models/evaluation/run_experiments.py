@@ -10,7 +10,7 @@ The YAML file may define:
 
 Example
 -------
-python run_experiments.py --config experiments.yaml --continue-on-error --compare
+python models/evaluation/run_experiments.py --config models/evaluation/experiments.yaml --continue-on-error --compare
 """
 
 import argparse

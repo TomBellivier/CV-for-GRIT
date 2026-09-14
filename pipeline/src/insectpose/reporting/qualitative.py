@@ -49,19 +49,46 @@ def instance_scores(gt: pd.DataFrame, pred: pd.DataFrame, schemas: dict[str, Key
     return pd.DataFrame(rows)
 
 
-def select_examples(scores: pd.DataFrame, n_examples: int, n_worst: int,
-                    seed: int) -> pd.DataFrame:
-    """Selectionne les pires cas puis un echantillon aleatoire reproductible."""
+def select_examples(scores: pd.DataFrame, n_examples: int, n_worst: int, seed: int,
+                    n_best_per_dataset: int = 1) -> pd.DataFrame:
+    """Selectionne les pires cas, les meilleurs par dataset, puis un tirage aleatoire.
+
+    Les trois categories repondent a trois questions differentes :
+    - `worst` : ou le modele echoue, et de quelle facon ;
+    - `best` : de quoi il est capable au mieux. Sans cette reference, on ne sait pas si
+      les echecs traduisent un plafond du modele ou des cas accidentels. La selection
+      est faite **par dataset**, car le meilleur cas global viendrait toujours de l'ordre
+      le plus facile ;
+    - `random` : ce a quoi ressemble un cas ordinaire, seul echantillon non biaise.
+
+    Le tirage aleatoire absorbe la variation : `n_examples` reste le total.
+    """
     if scores.empty:
         return scores
     ordered = scores.sort_values("oks", ascending=True)
     worst = ordered.head(min(n_worst, len(ordered)))
     remaining = ordered.drop(worst.index)
-    n_random = max(0, min(n_examples - len(worst), len(remaining)))
+
+    budget = max(0, n_examples - len(worst))
+    best = remaining.head(0)
+    if n_best_per_dataset > 0 and budget > 0 and not remaining.empty:
+        best = (
+            remaining.sort_values("oks", ascending=False)
+            .groupby("dataset", sort=True)
+            .head(n_best_per_dataset)
+            .head(budget)
+        )
+        remaining = remaining.drop(best.index)
+
+    n_random = max(0, min(n_examples - len(worst) - len(best), len(remaining)))
     sample = (
         remaining.sample(n=n_random, random_state=seed) if n_random else remaining.head(0)
     )
-    selection = pd.concat([worst.assign(reason="worst"), sample.assign(reason="random")])
+    selection = pd.concat([
+        worst.assign(reason="worst"),
+        best.assign(reason="best"),
+        sample.assign(reason="random"),
+    ])
     return selection.reset_index(drop=True)
 
 
@@ -90,9 +117,13 @@ def export_qualitative(run_dir: Path, gt: pd.DataFrame, pred: pd.DataFrame,
     from PIL import Image, ImageDraw
 
     cfg = eval_cfg.qualitative
+    if pred.empty:
+        log.warning("Aucune prediction : export qualitatif ignore pour ce run.")
+        return []
     scores = instance_scores(gt, pred, schemas, eval_cfg)
     selection = select_examples(
-        scores, int(cfg.n_examples), int(cfg.n_worst), seed
+        scores, int(cfg.n_examples), int(cfg.n_worst), seed,
+        n_best_per_dataset=int(cfg.get("n_best_per_dataset", 1)),
     )
     if selection.empty:
         log.warning("Aucune instance a exporter : verifier les predictions du run.")

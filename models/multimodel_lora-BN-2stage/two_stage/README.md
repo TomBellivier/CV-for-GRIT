@@ -18,11 +18,11 @@ Bonus : le détecteur prédit aussi le taxon, sans coût supplémentaire.
 
 ## Fichiers
 
-| Fichier | Rôle |
-|---|---|
-| `prepare_two_stage_dataset.py` | Construit le dataset de détection et le dataset de crops |
-| `train_two_stage.py` | Entraîne les deux étages |
-| `eval_two_stage.py` | Évalue le pipeline complet sur les images **originales** |
+| Fichier                          | Rôle                                                          |
+| -------------------------------- | -------------------------------------------------------------- |
+| `prepare_two_stage_dataset.py` | Construit le dataset de détection et le dataset de crops      |
+| `train_two_stage.py`           | Entraîne les deux étages                                     |
+| `eval_two_stage.py`            | Évalue le pipeline complet sur les images**originales** |
 
 ## Utilisation
 

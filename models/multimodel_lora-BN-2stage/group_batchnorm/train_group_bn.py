@@ -25,11 +25,11 @@ from pathlib import Path
 import torch
 from ultralytics import YOLO
 from ultralytics.models.yolo.pose import PoseTrainer
-from ultralytics.utils.torch_utils import de_parallel
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from dataset_utils import load_group_mapping  # noqa: E402
+from ul_compat import unwrap_model  # noqa: E402
 from group_bn import (bn_state_dict, check_shared_weights,  # noqa: E402
                       extract_bn_from_checkpoint, freeze_except_bn)
 
@@ -86,7 +86,7 @@ def train_one_group(args, group, data_yaml, also_train, run_tag):
     model = YOLO(args.base_weights)
     model.add_callback(
         "on_train_start",
-        lambda trainer: freeze_except_bn(de_parallel(trainer.model),
+        lambda trainer: freeze_except_bn(unwrap_model(trainer.model),
                                          also_train=also_train, verbose=False))
 
     model.train(
@@ -117,7 +117,7 @@ def train_one_group(args, group, data_yaml, also_train, run_tag):
         state = extract_bn_from_checkpoint(best)
     except Exception as exc:  # noqa: BLE001
         print(f"  could not read {best} ({exc}); using the in-memory model.")
-        state = bn_state_dict(de_parallel(model.model))
+        state = bn_state_dict(unwrap_model(model.model))
 
     if not state:
         raise RuntimeError(f"no BatchNorm tensors recovered for '{group}'")

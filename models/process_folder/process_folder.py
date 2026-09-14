@@ -20,7 +20,7 @@ Parallelism (inspired by test_process_hf.py, extended to the whole task):
 Examples
 --------
     # local folder (as before)
-    python process_folder.py --source folder --input images_to_process
+    python process_folder.py --source folder --input ../../databases/full\ databases
 
     # the whole Hugging Face dataset, 16 workers
     python process_folder.py --source hf --dataset TomBellivier/all_images --workers 16
@@ -42,6 +42,8 @@ from processing import config
 from processing.csv_writer import CsvWriter
 from processing.dataset_membership import build_membership
 from processing.image_source import build_source
+from processing.insect_group import build_group_index
+from processing.measurement_classifier import load_measurement_classifiers
 from processing.parallel import bounded_unordered_map
 from processing.worker import configure_cpu_threads, make_task
 
@@ -83,6 +85,8 @@ def parse_args():
                    help="Force the CSV to disk every N rows for crash safety "
                         "(default: config.CSV_FLUSH_EVERY_N_ROWS; 0 disables).")
 
+    p.add_argument("-only_scale_annotated", action="store_true") # /!\ needs "annotations.json" file in project root
+
     return p.parse_args()
 
 
@@ -101,6 +105,9 @@ def main():
 
     # Point the config at the requested pose model so every worker loads it.
     config.POSE_MODEL_PATH = resolve_pose_model_path(args.model)
+    # Full scale-bar + ruler evaluation data is only needed when evaluating
+    # against the manual scale annotations; see scale.py / detect_scale().
+    config.ONLY_SCALE_ANNOTATED = args.only_scale_annotated
 
     # ---- build the image source (list of items + a per-item loader) ---------
     items, load_fn = build_source(
@@ -109,6 +116,7 @@ def main():
         repo=args.dataset,
         hf_folders=args.hf_folders,
         hf_token=args.hf_token,
+        only_scale_annotated=args.only_scale_annotated
     )
     total = len(items)
 
@@ -126,7 +134,11 @@ def main():
     # ---- shared, read-only context ------------------------------------------
     configure_cpu_threads(args.workers, torch_threads=args.torch_threads)
     membership = build_membership()
-    task = make_task(load_fn, membership)
+    group_index = build_group_index() if config.RUN_MEASUREMENT_CLASSIFIER else None
+    measurement_classifiers = (
+        load_measurement_classifiers() if config.RUN_MEASUREMENT_CLASSIFIER else None
+    )
+    task = make_task(load_fn, membership, measurement_classifiers, group_index)
 
     # ---- process in parallel, write results as they complete ----------------
     ok, err = 0, 0

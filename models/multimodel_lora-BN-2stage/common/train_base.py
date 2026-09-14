@@ -14,6 +14,19 @@ python train_base.py \
     --epochs 150 --batch 16 --imgsz 640 \
     --degrees 180 --mosaic 0.5 \
     --out-dir base_model
+
+
+  epochs: 200
+  imgsz: 640
+  lr0: 0.01
+  lrf: 0.01
+
+  box: 11.0
+  cls: 0.1
+  dfl: 2.25
+  pose: 7
+  kobj: 2.25
+  rle: 1.2
 """
 
 import argparse
@@ -44,6 +57,10 @@ def parse_args():
     parser.add_argument("--lrf", type=float, default=0.01)
     parser.add_argument("--pose", type=float, default=12.0)
     parser.add_argument("--kobj", type=float, default=1.0)
+    parser.add_argument("--box", type=float, default=1.0)
+    parser.add_argument("--rle", type=float, default=1.0)
+    parser.add_argument("--dfl", type=float, default=1.0)
+    parser.add_argument("--cls", type=float, default=1.0)
     parser.add_argument("--patience", type=int, default=50)
     parser.add_argument("--device", default=None)
 
@@ -84,6 +101,10 @@ def train_base(args):
         imgsz=args.imgsz,
         lr0=args.lr0,
         lrf=args.lrf,
+        box=args.box,
+        rle = args.rle,
+        dfl = args.dfl,
+        cls = args.cls,
         pose=args.pose,
         kobj=args.kobj,
         patience=args.patience,

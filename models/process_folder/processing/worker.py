@@ -72,8 +72,12 @@ def _get_models() -> Models:
     return _local.models
 
 
-def make_task(load_fn, membership):
+def make_task(load_fn, membership, measurement_classifiers=None, group_index=None):
     """Build the function run for each item: load the image, then process it.
+
+    `measurement_classifiers` and `group_index` are shared read-only across
+    every worker thread (like `membership`): unlike the YOLO models, scoring a
+    fitted random forest does not mutate it, so one set of models is enough.
 
     Returned callable maps  (key, image_name)  ->  record dict.
     Exceptions propagate to parallel.bounded_unordered_map, which reports them
@@ -83,5 +87,6 @@ def make_task(load_fn, membership):
         key, image_name = item
         img_bgr = load_fn(key)               # download/decode (HF) or read (local)
         models = _get_models()
-        return process_image(img_bgr, image_name, models, membership)
+        return process_image(img_bgr, image_name, models, membership,
+                             measurement_classifiers, group_index)
     return task

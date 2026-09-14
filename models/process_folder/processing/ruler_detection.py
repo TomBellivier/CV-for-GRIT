@@ -27,7 +27,7 @@ import numpy as np
 from PIL import Image
 from scipy.signal import find_peaks, hilbert
 
-from ruler_confidence import row_spectrum, group_evidence, ruler_confidence
+from .ruler_confidence import row_spectrum, group_evidence, ruler_confidence
 
 
 warnings.filterwarnings('ignore')

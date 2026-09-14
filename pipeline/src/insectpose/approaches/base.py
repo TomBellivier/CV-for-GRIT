@@ -94,10 +94,17 @@ class BaseApproach(ABC):
         elapsed_ms = (time.perf_counter() - started) * 1000.0
 
         if raw.empty:
-            raise ContractError(
-                f"[{self.name}] aucune prediction produite sur '{split}'. Une approche qui "
-                "ne detecte rien doit ecrire un fichier vide explicite, pas planter en aval."
+            # Zero prediction est un RESULTAT, pas une erreur : un modele sous-entraine
+            # ou mal regle ne detecte rien, et l'evaluation doit le mesurer (OKS nul,
+            # couverture nulle) plutot que d'interrompre le pipeline. On ecrit donc un
+            # fichier conforme mais vide, et on le journalise fortement.
+            ctx.logger.warning(
+                "[%s] AUCUNE prediction sur '%s' (%d image(s)). Les metriques de ce split "
+                "seront nulles. Causes usuelles : modele sous-entraine, seuil de confiance "
+                "trop haut, ou labels mal formes.", self.name, split, len(images),
             )
+            return self._write_empty(ctx, split)
+
         required = {"image_id", "bbox_xywh", "kpts_xy", "kpts_score", "keypoint_schema"}
         missing = required - set(raw.columns)
         if missing:
@@ -123,6 +130,18 @@ class BaseApproach(ABC):
         df = ensure_columns(df, "predictions")
         out = ctx.paths.predictions(ctx.run_id, split, ctx.fold)
         return write_parquet(out, df, artifact="predictions")
+
+    def _write_empty(self, ctx: RunContext, split: str) -> Path:
+        """Ecrit un fichier de predictions vide mais conforme au contrat 3.
+
+        Effet de bord : ecrit runs/<run_id>/predictions/<split>_fold<k>.parquet.
+        """
+        from insectpose.contracts import all_columns
+
+        empty = pd.DataFrame({name: pd.Series(dtype="object")
+                              for name in all_columns("predictions")})
+        out = ctx.paths.predictions(ctx.run_id, split, ctx.fold)
+        return write_parquet(out, empty, artifact="predictions")
 
     @staticmethod
     def _check_in_image(df: pd.DataFrame, images: ImageSet) -> None:

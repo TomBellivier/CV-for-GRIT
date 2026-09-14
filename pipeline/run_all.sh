@@ -1,6 +1,13 @@
 # export INSECTPOSE_ROOT=$(pwd)
 # pip install -e ".[dev]"
 
+# create symlinks to the databases, if not already done
+# ln -s /home/tombellivier/Documents/CV/CV-for-GRIT/models/datasets/coleoptera /home/tombellivier/Documents/CV/CV-for-GRIT/pipeline/data/raw
+# ln -s /home/tombellivier/Documents/CV/CV-for-GRIT/models/datasets/diptera /home/tombellivier/Documents/CV/CV-for-GRIT/pipeline/data/raw
+# ln -s /home/tombellivier/Documents/CV/CV-for-GRIT/models/datasets/hymenoptera /home/tombellivier/Documents/CV/CV-for-GRIT/pipeline/data/raw
+# ln -s /home/tombellivier/Documents/CV/CV-for-GRIT/models/datasets/lepidoptera /home/tombellivier/Documents/CV/CV-for-GRIT/pipeline/data/raw
+
+
 # # 1. raw -> format canonique, un appel par dataset
 # for d in coleoptera diptera hymenoptera lepidoptera; do
 #   python -m insectpose.cli prepare data=$d
@@ -34,11 +41,19 @@
 # # 5. protocole complet : HPO nichée puis réentraînement des 5 folds externes
 # python -m insectpose.cli tune experiment=exp_a_yolo_pooled
 
+## faire une archive des runs
+# mkdir -p archive/$(date +%Y%m%d)
+# mv runs archive/$(date +%Y%m%d)/ && mkdir runs
+# mv results archive/$(date +%Y%m%d)/ 2>/dev/null; mkdir -p results
+
 python -m insectpose.cli train experiment=exp_f_yolo_reduced cv.fold=0 approach.weights=yolo26n-pose.pt tag=yolo26n
 
 python -m insectpose.cli train experiment=exp_d_lora cv.fold=0 approach.weights=yolo26n-pose.pt tag=yolo26n
 python -m insectpose.cli train experiment=exp_e_group_bn cv.fold=0 approach.weights=yolo26n-pose.pt tag=yolo26n
 
+
+# lancer avec logs 
+# python -m insectpose.cli train experiment=exp_X_XXX 2>&1 | tee logs_tune_X.txt
 
 # 6. agrégation + tableaux
 python -m insectpose.cli report

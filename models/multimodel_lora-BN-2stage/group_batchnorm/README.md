@@ -17,17 +17,17 @@ millions.
 
 ## Fichiers
 
-| Fichier | Rôle |
-|---|---|
-| `group_bn.py` | `GroupBatchNorm2d`, conversion, gel, extraction/chargement, vérification du partage |
-| `train_group_bn.py` | Réestime les BN sur chaque groupe, base gelée |
-| `eval_group_bn.py` | Assemble les 4 banques dans un modèle unique et évalue |
+| Fichier               | Rôle                                                                                  |
+| --------------------- | -------------------------------------------------------------------------------------- |
+| `group_bn.py`       | `GroupBatchNorm2d`, conversion, gel, extraction/chargement, vérification du partage |
+| `train_group_bn.py` | Réestime les BN sur chaque groupe, base gelée                                        |
+| `eval_group_bn.py`  | Assemble les 4 banques dans un modèle unique et évalue                               |
 
 ## Utilisation
 
 ```bash
 python train_group_bn.py \
-    --base-weights runs_base/base/weights/best.pt \
+    --base-weights best.pt \
     --data-config groups.yaml \
     --epochs 40 --lr0 0.002 \
     --out-dir gbn_weights --runs-dir runs_gbn \

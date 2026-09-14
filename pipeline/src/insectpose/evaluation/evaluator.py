@@ -7,6 +7,7 @@ n'importe aucun module d'approche : si c'etait necessaire, le design serait cass
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -51,9 +52,25 @@ def evaluate_predictions(predictions: pd.DataFrame, annotations: pd.DataFrame,
             log.info("Metrique '%s' non applicable a ce run (aucune ligne produite).", name)
         rows.extend(produced)
     if not rows:
+        if pred.empty:
+            # Un modele qui ne detecte rien obtient des metriques NULLES, pas une
+            # absence de metriques : c'est un resultat mesurable, et le masquer
+            # laisserait croire a un run casse alors que le modele est simplement mauvais.
+            from insectpose.evaluation.bundle import record
+
+            n_gt = int(len(gt))
+            rows = [record("overall", str(eval_cfg.primary_metric), 0.0, n_gt),
+                    record("overall", "kpt_coverage", 0.0, n_gt)]
+            for dataset in sorted(gt["dataset"].unique()):
+                subset = int((gt["dataset"] == dataset).sum())
+                rows.append(record(f"dataset:{dataset}", str(eval_cfg.primary_metric),
+                                   0.0, subset))
+            log.warning("Aucune prediction : metriques nulles publiees sur %d instance(s).",
+                        n_gt)
+            return pd.DataFrame(rows)
         raise ContractError(
-            "Aucune metrique produite : verifier que les predictions couvrent bien les "
-            "images de test et que eval.metrics n'est pas vide."
+            "Predictions presentes mais aucune metrique produite : verifier que "
+            "eval.metrics n'est pas vide et que les scopes sont actives."
         )
     return pd.DataFrame(rows)
 
@@ -80,9 +97,38 @@ def _check_schema_consistency(gt: pd.DataFrame, pred: pd.DataFrame) -> None:
         )
 
 
+def parse_prediction_filename(path: Path) -> tuple[str, int]:
+    """(split, fold) d'un fichier `<split>_fold<k>.parquet`."""
+    match = re.match(r"(?P<split>[a-z]+)_fold(?P<fold>\d+)$", Path(path).stem)
+    if not match:
+        raise ContractError(
+            f"Nom de fichier de predictions inattendu : {Path(path).name}. "
+            "Format attendu : <split>_fold<k>.parquet"
+        )
+    return match.group("split"), int(match.group("fold"))
+
+
+def _fold_images(paths: ProjectPaths, split_id: str,
+                 annotations: pd.DataFrame) -> dict[tuple[str, int], set[str]]:
+    """Images de chaque (split, fold) d'apres le decoupage du run.
+
+    Sert de perimetre d'evaluation quand un fichier de predictions est vide.
+    """
+    file = paths.split_file(split_id) if split_id else None
+    if file is None or not file.exists():
+        return {}
+    table = read_parquet(file)
+    known = set(annotations["image_id"])
+    return {
+        (str(role), int(fold)): set(group["image_id"]) & known
+        for (fold, role), group in table.groupby(["fold", "role"])
+    }
+
+
 def evaluate_run(run_id: str, paths: ProjectPaths, annotations: pd.DataFrame,
                  schemas: dict[str, KeypointSchema], eval_cfg: Any,
-                 splits: list[str] | None = None, approach: str | None = None) -> Path:
+                 splits: list[str] | None = None, approach: str | None = None,
+                 split_id: str | None = None) -> Path:
     """Evalue tous les fichiers de predictions d'un run et ecrit `metrics.parquet`.
 
     `approach` est passe explicitement pendant un entrainement : le manifeste s'ecrit
@@ -104,13 +150,21 @@ def evaluate_run(run_id: str, paths: ProjectPaths, annotations: pd.DataFrame,
         raise FileNotFoundError(f"Aucune prediction dans {pred_dir}. Lancer 'predict' d'abord.")
 
     frames: list[pd.DataFrame] = []
+    fold_table = _fold_images(paths, split_id or str(meta.get("split_id", "")), annotations)
     for file in files:
         pred = read_parquet(file, artifact="predictions", validate=True)
-        split = str(pred["split"].iloc[0])
+        # Le split et le fold viennent du NOM du fichier : un modele qui ne detecte rien
+        # produit un fichier vide, dont aucune ligne ne pourrait les porter.
+        split, fold = parse_prediction_filename(file)
         if splits is not None and split not in splits:
             continue
-        fold = int(pred["fold"].iloc[0])
-        subset = annotations[annotations["image_id"].isin(set(pred["image_id"]))]
+        if pred.empty:
+            # Le perimetre d'evaluation est alors celui du decoupage, pas celui des
+            # predictions : sinon le denominateur serait nul et l'echec invisible.
+            images = fold_table.get((split, fold), set())
+            subset = annotations[annotations["image_id"].isin(images)]
+        else:
+            subset = annotations[annotations["image_id"].isin(set(pred["image_id"]))]
         metrics = evaluate_predictions(pred, subset, schemas, eval_cfg)
         metrics["run_id"] = run_id
         metrics["approach"] = approach_name

@@ -75,6 +75,9 @@ class ScaleBarDetection:
     bar_box_conf: float | None      # detection score of the bar box
     text_box_conf: float | None     # detection score of the text box
     ocr_reliability: float | None   # EasyOCR reliability of the parsed read
+    bar_box: tuple[int, int, int, int] | None = None    # (x1, y1, x2, y2)
+    text_box: tuple[int, int, int, int] | None = None   # (x1, y1, x2, y2)
+    ocr_text: str | None = None                          # raw OCR read (joined fragments)
 
 
 # --------------------------------------------------------------------------- #
@@ -217,20 +220,23 @@ def detect_scale_bar(
         # confident detection so the pipeline still works on 1-class models.
         bar = max(dets, key=lambda d: d["confidence"])
     bar_box_conf = bar["confidence"]
+    bar_box = (bar["x1"], bar["y1"], bar["x2"], bar["y2"])
 
     bar_px = float(bar["x2"] - bar["x1"])
     if bar_px <= 0:
         return ScaleBarDetection(None, "Scale bar box has zero width.",
-                                 bar_box_conf, None, None)
+                                 bar_box_conf, None, None, bar_box=bar_box)
 
     # ---- pick the TEXT box (drives the OCR crop) -----------------------------
     text = _best_of_class(dets, text_class_id) if text_class_id is not None else None
     if text is not None:
         text_box_conf = text["confidence"]
+        text_box = (text["x1"], text["y1"], text["x2"], text["y2"])
         crop_src = text
     else:
         # No dedicated text box: OCR the padded bar crop and use a neutral score.
         text_box_conf = missing_box_conf
+        text_box = None
         crop_src = bar
 
     # ---- crop and run OCR ----------------------------------------------------
@@ -248,7 +254,8 @@ def detect_scale_bar(
         raw_ocr = reader.readtext(processed, detail=1, paragraph=False)
     except Exception as exc:  # noqa: BLE001 - report any OCR failure in the log
         return ScaleBarDetection(None, f"OCR failed: {exc}",
-                                 bar_box_conf, text_box_conf, 0.0)
+                                 bar_box_conf, text_box_conf, 0.0,
+                                 bar_box=bar_box, text_box=text_box)
 
     full_text, ocr_reliability = _ocr_reliability(raw_ocr)
     parsed = parse_scale_text(full_text)
@@ -259,6 +266,7 @@ def detect_scale_bar(
             f"Scale bar detected (bar_conf={bar_box_conf:.3f}) "
             f"but OCR text not parsed: '{full_text}'",
             bar_box_conf, text_box_conf, ocr_reliability,
+            bar_box=bar_box, text_box=text_box, ocr_text=full_text,
         )
 
     scale_value, unit = parsed
@@ -267,6 +275,7 @@ def detect_scale_bar(
         return ScaleBarDetection(
             None, f"Parsed scale value is zero or negative: {scale_value} {unit}",
             bar_box_conf, text_box_conf, ocr_reliability,
+            bar_box=bar_box, text_box=text_box, ocr_text=full_text,
         )
 
     px_per_mm = bar_px / mm_value
@@ -275,4 +284,5 @@ def detect_scale_bar(
             f"-> {px_per_mm:.2f} px/mm  "
             f"[bar_conf={bar_box_conf:.3f}, text_conf={text_box_conf:.3f}, "
             f"ocr={ocr_reliability:.3f}]")
-    return ScaleBarDetection(px_per_mm, info, bar_box_conf, text_box_conf, ocr_reliability)
+    return ScaleBarDetection(px_per_mm, info, bar_box_conf, text_box_conf, ocr_reliability,
+                             bar_box=bar_box, text_box=text_box, ocr_text=full_text)

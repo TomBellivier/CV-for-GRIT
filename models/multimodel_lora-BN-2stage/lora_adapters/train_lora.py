@@ -30,11 +30,11 @@ from pathlib import Path
 import torch
 from ultralytics import YOLO
 from ultralytics.models.yolo.pose import PoseTrainer
-from ultralytics.utils.torch_utils import de_parallel
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from dataset_utils import load_group_mapping  # noqa: E402
+from ul_compat import unwrap_model  # noqa: E402
 from lora import (extract_lora_from_checkpoint, freeze_base, inject_lora,  # noqa: E402
                   lora_state_dict, set_active_group)
 
@@ -115,7 +115,7 @@ def train_one_group(args, group, data_yaml, also_train, run_tag):
     # adapters before the first backward pass.
     model.add_callback(
         "on_train_start",
-        lambda trainer: freeze_base(de_parallel(trainer.model),
+        lambda trainer: freeze_base(unwrap_model(trainer.model),
                                     also_train=also_train, verbose=False))
 
     model.train(
@@ -149,7 +149,7 @@ def train_one_group(args, group, data_yaml, also_train, run_tag):
     except Exception as exc:  # noqa: BLE001
         print(f"  could not read adapters from {best} ({exc}); "
               "falling back to the in-memory model (last epoch).")
-        state = lora_state_dict(de_parallel(model.model))
+        state = lora_state_dict(unwrap_model(model.model))
         source = "last epoch (in memory)"
 
     if not state:

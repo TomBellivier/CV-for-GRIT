@@ -72,8 +72,91 @@ class LoRAConv2d(nn.Module):
             return out
         return out + self.scale * bank[self.active_group](x)
 
+    def merged_weight(self, group=None):
+        """Base kernel with one adapter folded in -- an exact rewrite.
+
+        Because ``B`` is a 1x1 convolution applied straight after ``A``, and both
+        share the base stride/padding/dilation, the two-step branch collapses to
+        a single kernel::
+
+            W_lora[o, i, u, v] = sum_r B[o, r] * A[r, i, u, v]
+
+        so ``W + scale * W_lora`` reproduces the adapted layer exactly. This is
+        what makes LoRA free at inference time, and it is also what lets
+        Ultralytics' Conv+BatchNorm fusion work on an adapted model.
+        """
+        key = self.active_group if group is None else _safe_key(group)
+        weight = self.base.weight
+        bank = getattr(self, LORA_ATTR)
+        if key is None or key not in bank:
+            return weight.detach().clone()
+        down, up = bank[key][0], bank[key][1]
+        delta = torch.einsum("or,riuv->oiuv", up.weight[:, :, 0, 0], down.weight)
+        return (weight + self.scale * delta).detach().clone()
+
+    def to_merged_conv(self, group=None):
+        """Return a plain nn.Conv2d equivalent to base + the chosen adapter."""
+        merged = nn.Conv2d(
+            self.base.in_channels, self.base.out_channels, self.base.kernel_size,
+            stride=self.base.stride, padding=self.base.padding,
+            dilation=self.base.dilation, groups=self.base.groups,
+            bias=self.base.bias is not None)
+        merged.weight.data.copy_(self.merged_weight(group))
+        if self.base.bias is not None:
+            merged.bias.data.copy_(self.base.bias.data)
+        return merged.to(self.base.weight.device, dtype=self.base.weight.dtype)
+
     def extra_repr(self):
         return f"rank={self.rank}, alpha={self.alpha}, active={self.active_group}"
+
+
+_FUSE_PATCHED = False
+
+
+def install_fuse_support():
+    """Teach Ultralytics' Conv+BatchNorm fusion about LoRA-wrapped convolutions.
+
+    ``fuse_conv_and_bn`` writes into ``conv.weight.data``, so exposing a computed
+    ``weight`` property on the wrapper is not enough. Instead the wrapper is
+    collapsed into an equivalent plain Conv2d first, and fusion proceeds on that.
+    The result is numerically exact.
+
+    This matters at the end of training: Ultralytics reloads ``best.pt`` and
+    fuses it before the final validation pass, which would otherwise crash on
+    ``LoRAConv2d has no attribute 'weight'``. Idempotent.
+    """
+    global _FUSE_PATCHED
+    if _FUSE_PATCHED:
+        return
+    import ultralytics.nn.tasks as tasks
+
+    original = tasks.fuse_conv_and_bn
+
+    def patched(conv, bn):
+        if isinstance(conv, LoRAConv2d):
+            conv = conv.to_merged_conv()
+        return original(conv, bn)
+
+    tasks.fuse_conv_and_bn = patched
+    _FUSE_PATCHED = True
+
+
+def merge_lora(pose_model, group, verbose=True):
+    """Bake one group's adapters into the weights and drop the wrappers.
+
+    Produces a plain model with zero adapter overhead -- the right thing to
+    export to ONNX for a single group.
+    """
+    targets = [(name, module) for name, module in pose_model.named_modules()
+               if isinstance(module, LoRAConv2d)]
+    for name, module in targets:
+        parent_name, _, attr = name.rpartition(".")
+        parent = pose_model.get_submodule(parent_name) if parent_name else pose_model
+        setattr(parent, attr, module.to_merged_conv(group))
+    if verbose:
+        print(f"[lora] merged {len(targets)} adapters for group '{group}'; "
+              f"the model is now a plain YOLO-pose network")
+    return pose_model
 
 
 def _safe_key(name):
@@ -147,6 +230,8 @@ def inject_lora(pose_model, groups, rank=8, alpha=None, targets="neck_head",
         wrapper.to(module.weight.device, dtype=module.weight.dtype)
         setattr(parent, attr, wrapper)
         n_params += sum(p.numel() for p in getattr(wrapper, LORA_ATTR).parameters())
+
+    install_fuse_support()
 
     if verbose:
         total = sum(p.numel() for p in pose_model.parameters())

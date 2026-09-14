@@ -1,15 +1,22 @@
 # @package _global_
 tuning:
-  # ADR-0012 : HPO niche. La boucle interne optimise sur le train du fold externe,
-  # l'evaluation se fait sur le test externe jamais vu par la recherche.
-  mode: nested                  # nested | tune_once
-  n_trials: 40                  # DOIT etre identique entre approches (§6.3 budget equitable)
+  # ADR-0031 : budget FIGE pour les six approches. `tune_once` cherche sur les folds
+  # internes du fold externe 0, puis applique les hyperparametres retenus aux 5 folds
+  # externes. Seule l'estimation du fold 0 devient legerement optimiste ; les jeux de
+  # test des folds 1 a 4 restent vierges de toute recherche.
+  mode: tune_once               # nested | tune_once
+  n_trials: 20                  # DOIT etre identique entre approches (§6.3 budget equitable)
+  # Trials tires au hasard avant que le TPE ne prenne le relais. Le defaut d'Optuna
+  # (10) consommerait la moitie d'un budget de 20 en tirage aveugle.
+  n_startup_trials: 5
   timeout_s: null
   inner_folds: 3                # folds internes pour l'HPO
   tuning_outer_fold: 0          # utilise seulement si mode=tune_once
   sampler: tpe                  # tpe | random
   pruner: median                # median | none
-  pruner_warmup_steps: 5
+  # 1 et non 5 : un trial ne remonte que `inner_folds` valeurs intermediaires, donc a 5
+  # l'elagage ne se declenchait JAMAIS et le budget etait paye en entier.
+  pruner_warmup_steps: 1
   storage: sqlite               # sqlite | none (in-memory, non reprenable)
   load_if_exists: true
   seed: 42

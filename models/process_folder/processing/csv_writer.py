@@ -28,6 +28,8 @@ import os
 
 from . import config
 from .definitions import MEASUREMENT_NAMES, KEYPOINT_NAMES
+from .insect_group import INSECT_GROUPS
+from .measurement_classifier import VALID_PROBA_SUFFIX, VALID_PRED_SUFFIX
 
 
 # Suffixes used to disambiguate the three columns of each measurement.
@@ -40,10 +42,22 @@ KP_X_SUFFIX = " [kp_x]"
 KP_Y_SUFFIX = " [kp_y]"
 KP_CONF_SUFFIX = " [kp_conf]"
 
+# Pipeline stages timed when config.EXPORT_TIMINGS is True (see pipeline.py).
+TIMING_STAGES = ["scale", "pose", "measurements", "confidence",
+                 "mm_conversion", "measurement_classifier", "total"]
+TIME_SUFFIX = " [s]"
+
 # Optional columns, in a stable display order.
 _OPTIONAL_ORDER = [
     "scale_method",
     "n_instances",
+    "scale_bar_confidence",
+    "ruler_confidence",
+    "scale_bar_box",
+    "scale_text_box",
+    "scale_ocr_text",
+    "ruler_line",
+    "ruler_orientation",
     "detection_confidence",
     "image_width",
     "image_height",
@@ -65,6 +79,23 @@ def _keypoint_columns() -> list[str]:
     return cols
 
 
+def _measurement_validity_columns() -> list[str]:
+    """Group one-hot + per-measurement classifier columns, or [] if disabled."""
+    if not getattr(config, "RUN_MEASUREMENT_CLASSIFIER", False):
+        return []
+    cols = [f"{g}_one_hot" for g in INSECT_GROUPS]
+    cols += [m + VALID_PROBA_SUFFIX for m in MEASUREMENT_NAMES]
+    cols += [m + VALID_PRED_SUFFIX for m in MEASUREMENT_NAMES]
+    return cols
+
+
+def _timing_columns() -> list[str]:
+    """Per-stage processing-time columns, or [] if export is off."""
+    if not getattr(config, "EXPORT_TIMINGS", False):
+        return []
+    return [stage + " time" + TIME_SUFFIX for stage in TIMING_STAGES]
+
+
 def build_header() -> list[str]:
     """Return the ordered list of column names."""
     header = ["image_name", "in_train", "in_val"]
@@ -73,6 +104,8 @@ def build_header() -> list[str]:
     header += [m + CONF_SUFFIX for m in MEASUREMENT_NAMES]
     header += ["overall_pose_confidence", "scale_px_per_mm", "scale_confidence"]
     header += _enabled_optional_columns()
+    header += _measurement_validity_columns()
+    header += _timing_columns()
     header += _keypoint_columns()
     return header
 
@@ -111,6 +144,17 @@ def build_row(record: dict) -> list[str]:
 
     for col in _enabled_optional_columns():
         row.append(_fmt(record.get(col)))
+
+    if getattr(config, "RUN_MEASUREMENT_CLASSIFIER", False):
+        group_one_hot = record.get("group_one_hot", {})
+        row += [_fmt(group_one_hot.get(f"{g}_one_hot")) for g in INSECT_GROUPS]
+        measure_valid = record.get("measure_valid", {})
+        row += [_fmt(measure_valid.get(m, {}).get("proba")) for m in MEASUREMENT_NAMES]
+        row += [_fmt(measure_valid.get(m, {}).get("pred")) for m in MEASUREMENT_NAMES]
+
+    if getattr(config, "EXPORT_TIMINGS", False):
+        timings = record.get("timings", {})
+        row += [_fmt(timings.get(stage)) for stage in TIMING_STAGES]
 
     # Raw keypoints of the measured instance (x, y, confidence per keypoint).
     if getattr(config, "EXPORT_KEYPOINTS", False):

@@ -90,7 +90,7 @@ MEASUREMENTS = {
     "thorax length":               ["neck", "thorax-bottom"],
     "abdomen width":               ["body-left", "body-right"],
     "abdomen length":              ["thorax-bottom", "body-tip"],
-    "intertegular distance":       ["left-hindwing-base", "right-hindwing-base"],
+    "intertegular distance":       ["left-forewing-base", "right-forewing-base"],
     "left hind wing length":       ["left-hindwing-base", "left-hindwing-tip"],
     "right hind wing length":      ["right-hindwing-base", "right-hindwing-tip"],
     "left hind wing width":        ["left-hindwing-front", "left-hindwing-rear"],

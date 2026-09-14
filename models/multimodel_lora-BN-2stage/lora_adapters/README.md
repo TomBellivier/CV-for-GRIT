@@ -19,17 +19,17 @@ chaîne de caractères : les poids partagés ne sont jamais rechargés.
 
 ## Fichiers
 
-| Fichier | Rôle |
-|---|---|
-| `lora.py` | `LoRAConv2d`, injection, gel, extraction/chargement des banques |
-| `train_lora.py` | Entraîne une banque par groupe sur le modèle de base gelé |
-| `eval_lora.py` | Installe les 4 banques sur un seul backbone et évalue |
+| Fichier           | Rôle                                                             |
+| ----------------- | ----------------------------------------------------------------- |
+| `lora.py`       | `LoRAConv2d`, injection, gel, extraction/chargement des banques |
+| `train_lora.py` | Entraîne une banque par groupe sur le modèle de base gelé      |
+| `eval_lora.py`  | Installe les 4 banques sur un seul backbone et évalue            |
 
 ## Utilisation
 
 ```bash
 python train_lora.py \
-    --base-weights runs_base/base/weights/best.pt \
+    --base-weights best.pt \
     --data-config groups.yaml \
     --rank 8 --targets neck_head \
     --epochs 80 --batch 16 --lr0 0.001 \

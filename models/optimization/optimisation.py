@@ -16,18 +16,18 @@ wandb.init(project="Optuna", name=f"Study_2")
 optuna.logging.get_logger("optuna").addHandler(logging.StreamHandler(sys.stdout))
 
 BASE_MODEL = "../yolo26s-pose.pt"
-DATASET = "../datasets/Lepidoptera/yolo-config.yaml"
+DATASET = "../training/datasets/all_insects_cls/data.yaml"
 
 STUDY_NAME = "study_pose_kobj_box_cls_dfl_rle"
 
-N_TRIALS = 100
+N_TRIALS = 16
 
 SAVE = False
 
 
 def attention(pose, kobj, box, cls, dfl, rle, save=True):
         model = YOLO(BASE_MODEL)
-        model.train(data=DATASET, epochs=200, 
+        model.train(data=DATASET, epochs=150, 
                     optimizer="SGD", lr0=0.01, pose=pose, kobj=kobj, box=box, cls=cls, dfl=dfl, rle=rle, 
                     name="./storage/exp", save=save)
         metrics = model.val()
@@ -56,7 +56,8 @@ if __name__ == "__main__":
                 )
 
         start = time.time()
-        study2.optimize(objective, n_trials=N_TRIALS)
+        # study2.optimize(objective, n_trials=N_TRIALS)
+        
 
         print("best parameters : ", study2.best_params)
 

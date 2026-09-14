@@ -49,14 +49,28 @@ def _pil_to_bgr(pil_image) -> np.ndarray:
 # --------------------------------------------------------------------------- #
 # LOCAL folder source
 # --------------------------------------------------------------------------- #
-def _list_local_images(folder: Path) -> list[tuple[Path, str]]:
+def _list_local_images(folder: Path, only_scale_annotated=False) -> list[tuple[Path, str]]:
     if not folder.is_dir():
         raise FileNotFoundError(f"Input folder not found: {folder}")
-    items = [
-        (p.resolve(), p.name)
-        for p in folder.rglob("*")
-        if p.is_file() and p.suffix.lower() in config.IMG_EXTENSIONS
-    ]
+    if only_scale_annotated:
+        import json
+        with open("./annotations.json") as f:
+            annotation_file = json.load(f)
+        scale_annotated_images = [Path(k.replace("\\", "/")).stem for k, v in annotation_file.items()]
+        print(len(scale_annotated_images), scale_annotated_images[0])
+        items = [
+                (p.resolve(), p.name)
+                for p in folder.rglob("*")
+                if p.is_file() and p.suffix.lower() in config.IMG_EXTENSIONS \
+                and Path(p).stem in scale_annotated_images
+            ]
+        print(len(items))
+    else:
+        items = [
+            (p.resolve(), p.name)
+            for p in folder.rglob("*")
+            if p.is_file() and p.suffix.lower() in config.IMG_EXTENSIONS 
+        ]
     return items
 
 
@@ -67,10 +81,10 @@ def _load_local(path: Path) -> np.ndarray:
     return img_bgr
 
 
-def build_local_source(folder) -> tuple[list[tuple[Path, str]], callable]:
+def build_local_source(folder, only_scale_annotated=False) -> tuple[list[tuple[Path, str]], callable]:
     """Return (items, load_fn) for a local folder of images."""
     folder = Path(folder)
-    items = _list_local_images(folder)
+    items = _list_local_images(folder, only_scale_annotated)
     return items, _load_local
 
 
@@ -131,13 +145,13 @@ def build_hf_source(repo: str, folders: list[str] | None,
 # Dispatcher
 # --------------------------------------------------------------------------- #
 def build_source(source_kind: str, *, folder=None, repo=None,
-                 hf_folders=None, hf_token=None):
+                 hf_folders=None, hf_token=None, only_scale_annotated=False):
     """Return (items, load_fn) for the requested source.
 
     source_kind : "folder" | "hf"
     """
     if source_kind == "folder":
-        return build_local_source(folder or config.INPUT_FOLDER)
+        return build_local_source(folder or config.INPUT_FOLDER, only_scale_annotated)
     if source_kind == "hf":
         if not repo:
             raise ValueError("A Hugging Face dataset id is required (--dataset).")

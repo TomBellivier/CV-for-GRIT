@@ -17,7 +17,9 @@ src/insectpose/approaches/__init__.py
 src/insectpose/approaches/base.py
 src/insectpose/approaches/detect_then_pose.py
 src/insectpose/approaches/group_bn.py
+src/insectpose/approaches/head_only.py
 src/insectpose/approaches/lora.py
+src/insectpose/approaches/lora_per_dataset.py
 src/insectpose/approaches/reference.py
 src/insectpose/approaches/yolo_per_dataset.py
 src/insectpose/approaches/yolo_pooled.py

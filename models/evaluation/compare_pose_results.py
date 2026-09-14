@@ -13,6 +13,10 @@ Loads every result_*.xlsx workbook in a directory and produces:
 Example
 -------
 python compare_pose_results.py --results-dir pose_results --out-dir comparison
+python compare_pose_results.py --results-dir pose_results_2 --out-dir comparison_2
+python compare_pose_results.py --results-dir pose_results_3 --out-dir comparison_3
+
+
 """
 
 import argparse

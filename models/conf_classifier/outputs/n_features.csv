@@ -1,0 +1,9 @@
+model,mean_n_features,min_n_features,max_n_features,mean_mcc
+seuil_conf_moy,2.31,2,4,0.405
+seuil_conf_min,2.31,2,4,0.425
+xgb_direct,6.31,6,8,0.58
+rf_direct,6.31,6,8,0.582
+xgb_related,12.62,8,24,0.63
+rf_related,12.62,8,24,0.641
+xgb_all,46.0,46,46,0.631
+rf_all,46.0,46,46,0.646

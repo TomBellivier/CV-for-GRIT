@@ -32,3 +32,4 @@ models/optimization/wandb
 models/optimization/Optuna
 
 pipeline/runs
+pipeline/archive
