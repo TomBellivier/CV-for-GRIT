@@ -1,0 +1,3 @@
+,mcc,precision,recall
+mean,0.846,0.887,0.923
+std,0.168,0.172,0.141

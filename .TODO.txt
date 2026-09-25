@@ -1,0 +1,19 @@
+A FAIRE : 
+X 1. mettre à jour annotation_tools/conversion_to_yolo_dataset et annotation/tools/import_volunteer_file pour les simplifier en un seul fichier. 
+2. ajouter les modèles (detection de scale bar, detection de règle, module de pose, modèles de classification des membres)
+X 3. faire en sorte que tous les modèles soient crées dans retained_models, de manière à être utilisés directements par le module pipeline.
+4. faire les readme de toutes les approches. 
+5. faire un dossier resultats
+X 6. simplifier le code pour l'application annotations_tools/measurement_validation à simplement classer les mesures. 
+7. changer les paramètre des classificateurs par mesure : changer des confiances aux coordonnées simples. 
+
+MODELS ONLY (pouvant être copier coller quelquepart, servant uniquement à l'inférenceindépendants): 
+pipeline
+retained_models
+images_to_process
+
+ATTENTION PENDANT LES MODIFS : 
+- faire en sorte que le cpu soit choisi automatiquement si pas de gpu disponibles, ou si seul un CPU est disponible
+- faire en sorte que le squelette/mesures d'intérêt soient personalisables, grâce à un fichier à la racine du projet (kp_infos.txt ?)
+- certains fichiers on été déplacés : chemins écrit en brut à vérifier. 
+- fichiers d'annotation à rassembler après les étapes d'annotations successives. 

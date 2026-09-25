@@ -1,3 +1,5 @@
+.venv/
+
 *.png
 *.jpg
 *.jpeg
@@ -6,30 +8,24 @@
 *.pkl
 *.parquet
 
-models/datasets
+datasets/*/images/
+datasets/*/labels/
 
-!label_studio_annotations/
-!label_studio_annotations/**/*.json
-databases/
-!databases/**/*/ipynb
-!databases/redim.py
-!annotations/
-!annotations/**/*.json
+!annotation_data/label_studio_annotations/
+!annotation_data/label_studio_annotations/**/*.json
+!annotation_data/
+!annotation_data/**/*.json
+!annotation_data/**/*.csv
 *.pth
 *.pt
+*.joblib
 *.cache
-models/**/labels/
-models/**/images/
-!models/runs/**/*_pred.jpg
-!models/runs/**/*output.png
-#models/runs/
-!models/run_results.json
+modules/**/labels/
+modules/**/images/
 *__pycache__/
 
-
-models/optimization/runs
-models/optimization/wandb
-models/optimization/Optuna
+results/pose/optuna/**/wandb
+results/pose/optuna/**/runs
 
 pipeline/runs
 pipeline/archive

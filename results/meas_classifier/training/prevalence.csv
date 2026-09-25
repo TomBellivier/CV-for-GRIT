@@ -1,0 +1,28 @@
+measure,n,n_unmeasurable,prevalence_unmeasurable,kept
+total length,1201,314,0.2614487926727727,True
+head width,1201,281,0.23397169025811823,True
+head length,1201,174,0.14487926727726894,True
+inter ocular distance,1201,321,0.2672772689425479,True
+right antenna length,1201,181,0.15070774354704414,True
+left antenna length,1201,150,0.12489592006661115,True
+thorax width,1201,202,0.16819317235636969,True
+thorax length,1201,5,0.004163197335553705,False
+abdomen width,1201,261,0.21731890091590342,True
+abdomen length,1201,151,0.1257285595337219,True
+intertegular distance,1201,179,0.14904246461282264,True
+left hind wing length,1201,886,0.7377185678601166,True
+right hind wing length,1201,882,0.7343880099916736,True
+left hind wing width,1201,912,0.7593671940049959,True
+right hind wing width,1201,901,0.7502081598667777,True
+left fore wing length,1201,201,0.16736053288925895,True
+right fore wing length,1201,201,0.16736053288925895,True
+left fore wing width,1201,532,0.44296419650291424,True
+right fore wing width,1201,537,0.44712739383846795,True
+left hind leg length,1201,1172,0.9758534554537885,True
+left hind leg femur length,1201,1163,0.9683597002497918,True
+left hind leg tibia length,1201,781,0.6502914238134888,True
+left hind leg tarsus length,1201,779,0.6486261448792673,True
+right hind leg length,1201,1176,0.9791840133222315,True
+right hind leg femur length,1201,1166,0.9708576186511241,True
+right hind leg tibia length,1201,800,0.6661115736885929,True
+right hind leg tarsus length,1201,768,0.6394671107410491,True
