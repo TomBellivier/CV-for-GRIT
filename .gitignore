@@ -24,8 +24,7 @@ modules/**/labels/
 modules/**/images/
 *__pycache__/
 
-results/pose/optuna/**/wandb
-results/pose/optuna/**/runs
+modules/architectures/results
 
 pipeline/runs
 pipeline/archive
