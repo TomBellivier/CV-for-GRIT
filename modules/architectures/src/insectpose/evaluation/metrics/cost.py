@@ -1,6 +1,6 @@
-"""Metriques de cout : latence, taille du modele, duree d'entrainement.
+"""Cost metrics: latency, model size, training duration.
 
-Metriques de PREMIER ORDRE pour choisir un modele deployable, pas des annexes (§7.2).
+FIRST-ORDER metrics to choose a deployable model, not appendices (§7.2).
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from insectpose.registry import register_metric
 
 @register_metric("cost")
 def cost(bundle: EvalBundle) -> list[dict[str, Any]]:
-    """Latence d'inference par instance, quand l'approche l'a renseignee."""
+    """Inference latency per instance, when the approach reported it."""
     if "inference_ms" not in bundle.pred.columns or bundle.pred.empty:
         return []
     values = bundle.pred["inference_ms"].to_numpy(dtype=float)

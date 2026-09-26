@@ -1,1 +1,1 @@
-"""Briques de modeles reutilisables : normalisation par groupe, adaptateurs."""
+"""Reusable model building blocks: per-group normalisation, adapters."""

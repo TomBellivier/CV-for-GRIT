@@ -1,7 +1,7 @@
-"""Registre par nom des composants enfichables (CONVENTIONS.md §4.1).
+"""Registry by name of the pluggable components (CONVENTIONS.md §4.1).
 
-Un composant s'enregistre par decorateur ; le pipeline ne connait que des noms.
-Aucun `if approach == ...` ne doit exister ailleurs dans le projet.
+A component registers itself through a decorator; the pipeline only knows names.
+No `if approach == ...` may exist anywhere else in the project.
 """
 
 from __future__ import annotations
@@ -16,20 +16,20 @@ T = TypeVar("T")
 
 
 class Registry(Generic[T]):
-    """Table nom -> objet, avec refus des doublons silencieux."""
+    """Name -> object table, refusing silent duplicates."""
 
     def __init__(self, namespace: str) -> None:
         self.namespace = namespace
         self._items: dict[str, T] = {}
 
     def register(self, name: str) -> Callable[[T], T]:
-        """Decorateur d'enregistrement. Le nom DOIT etre celui du YAML correspondant."""
+        """Registration decorator. The name MUST be that of the matching YAML file."""
 
         def decorator(obj: T) -> T:
             if name in self._items and self._items[name] is not obj:
                 raise KeyError(
-                    f"'{name}' est deja enregistre dans le registre '{self.namespace}'. "
-                    "Choisir un autre nom plutot que d'ecraser."
+                    f"'{name}' is already registered in the '{self.namespace}' registry. "
+                    "Choose another name rather than overwriting."
                 )
             self._items[name] = obj
             return obj
@@ -37,17 +37,17 @@ class Registry(Generic[T]):
         return decorator
 
     def get(self, name: str) -> T:
-        """Recupere un composant enregistre, ou echoue avec la liste des noms valides."""
+        """Return a registered component, or fail with the list of valid names."""
         if name not in self._items:
             raise KeyError(
-                f"'{name}' introuvable dans le registre '{self.namespace}'. "
-                f"Disponibles : {sorted(self._items)}. "
-                "Verifier que le module est importe (cf. load_plugins)."
+                f"'{name}' not found in the '{self.namespace}' registry. "
+                f"Available: {sorted(self._items)}. "
+                "Check that the module is imported (see load_plugins)."
             )
         return self._items[name]
 
     def available(self) -> list[str]:
-        """Noms enregistres, tries."""
+        """Registered names, sorted."""
         return sorted(self._items)
 
     def __contains__(self, name: object) -> bool:
@@ -64,9 +64,9 @@ register_adapter = ADAPTERS.register
 
 
 def load_plugins(package: str) -> list[str]:
-    """Importe tous les sous-modules d'un package pour declencher les enregistrements.
+    """Import every sub-module of a package to trigger the registrations.
 
-    Effet de bord : imports Python uniquement, aucune ecriture disque.
+    Side effect: Python imports only, no disk write.
     """
     module: ModuleType = importlib.import_module(package)
     loaded: list[str] = []
@@ -79,7 +79,7 @@ def load_plugins(package: str) -> list[str]:
 
 
 def load_all_plugins() -> None:
-    """Charge approches, metriques et adaptateurs. Appele une fois au demarrage du CLI."""
+    """Load approaches, metrics and adapters. Called once when the CLI starts."""
     load_plugins("insectpose.approaches")
     load_plugins("insectpose.evaluation.metrics")
     load_plugins("insectpose.data.adapters")

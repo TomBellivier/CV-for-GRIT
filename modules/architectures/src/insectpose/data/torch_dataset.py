@@ -1,7 +1,7 @@
-"""Dataset torch generique produisant le SUPERSET de champs du §4.3.
+"""Generic torch dataset producing the SUPERSET of fields of §4.3.
 
-Une approche ignore les champs qui ne la concernent pas ; aucune ne doit avoir a
-modifier le datamodule pour obtenir un champ manquant.
+An approach ignores the fields that do not concern it; none should have to modify the
+datamodule to get a missing field.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from insectpose.utils.optional import require
 
 
 def build_instance_records(image_set: ImageSet) -> list[dict[str, Any]]:
-    """Aplatit un ImageSet en enregistrements par instance (sans charger les images)."""
+    """Flatten an ImageSet into per-instance records (without loading the images)."""
     records: list[dict[str, Any]] = []
     for row in image_set.annotations.itertuples(index=False):
         records.append(
@@ -37,11 +37,11 @@ def build_instance_records(image_set: ImageSet) -> list[dict[str, Any]]:
     return records
 
 
-class InstanceCropDataset:  # pragma: no cover - necessite torch + images reelles
-    """Dataset d'instances recadrees, avec matrice de transformation conservee.
+class InstanceCropDataset:  # pragma: no cover - needs torch + real images
+    """Dataset of cropped instances, with the transform matrix kept.
 
-    La `transform_matrix` retournee permet la retro-projection obligatoire des
-    predictions vers le repere de l'image d'origine (§3.4, §9.3).
+    The returned `transform_matrix` enables the mandatory back-projection of the
+    predictions to the frame of the original image (§3.4, §9.3).
     """
 
     def __init__(self, image_set: ImageSet, out_size: tuple[int, int], train: bool = False,
@@ -62,7 +62,7 @@ class InstanceCropDataset:  # pragma: no cover - necessite torch + images reelle
         rec = self.records[idx]
         bbox = rec["bbox_xywh"]
         if self.train:
-            # Crops issus de bboxes GT BRUITEES : sinon decalage train/test (§9.3).
+            # Crops from NOISY GT bboxes: otherwise a train/test shift (§9.3).
             bbox = jitter_bbox(bbox, self.rng, self.jitter_scale, self.jitter_shift)
         matrix = crop_affine(bbox, self.out_size)
         image = Image.open(rec["image_path"]).convert("RGB")
@@ -89,7 +89,7 @@ class InstanceCropDataset:  # pragma: no cover - necessite torch + images reelle
         }
 
     def as_torch(self) -> Any:
-        """Enveloppe torch.utils.data.Dataset (import differe)."""
+        """torch.utils.data.Dataset wrapper (deferred import)."""
         torch_utils = require("torch.utils.data", "torch")
         parent = self
 

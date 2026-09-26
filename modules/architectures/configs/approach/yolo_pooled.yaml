@@ -1,32 +1,32 @@
 # @package _global_
-# Approche A : un seul modele YOLO-pose, une seule classe "insecte", les 4 datasets
-# confondus (CONVENTIONS.md §9.1). Schema de keypoints commun => aucune reprojection.
+# Approach A: a single YOLO-pose model, a single "insect" class, the 4 datasets pooled
+# (CONVENTIONS.md §9.1). Common keypoint schema => no reprojection.
 approach:
   name: yolo_pooled
   _target_: insectpose.approaches.yolo_pooled.YoloPooledApproach
 
-  # ADR-0033 : yolo26n est le modele de base FIGE des six approches. Une taille
-  # differente changerait la capacite du reseau, et la comparaison porterait alors sur
-  # elle plutot que sur la methode. Pour comparer des poids de depart (etude annexe,
-  # hors tableau principal) :
+  # ADR-0033: yolo26n is the FROZEN base model of the six approaches. A different size
+  # would change the capacity of the network, and the comparison would then be about it
+  # rather than about the method. To compare starting weights (side study, outside the
+  # main table):
   #   python -m insectpose.cli train experiment=exp_a_yolo_pooled \
   #       approach.weights=yolo11n-pose.pt tag=yolo11n
-  # Le `tag` est OBLIGATOIRE : sans lui, les deux variantes seraient distinguees par
-  # leur variant_hash mais porteraient la meme etiquette dans les figures.
+  # The `tag` is MANDATORY: without it, the two variants would be told apart by their
+  # variant_hash but would carry the same label in the figures.
   weights: yolo26n-pose.pt
-  prunable: false               # Ultralytics ne remonte pas d'intermediaire exploitable
+  prunable: false               # Ultralytics reports no usable intermediate value
 
   # --- inference ---
-  max_det: 1                    # ADR-0017 : une image = un insecte
-  conf: 0.001                   # seuil BAS : ne jamais tronquer les courbes AP (§3.4)
+  max_det: 1                    # ADR-0017: one image = one insect
+  conf: 0.001                   # LOW threshold: never truncate the AP curves (§3.4)
   iou: 0.7
-  # ADR-0021 : nombre d'images passees a predict() en une fois. Ultralytics materialise
-  # toutes les images du `source` a la construction de son chargeur, avant toute
-  # inference : une liste complete de fold sature la RAM. Ce parametre n'affecte AUCUN
-  # resultat, seulement l'empreinte memoire ; il peut donc etre ajuste librement.
+  # ADR-0021: number of images passed to predict() at once. Ultralytics materialises
+  # every image of the `source` when building its loader, before any inference: a
+  # whole-fold list saturates the RAM. This parameter affects NO result, only the memory
+  # footprint; it can therefore be tuned freely.
   predict_chunk_size: 16
-  # fp16 | fp32. Traduit en `quantize` (Ultralytics >= 8.4) ou `half` (versions
-  # anterieures) ; ignore sur CPU. En fp32, aucun argument n'est passe : c'est le defaut.
+  # fp16 | fp32. Translated into `quantize` (Ultralytics >= 8.4) or `half` (earlier
+  # versions); ignored on CPU. In fp32 no argument is passed: it is the default.
   inference_precision: fp16
 
   # --- optimisation ---
@@ -38,7 +38,7 @@ approach:
   warmup_epochs: 3.0
   cos_lr: false
 
-  # --- ponderation des pertes ---
+  # --- loss weights ---
   box: 7.5
   pose: 12.0
   kobj: 1.0
@@ -46,8 +46,8 @@ approach:
   dfl: 1.5
 
   # --- augmentation ---
-  # fliplr n'est licite que parce que data.yaml embarque flip_idx (§3.1) : sans lui,
-  # le miroir echangerait gauche et droite sans permuter les labels.
+  # fliplr is only legitimate because data.yaml carries flip_idx (§3.1): without it, the
+  # mirror would swap left and right without permuting the labels.
   fliplr: 0.5
   flipud: 0.0
   degrees: 10.0
@@ -63,15 +63,15 @@ approach:
   mixup: 0.0
   erasing: 0.0
 
-  # Budget identique a celui des autres approches (§6.3) : ne pas elargir cet espace
-  # ADR-0031 : QUATRE hyperparametres, budget de 20 trials. Le taux d'apprentissage est
-  # de loin le plus influent en apprentissage profond (analyses fANOVA : plus des deux
-  # tiers de la variance sur LSTM, 2e rang sur CNN derriere la profondeur, qui est fixee
-  # ici par le choix du modele). `pose` et `kobj` comptent particulierement hors domaine
-  # COCO : avec les valeurs par defaut, la perte de pose peut ne pas descendre du tout
-  # sur des keypoints non humains — et nous avons 42 points d'insecte.
-  # Les parametres d'augmentation sont FIXES (ADR-0032), `lrf` aussi : il interagit avec
-  # la duree d'entrainement et pese bien moins que `lr0`.
+  # Budget identical to the other approaches' (§6.3): do not widen this space.
+  # ADR-0031: FOUR hyperparameters, budget of 20 trials. The learning rate is by far
+  # the most influential one in deep learning (fANOVA analyses: more than two thirds of
+  # the variance on LSTMs, 2nd rank on CNNs behind the depth, which is fixed here by the
+  # choice of the model). `pose` and `kobj` matter particularly outside the COCO domain:
+  # with the default values, the pose loss may not decrease at all on non-human
+  # keypoints — and we have 42 insect points.
+  # The augmentation parameters are FIXED (ADR-0032), and so is `lrf`: it interacts
+  # with the training duration and weighs much less than `lr0`.
   search_space:
     lr0: {type: float, low: 1.0e-4, high: 5.0e-2, log: true}
     pose: {type: float, low: 4.0, high: 30.0}

@@ -1,4 +1,4 @@
-# Seul endroit qui declare des racines de chemins. Surchargeable par machine :
+# The only place that declares path roots. Overridable per machine:
 #   python -m insectpose.cli train paths.root=/scratch/insectpose
 paths:
   root: ${oc.env:INSECTPOSE_ROOT,.}
@@ -8,12 +8,12 @@ paths:
   processed: ${paths.data}/processed
   splits: ${paths.data}/splits
   runs: ${paths.root}/runs
-  # Analyses (tableaux, figures, rapports) : dans le dossier `results/` a la racine du
-  # depot, qui rassemble les analyses de tous les modules (voir results/README.md).
+  # Analyses (tables, figures, reports): in the `results/` folder at the repository
+  # root, which gathers the analyses of every module (see results/README.md).
   results: ${paths.root}/../../results/pose
   reports: ${paths.results}/reports
   configs: ${paths.root}/configs
-  # Modeles retenus, a la racine du depot : seule sortie du module lue par
-  # pipeline/ (voir retained_models/README.md). Sur une machine ou `root` n'est
-  # pas modules/architectures, la surcharger : paths.retained=/chemin/absolu
+  # Retained models, at the repository root: the only output of the module read by
+  # pipeline/ (see retained_models/README.md). On a machine where `root` is not
+  # modules/architectures, override it: paths.retained=/absolute/path
   retained: ${paths.root}/../../retained_models

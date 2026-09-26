@@ -1,7 +1,7 @@
-"""Tableaux de resultats et tests apparies (CONVENTIONS.md §8.3).
+"""Results tables and paired tests (CONVENTIONS.md §8.4).
 
-Toute figure ou tableau du rapport vient d'ici. Un chiffre copie depuis une console
-n'est pas un resultat : il n'est ni tracable ni reproductible.
+Every figure or table of the report comes from here. A number copied from a console is
+not a result: it is neither traceable nor reproducible.
 """
 
 from __future__ import annotations
@@ -22,10 +22,10 @@ log = get_logger("report")
 
 def paired_tests(master: pd.DataFrame, metric: str, scope: str = "overall",
                  split: str = "test") -> pd.DataFrame:
-    """Wilcoxon apparie par fold entre chaque paire d'approches, avec correction Holm.
+    """Paired Wilcoxon per fold between each pair of approaches, with a Holm correction.
 
-    Comparer des moyennes sans test apparie sur les MEMES folds sur-interprete
-    systematiquement les ecarts (§8.3).
+    Comparing means without a paired test on the SAME folds systematically
+    over-interprets the gaps (§8.4).
     """
     from itertools import combinations
 
@@ -46,7 +46,7 @@ def paired_tests(master: pd.DataFrame, metric: str, scope: str = "overall",
     out = pd.DataFrame(rows)
     if out.empty:
         return out
-    # Correction de Holm pour comparaisons multiples
+    # Holm correction for multiple comparisons
     order = out["p_value"].rank(method="first")
     m = out["p_value"].notna().sum()
     out["p_holm"] = np.minimum(1.0, out["p_value"] * (m - order + 1))
@@ -54,7 +54,7 @@ def paired_tests(master: pd.DataFrame, metric: str, scope: str = "overall",
 
 
 def cost_performance(master: pd.DataFrame, metric: str, split: str = "test") -> pd.DataFrame:
-    """Croisement performance / latence : base du choix d'un modele deployable (§7.2)."""
+    """Performance / latency crossing: basis for choosing a deployable model (§7.2)."""
     perf = summary_table(master, metric, "overall", split)[["approach", "mean"]]
     cost = master[
         (master["metric"] == "latency_ms_per_instance") & (master["split"] == split)
@@ -63,9 +63,9 @@ def cost_performance(master: pd.DataFrame, metric: str, split: str = "test") -> 
 
 
 def write_report(paths: ProjectPaths, cfg: Any) -> Path:
-    """Ecrit les tableaux de synthese. Effet de bord : results/*.parquet et *.json.
+    """Write the summary tables. Side effect: results/*.parquet and *.json.
 
-    Retourne le chemin du tableau principal.
+    Returns the path of the main table.
     """
     from insectpose.evaluation.aggregate import final_runs
 
@@ -115,7 +115,7 @@ def write_report(paths: ProjectPaths, cfg: Any) -> Path:
         if bool(cfg.report.get("per_run_figures", True)):
             write_per_run_figures(paths, cfg, master)
 
-    log.info("Rapport : %d approche(s), %d run(s) citables (%d trials d'HPO exclus).",
+    log.info("Report: %d approach(es), %d quotable run(s) (%d HPO trials excluded).",
              citable["approach"].nunique(), citable["run_id"].nunique(),
              master["run_id"].nunique() - citable["run_id"].nunique())
     return paths.results / "summary_primary.parquet"

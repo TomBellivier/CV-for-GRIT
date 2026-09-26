@@ -1,5 +1,5 @@
 # @package _global_
-# Experience G : tetes seules. Temoin de l'experience D (LoRA).
+# Experiment G: heads only. Control of experiment D (LoRA).
 defaults:
   - override /data: pooled
   - override /approach: head_only

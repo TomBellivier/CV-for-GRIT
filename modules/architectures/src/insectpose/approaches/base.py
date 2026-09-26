@@ -1,8 +1,8 @@
-"""Protocole des approches (CONVENTIONS.md §4.2).
+"""Protocol of the approaches (CONVENTIONS.md §4.2).
 
-Une approche : `fit` (entraine), `predict` (ecrit un contrat 3), `load` (recharge),
-`search_space` (declare ses hyperparametres a Optuna). Elle ne calcule JAMAIS de
-metrique et n'ecrit jamais hors de `ctx.run_dir`.
+An approach: `fit` (trains), `predict` (writes a contract 3), `load` (reloads),
+`search_space` (declares its hyperparameters to Optuna). It NEVER computes a metric and
+never writes outside `ctx.run_dir`.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from insectpose.utils.io import write_parquet
 
 @runtime_checkable
 class Approach(Protocol):
-    """Interface vue par le pipeline. Aucun autre point de contact n'est autorise."""
+    """Interface seen by the pipeline. No other contact point is allowed."""
 
     name: str
 
@@ -40,75 +40,75 @@ class Approach(Protocol):
 
 
 class BaseApproach(ABC):
-    """Base commune : gestion du nom, des artefacts et de l'ecriture des predictions."""
+    """Common base: handling of the name, the artefacts and the writing of the predictions."""
 
     def __init__(self, cfg: Any) -> None:
         self.cfg = cfg
         self.name = str(cfg.approach.name)
 
-    # --- a implementer -----------------------------------------------------
+    # --- to implement ---------------------------------------------------------
     @abstractmethod
     def fit(self, data: FoldData, ctx: RunContext) -> None:
-        """Entraine sur data.train, valide sur data.val. NE DOIT PAS lire data.test."""
+        """Train on data.train, validate on data.val. MUST NOT read data.test."""
 
     @abstractmethod
     def predict_instances(self, images: ImageSet, ctx: RunContext) -> pd.DataFrame:
-        """Retourne les predictions brutes, DEJA dans le repere de l'image d'origine.
+        """Return the raw predictions, ALREADY in the frame of the original image.
 
-        Colonnes attendues : image_id, bbox_xywh, bbox_score, kpts_xy, kpts_score,
-        keypoint_schema, bbox_source, inference_ms (optionnel).
+        Expected columns: image_id, bbox_xywh, bbox_score, kpts_xy, kpts_score,
+        keypoint_schema, bbox_source, inference_ms (optional).
         """
 
     @classmethod
     def availability(cls) -> tuple[bool, str]:
-        """(disponible, raison). Permet a une approche de declarer une dependance lourde.
+        """(available, reason). Lets an approach declare a heavy dependency.
 
-        Le smoke test ignore proprement une approche indisponible au lieu d'echouer :
-        l'absence d'un GPU ou d'un extra pip n'est pas un defaut du socle.
+        The smoke test cleanly skips an unavailable approach instead of failing: the
+        absence of a GPU or of a pip extra is not a defect of the framework.
         """
         return True, ""
 
     @classmethod
     def load(cls, run_dir: Path, cfg: Any) -> BaseApproach:
-        """Reconstruit un predicteur depuis les artefacts, sans reentrainement."""
+        """Rebuild a predictor from the artefacts, without retraining."""
         raise NotImplementedError(
-            f"{cls.__name__}.load n'est pas implemente : le run ne sera pas rejouable."
+            f"{cls.__name__}.load is not implemented: the run will not be replayable."
         )
 
     @classmethod
     def search_space(cls, trial: Any, cfg: Any) -> dict[str, Any]:
-        """Surcharges proposees a Optuna. Par defaut : lit `approach.search_space` du YAML."""
+        """Overrides proposed to Optuna. By default: reads `approach.search_space` from the YAML."""
         from insectpose.tuning.search_spaces import suggest_from_spec
 
         spec = cfg.approach.get("search_space", {})
         return suggest_from_spec(trial, spec, prefix="approach")
 
-    # --- fourni par la base ------------------------------------------------
+    # --- provided by the base -------------------------------------------------
     def predict(self, images: ImageSet, ctx: RunContext, split: str) -> Path:
-        """Enveloppe `predict_instances`, complete le contrat 3 et ecrit le parquet.
+        """Wrap `predict_instances`, complete contract 3 and write the parquet.
 
-        Effet de bord : ecrit runs/<run_id>/predictions/<split>_fold<k>.parquet.
+        Side effect: writes runs/<run_id>/predictions/<split>_fold<k>.parquet.
         """
         started = time.perf_counter()
         raw = self.predict_instances(images, ctx)
         elapsed_ms = (time.perf_counter() - started) * 1000.0
 
         if raw.empty:
-            # Zero prediction est un RESULTAT, pas une erreur : un modele sous-entraine
-            # ou mal regle ne detecte rien, et l'evaluation doit le mesurer (OKS nul,
-            # couverture nulle) plutot que d'interrompre le pipeline. On ecrit donc un
-            # fichier conforme mais vide, et on le journalise fortement.
+            # Zero prediction is a RESULT, not an error: an under-trained or badly tuned
+            # model detects nothing, and the evaluation must measure it (zero OKS, zero
+            # coverage) rather than interrupt the pipeline. A compliant but empty file is
+            # therefore written, and loudly logged.
             ctx.logger.warning(
-                "[%s] AUCUNE prediction sur '%s' (%d image(s)). Les metriques de ce split "
-                "seront nulles. Causes usuelles : modele sous-entraine, seuil de confiance "
-                "trop haut, ou labels mal formes.", self.name, split, len(images),
+                "[%s] NO prediction on '%s' (%d image(s)). The metrics of this split "
+                "will be zero. Usual causes: under-trained model, confidence threshold "
+                "too high, or malformed labels.", self.name, split, len(images),
             )
             return self._write_empty(ctx, split)
 
         required = {"image_id", "bbox_xywh", "kpts_xy", "kpts_score", "keypoint_schema"}
         missing = required - set(raw.columns)
         if missing:
-            raise ContractError(f"[{self.name}] colonnes manquantes en sortie : {sorted(missing)}")
+            raise ContractError(f"[{self.name}] missing output columns: {sorted(missing)}")
 
         df = raw.copy()
         df["run_id"] = ctx.run_id
@@ -132,9 +132,9 @@ class BaseApproach(ABC):
         return write_parquet(out, df, artifact="predictions")
 
     def _write_empty(self, ctx: RunContext, split: str) -> Path:
-        """Ecrit un fichier de predictions vide mais conforme au contrat 3.
+        """Write a predictions file that is empty but complies with contract 3.
 
-        Effet de bord : ecrit runs/<run_id>/predictions/<split>_fold<k>.parquet.
+        Side effect: writes runs/<run_id>/predictions/<split>_fold<k>.parquet.
         """
         from insectpose.contracts import all_columns
 
@@ -145,10 +145,10 @@ class BaseApproach(ABC):
 
     @staticmethod
     def _check_in_image(df: pd.DataFrame, images: ImageSet) -> None:
-        """Garde-fou anti-oubli de retro-projection (§3.4, §9.3).
+        """Guard against a forgotten back-projection (§3.4, §9.3).
 
-        Des keypoints massivement hors image signalent presque toujours des coordonnees
-        laissees dans le repere du crop ou en normalise.
+        Keypoints massively outside the image almost always signal coordinates left in
+        the frame of the crop or normalised.
         """
         sizes = images.images.set_index("image_id")[["image_width", "image_height"]]
         sample = df.head(200)
@@ -168,7 +168,7 @@ class BaseApproach(ABC):
                 offenders += 1
         if offenders > 0.5 * max(len(sample), 1):
             raise ContractError(
-                "Plus de la moitie des predictions sortent largement de l'image. "
-                "Cause quasi certaine : coordonnees laissees dans le repere du crop ou "
-                "normalisees. Le contrat 3 impose le repere de l'image d'origine."
+                "More than half of the predictions fall far outside the image. "
+                "Almost certain cause: coordinates left in the frame of the crop or "
+                "normalised. Contract 3 imposes the frame of the original image."
             )

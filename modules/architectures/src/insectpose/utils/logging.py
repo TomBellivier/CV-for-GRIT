@@ -1,4 +1,4 @@
-"""Journalisation uniforme. Aucun `print` ailleurs dans le projet."""
+"""Uniform logging. No `print` anywhere else in the project."""
 
 from __future__ import annotations
 
@@ -11,9 +11,9 @@ _FORMAT = "%(asctime)s | %(levelname)-7s | %(name)s | %(message)s"
 
 
 def setup_logging(level: str = "INFO", logfile: Path | None = None) -> None:
-    """Configure le logging racine. Idempotent.
+    """Configure the root logging. Idempotent.
 
-    Effet de bord : ecrit dans `logfile` si fourni.
+    Side effect: writes to `logfile` if given.
     """
     global _CONFIGURED
     root = logging.getLogger("insectpose")
@@ -32,6 +32,6 @@ def setup_logging(level: str = "INFO", logfile: Path | None = None) -> None:
 
 
 def get_logger(name: str) -> logging.Logger:
-    """Logger nomme sous l'espace `insectpose`."""
+    """Logger named under the `insectpose` namespace."""
     setup_logging()
     return logging.getLogger(f"insectpose.{name}")

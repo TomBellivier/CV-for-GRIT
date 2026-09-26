@@ -1,19 +1,19 @@
-A FAIRE : 
-X 1. mettre à jour annotation_tools/conversion_to_yolo_dataset et annotation/tools/import_volunteer_file pour les simplifier en un seul fichier. 
-2. ajouter les modèles (detection de scale bar, detection de règle, module de pose, modèles de classification des membres)
-X 3. faire en sorte que tous les modèles soient crées dans retained_models, de manière à être utilisés directements par le module pipeline.
-4. faire les readme de toutes les approches. 
-5. faire un dossier resultats
-X 6. simplifier le code pour l'application annotations_tools/measurement_validation à simplement classer les mesures. 
-X 7. changer les paramètre des classificateurs par mesure : changer des confiances aux coordonnées simples. 
+TO DO:
+X 1. update annotation_tools/conversion_to_yolo_dataset and annotation/tools/import_volunteer_file to simplify them into a single file.
+2. add the models (scale bar detection, ruler detection, pose module, limb classification models)
+X 3. make every model be created in retained_models, so that they are used directly by the pipeline module.
+4. write the README of every approach.
+X 5. create a results folder
+X 6. simplify the code of the annotations_tools/measurement_validation application so that it only classifies the measurements.
+X 7. change the parameters of the per-measurement classifiers: switch from confidences to plain coordinates.
 
-MODELS ONLY (pouvant être copier coller quelquepart, servant uniquement à l'inférenceindépendants): 
+MODELS ONLY (can be copy-pasted somewhere, only used for independent inference):
 pipeline
 retained_models
 images_to_process
 
-ATTENTION PENDANT LES MODIFS : 
-- faire en sorte que le cpu soit choisi automatiquement si pas de gpu disponibles, ou si seul un CPU est disponible
-- faire en sorte que le squelette/mesures d'intérêt soient personalisables, grâce à un fichier à la racine du projet (kp_infos.txt ?)
-- certains fichiers on été déplacés : chemins écrit en brut à vérifier. 
-X - fichiers d'annotation à rassembler après les étapes d'annotations successives. 
+CAREFUL DURING THE CHANGES:
+X - make the CPU be chosen automatically if no GPU is available, or if only a CPU is available
+X - make the skeleton/measurements of interest customisable, through a file at the project root (kp_infos.txt ?)
+- some files have been moved: hard-coded paths to check.
+X - annotation files to gather after the successive annotation steps.

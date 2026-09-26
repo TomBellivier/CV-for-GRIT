@@ -1,14 +1,13 @@
-"""Double d'Ultralytics partage par les tests des approches YOLO.
+"""Ultralytics test double shared by the tests of the YOLO approaches.
 
-Ultralytics et CUDA ne sont pas installables partout (CI legere, machine de dev). Ce
-double permet de verifier ce que NOUS controlons — arguments passes a l'entrainement,
-conversion des coordonnees, routage entre modeles, gel des parametres — sans GPU ni
-poids a telecharger.
+Ultralytics and CUDA cannot be installed everywhere (light CI, dev machine). This double
+checks what WE control — arguments passed to the training, coordinate conversion,
+routing between models, parameter freezing — without a GPU or weights to download.
 
-Il expose aussi `ultralytics.models.yolo.pose` et `ultralytics.cfg` : les approches qui
-passent un trainer personnalise (lora, group_bn, head_only) importent `PoseTrainer`, et
-remplacer `sys.modules["ultralytics"]` par un module plat ferait echouer ces imports
-avec "ultralytics.models is not a package".
+It also exposes `ultralytics.models.yolo.pose` and `ultralytics.cfg`: the approaches that
+pass a custom trainer (lora, group_bn, head_only) import `PoseTrainer`, and replacing
+`sys.modules["ultralytics"]` with a flat module would make these imports fail with
+"ultralytics.models is not a package".
 """
 
 from __future__ import annotations
@@ -23,7 +22,7 @@ import pytest
 
 
 class _Arr:
-    """Minimal shim exposant l'interface `.cpu().numpy()` des tenseurs torch."""
+    """Minimal shim exposing the `.cpu().numpy()` interface of torch tensors."""
 
     def __init__(self, values: np.ndarray) -> None:
         self._values = np.asarray(values, dtype=float)
@@ -69,10 +68,10 @@ class _Param:
 
 
 class FakePoseTrainer:
-    """Trainer minimal : les approches en derivent via `make_patched_trainer`.
+    """Minimal trainer: the approaches derive from it through `make_patched_trainer`.
 
-    Il n'entraine rien, mais expose les points d'accroche que le patch surcharge, ce qui
-    permet de verifier que la chaine se construit sans erreur.
+    It trains nothing, but exposes the hooks that the patch overrides, which checks that
+    the chain builds without error.
     """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -103,11 +102,11 @@ class FakePoseTrainer:
 
 
 class FakeLoraLayer:
-    """Couche LoRA minimale, fusionnable et picklable.
+    """Minimal LoRA layer, mergeable and picklable.
 
-    Les approches D et H fusionnent leurs adaptateurs dans les poids de base avant
-    sauvegarde (ADR-0025), et refusent un checkpoint qui n'en contient aucun — c'est
-    un garde-fou legitime du code reel. Le double doit donc en produire.
+    Approaches D and H merge their adapters into the base weights before saving
+    (ADR-0025), and refuse a checkpoint that contains none — a legitimate safeguard of
+    the real code. The double must therefore produce some.
     """
 
     def __init__(self, name: str = "conv") -> None:
@@ -133,7 +132,7 @@ class _FakeBaseLayer:
 
 
 class _FakeCheckpointModule:
-    """Module picklable imitant l'arborescence d'un checkpoint YOLO patche."""
+    """Picklable module mimicking the tree of a patched YOLO checkpoint."""
 
     def __init__(self) -> None:
         self.conv = FakeLoraLayer("model.20.conv")
@@ -143,9 +142,9 @@ class _FakeCheckpointModule:
 
 
 def _write_fake_checkpoint(path: Path) -> None:
-    """Ecrit un checkpoint lisible par torch.load, contenant une couche LoRA.
+    """Write a checkpoint readable by torch.load, containing a LoRA layer.
 
-    Effet de bord : cree `path`.
+    Side effect: creates `path`.
     """
     payload = {"model": _FakeCheckpointModule(), "ema": None, "epoch": -1}
     try:
@@ -160,7 +159,7 @@ def _write_fake_checkpoint(path: Path) -> None:
 
 
 class FakeYOLO:
-    """Double d'Ultralytics : enregistre les appels, renvoie des sorties plausibles."""
+    """Ultralytics double: records the calls, returns plausible outputs."""
 
     calls: list[dict[str, Any]] = []
     n_keypoints = 42
@@ -179,22 +178,22 @@ class FakeYOLO:
         FakeYOLO.calls.append({"kind": "train", **kwargs})
         best = Path(kwargs["project"]) / "train" / "weights" / "best.pt"
         best.parent.mkdir(parents=True, exist_ok=True)
-        # Un checkpoint PICKLABLE : les approches qui fusionnent leurs adaptateurs
-        # (lora, lora_per_dataset) le rechargent avec torch.load avant de le reecrire.
-        # Un simple b"fake-weights" ferait echouer le depickling.
+        # A PICKLABLE checkpoint: the approaches that merge their adapters
+        # (lora, lora_per_dataset) reload it with torch.load before rewriting it.
+        # A plain b"fake-weights" would make the unpickling fail.
         _write_fake_checkpoint(best)
         self.trainer = types.SimpleNamespace(best=str(best))
 
     def predict(self, source: list[str], **kwargs: Any) -> list[_Result]:
         FakeYOLO.calls.append({"kind": "predict", "n_sources": len(source), **kwargs})
         assert kwargs.get("stream") is True, (
-            "predict() doit etre streame : sinon Ultralytics garde un Results par image "
-            "(image d'origine comprise) et le processus se fait tuer par l'OOM killer."
+            "predict() must be streamed: otherwise Ultralytics keeps one Results per image "
+            "(original image included) and the process gets killed by the OOM killer."
         )
-        assert "half" not in kwargs, "'half' est deprecie : utiliser 'quantize'."
+        assert "half" not in kwargs, "'half' is deprecated: use 'quantize'."
         results = []
         for i in range(len(source)):
-            # bbox CENTREE, comme Ultralytics : centre (60, 80), taille 40 x 20
+            # CENTRED bbox, like Ultralytics: centre (60, 80), size 40 x 20
             boxes = _Boxes(np.array([[60.0, 80.0, 40.0, 20.0]]), np.array([0.9 - i * 0.001]))
             kpts = np.zeros((1, self.n_keypoints, 3))
             kpts[0, :, 0] = np.linspace(45, 75, self.n_keypoints)
@@ -205,16 +204,16 @@ class FakeYOLO:
 
 
 class _FakeLoraConfig:
-    """Config LoRA minimale : le double n'en lit que les champs journalises."""
+    """Minimal LoRA config: the double only reads the logged fields."""
 
     def __init__(self, **kwargs: Any) -> None:
         self.__dict__.update(kwargs)
 
 
 def _fake_inject(config: Any, model: Any, **kwargs: Any) -> Any:
-    """Injection simulee : rend quelques parametres 'lora_' visibles sur le modele.
+    """Simulated injection: makes a few 'lora_' parameters visible on the model.
 
-    Suffit a verifier que le gel epargne bien les adaptateurs et fige le reste.
+    Enough to check that the freezing spares the adapters and freezes the rest.
     """
     existing = list(model.named_parameters()) if hasattr(model, "named_parameters") else []
     adapters = [("model.20.conv.lora_A.default.weight", _Param(64)),
@@ -224,11 +223,11 @@ def _fake_inject(config: Any, model: Any, **kwargs: Any) -> Any:
 
 
 def _install_fake_ultralytics(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Installe `ultralytics` ET ses sous-modules dans sys.modules.
+    """Install `ultralytics` AND its submodules in sys.modules.
 
-    Un module plat ferait echouer `from ultralytics.models.yolo.pose import PoseTrainer`
-    avec "ultralytics.models is not a package" : Python resout ces imports par
-    sys.modules, pas par attribut.
+    A flat module would make `from ultralytics.models.yolo.pose import PoseTrainer` fail
+    with "ultralytics.models is not a package": Python resolves these imports through
+    sys.modules, not through attributes.
     """
     root = types.ModuleType("ultralytics")
     root.YOLO = FakeYOLO  # type: ignore[attr-defined]
@@ -243,14 +242,14 @@ def _install_fake_ultralytics(monkeypatch: pytest.MonkeyPatch) -> None:
     modules["ultralytics.models.yolo.pose"].PoseTrainer = FakePoseTrainer  # type: ignore[attr-defined]
 
     cfg = types.ModuleType("ultralytics.cfg")
-    # `quantize` present : le code doit produire {"quantize": 16}, pas {"half": True}
+    # `quantize` present: the code must produce {"quantize": 16}, not {"half": True}
     cfg.DEFAULT_CFG_DICT = {"quantize": None, "half": False}  # type: ignore[attr-defined]
     modules["ultralytics.cfg"] = cfg
 
-    # `peft` : les approches D et H l'importent pour injecter puis fusionner les
-    # adaptateurs. Le faux `LoraLayer` doit etre la classe dont herite FakeLoraLayer,
-    # sinon `merge_lora_weights` — qui teste isinstance — ne reconnaitrait rien et
-    # refuserait le checkpoint.
+    # `peft`: approaches D and H import it to inject then merge the adapters. The fake
+    # `LoraLayer` must be the class FakeLoraLayer inherits from, otherwise
+    # `merge_lora_weights` — which tests isinstance — would recognise nothing and
+    # refuse the checkpoint.
     peft_layer = types.ModuleType("peft.tuners.lora.layer")
     peft_layer.LoraLayer = FakeLoraLayer  # type: ignore[attr-defined]
     for name in ("peft", "peft.tuners", "peft.tuners.lora"):
@@ -268,7 +267,7 @@ def _install_fake_ultralytics(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture()
 def fake_ultralytics(monkeypatch: pytest.MonkeyPatch) -> type[FakeYOLO]:
-    """Injecte le faux module `ultralytics` pour la duree du test."""
+    """Inject the fake `ultralytics` module for the duration of the test."""
     FakeYOLO.calls = []
     _install_fake_ultralytics(monkeypatch)
     return FakeYOLO

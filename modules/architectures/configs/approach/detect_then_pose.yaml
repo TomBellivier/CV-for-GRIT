@@ -1,34 +1,34 @@
 # @package _global_
-# Approche C : detection poulee puis pose sur crop normalise (CONVENTIONS.md §9.3).
-# Deux modeles entraines dans le meme run, evalues comme un seul systeme.
+# Approach C: pooled detection then pose on a normalised crop (CONVENTIONS.md §9.3).
+# Two models trained in the same run, evaluated as a single system.
 approach:
   name: detect_then_pose
   _target_: insectpose.approaches.detect_then_pose.DetectThenPoseApproach
   prunable: false
 
-  # --- inference du systeme complet ---
-  max_det: 1                    # ADR-0017 : une image = un insecte
-  conf: 0.001                   # seuil BAS : ne jamais tronquer les courbes AP (§3.4)
+  # --- inference of the whole system ---
+  max_det: 1                    # ADR-0017: one image = one insect
+  conf: 0.001                   # LOW threshold: never truncate the AP curves (§3.4)
   iou: 0.7
   inference_precision: fp16
   predict_chunk_size: 16        # ADR-0021
-  # Diagnostic UNIQUEMENT : pose sur bboxes GT. Ecrit bbox_source=gt, donc jamais
-  # dans le meme tableau que les approches bout-en-bout (§9.3).
+  # Diagnostic ONLY: pose on GT bboxes. Writes bbox_source=gt, hence never in the
+  # same table as the end-to-end approaches (§9.3).
   pose_on_gt_boxes: false
 
-  # --- recadrage ---
+  # --- cropping ---
   crop:
-    # ADR-0024 : meme resolution que le protocole (640), pour que la comparaison avec
-    # A et B porte sur la methode et non sur la resolution.
+    # ADR-0024: same resolution as the protocol (640), so that the comparison with
+    # A and B is about the method and not the resolution.
     size: [640, 640]
-    padding: 0.15               # marge autour de la bbox : sans elle, tarses et
-                                # antennes tombent hors du crop et sont irrecuperables
-    # Les crops d'entrainement viennent de bboxes GT BRUITEES (§9.3) : sinon le modele
-    # n'apprend que des cadrages parfaits qu'il ne reverra jamais a l'inference.
+    padding: 0.15               # margin around the bbox: without it, tarsi and
+                                # antennae fall outside the crop and are unrecoverable
+    # Training crops come from NOISY GT bboxes (§9.3): otherwise the model only
+    # learns perfect framings it will never see again at inference.
     jitter_scale: 0.15
     jitter_shift: 0.10
 
-  # --- detecteur (images entieres, une classe, sans keypoints) ---
+  # --- detector (whole images, one class, no keypoints) ---
   detector:
     weights: yolo26n.pt        # ADR-0033
     lr0: 0.01
@@ -49,7 +49,7 @@ approach:
     hsv_s: 0.7
     hsv_v: 0.4
 
-  # --- modele de pose (crops normalises) ---
+  # --- pose model (normalised crops) ---
   pose:
     weights: yolo26n-pose.pt   # ADR-0033
     lr0: 0.01
@@ -62,8 +62,8 @@ approach:
     kobj: 1.0
     cls: 0.5
     dfl: 1.5
-    # Sur crop, l'insecte est deja cadre et centre : mosaique et grandes translations
-    # detruiraient ce cadrage, qui est justement l'apport de l'approche.
+    # On a crop, the insect is already framed and centred: mosaic and large translations
+    # would destroy this framing, which is precisely what the approach brings.
     mosaic: 0.0
     translate: 0.05
     scale: 0.2
@@ -73,10 +73,10 @@ approach:
     hsv_s: 0.7
     hsv_v: 0.4
 
-  # Budget identique a celui des autres approches (§6.3). L'espace couvre les deux
-  # ADR-0031 : QUATRE hyperparametres. Avec un insecte par image (ADR-0017), la
-  # detection est quasi triviale : `detector.lr0` est donc fige et le budget va au
-  # modele de pose et a la geometrie du recadrage, qui est ce qui distingue C de A.
+  # Budget identical to the other approaches' (§6.3). ADR-0031: FOUR hyperparameters.
+  # With one insect per image (ADR-0017), detection is almost trivial: `detector.lr0`
+  # is therefore frozen and the budget goes to the pose model and to the crop geometry,
+  # which is what sets C apart from A.
   search_space:
     pose.lr0: {type: float, low: 1.0e-4, high: 5.0e-2, log: true}
     pose.pose: {type: float, low: 4.0, high: 30.0}

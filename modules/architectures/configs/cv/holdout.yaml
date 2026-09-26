@@ -1,5 +1,5 @@
 # @package _global_
-# Uniquement pour le debug rapide. Aucun resultat de rapport ne doit venir d'un holdout.
+# Only for quick debugging. No report result may come from a holdout.
 cv:
   name: holdout
   strategy: stratified_group_holdout

@@ -1,28 +1,28 @@
 # @package _global_
-# Les 4 datasets vus comme un seul corpus (une classe "insecte"). Les modeles poules
-# predisent dans l'espace union, la reprojection vers le schema local se fait a
-# l'ecriture des predictions (CONVENTIONS.md §3.1).
+# The 4 datasets seen as a single corpus (one "insect" class). The pooled models
+# predict in the union space, the reprojection to the local schema happens when the
+# predictions are written (CONVENTIONS.md §3.1).
 data:
   scope: pooled
   datasets: [coleoptera, diptera, hymenoptera, lepidoptera]
-  # ADR-0017 : une image = un insecte. Viole => erreur bloquante a la preparation.
+  # ADR-0017: one image = one insect. Violated => blocking error at preparation.
   single_instance_per_image: true
-  # ADR-0016 : certains keypoints n'existent pas chez tous les ordres d'insectes.
+  # ADR-0016: some keypoints do not exist in every insect order.
   coverage:
-    absent_max: 0.01            # <= ce taux d'annotation => point considere absent
-    rare_max: 0.5               # < ce taux => point rare, PCK par point peu informatif
-    measurement_min_rate: 0.5   # < ce taux => mesure non exploitable pour ce dataset
+    absent_max: 0.01            # <= this annotation rate => point considered absent
+    rare_max: 0.5               # < this rate => rare point, per-point PCK not very informative
+    measurement_min_rate: 0.5   # < this rate => measurement not usable for this dataset
   adapter: annotation_csv
-  raw_subdir: null              # null => paths.raw/<dataset> pour chaque dataset
-  keypoint_schema: insect42_v1  # ADR-0006 : les 4 datasets partagent ce schema
-  union_space: insect42_v1      # mapping identite ; le mecanisme reste pour un futur ecart
+  raw_subdir: null              # null => paths.raw/<dataset> for each dataset
+  keypoint_schema: insect42_v1  # ADR-0006: the 4 datasets share this schema
+  union_space: insect42_v1      # identity mapping; the mechanism stays for a future gap
   adapter_options:
-    # Table unique du depot (annotation_tools/build_annotation_data.py) : chaque
-    # dataset y prend les lignes dont la colonne 'group' porte son nom.
-    # images_subdir n'est pas fixe ici : le defaut raw/<dataset>/images suit le
-    # dataset en cours de preparation.
-    # chemin relatif a la racine du module (modules/architectures/)
+    # Single table of the repository (annotation_tools/build_annotation_data.py): each
+    # dataset takes the rows whose 'group' column holds its name.
+    # images_subdir is not set here: the default raw/<dataset>/images follows the
+    # dataset being prepared.
+    # path relative to the module root (modules/architectures/)
     csv_path: ../../annotation_data/annotation_data.csv
     group_column: group
-    margin: 10                  # marge en pixels autour des keypoints pour la bbox
-    group_id_field: null        # ADR-0011 : une image = un specimen
+    margin: 10                  # margin in pixels around the keypoints for the bbox
+    group_id_field: null        # ADR-0011: one image = one specimen

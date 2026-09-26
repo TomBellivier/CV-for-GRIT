@@ -1,5 +1,5 @@
-"""Fenêtre principale : navigation entre les annotations, classement des mesures,
-presets, undo/redo et export du CSV de statuts."""
+"""Main window: navigation between the annotations, measurement classification,
+presets, undo/redo and export of the status CSV."""
 import json
 import time
 from pathlib import Path
@@ -42,16 +42,16 @@ class MainWindow(QMainWindow):
         self.state_path = STATE_DIR / f"{project_name}_state.json"
 
         self.index = 0
-        self.presets = {}  # nom -> Preset
+        self.presets = {}  # name -> Preset
         self.load_presets()
 
-        # snapshots (edge_overrides, done) de l'image courante
+        # snapshots (edge_overrides, done) of the current image
         self.undo_stack = []
         self.redo_stack = []
 
-        self.start_time = time.time()  # début du minuteur, dès le chargement du CSV
+        self.start_time = time.time()  # timer start, as soon as the CSV is loaded
 
-        self.setWindowTitle("Classement des mesures")
+        self.setWindowTitle("Measurement classification")
         self.resize(1400, 900)
 
         self.canvas = MeasurementCanvas(config, self)
@@ -64,25 +64,25 @@ class MainWindow(QMainWindow):
         self.canvas.strokeStarted.connect(self.push_undo)
         self._build_shortcuts()
 
-    # ---------------- construction de l'UI ----------------
+    # ---------------- UI construction ----------------
     def _build_sidebar(self):
-        dock = QDockWidget("Mesures", self)
+        dock = QDockWidget("Measurements", self)
         dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
         panel = QWidget()
         layout = QVBoxLayout(panel)
 
         self.measure_list = QListWidget()
         self.measure_list.itemClicked.connect(self._on_measure_list_clicked)
-        layout.addWidget(QLabel("Mesures (clic = bascule mesurable / non mesurable)"))
+        layout.addWidget(QLabel("Measurements (click = toggle measurable / non measurable)"))
         layout.addWidget(self.measure_list)
 
         layout.addWidget(QLabel("Presets"))
         self.preset_list = QListWidget()
         layout.addWidget(self.preset_list)
         btn_row = QHBoxLayout()
-        for label, slot in (("Enregistrer preset", self.save_current_as_preset),
-                            ("Appliquer", self.apply_selected_preset),
-                            ("Supprimer", self.delete_selected_preset)):
+        for label, slot in (("Save preset", self.save_current_as_preset),
+                            ("Apply", self.apply_selected_preset),
+                            ("Delete", self.delete_selected_preset)):
             button = QPushButton(label)
             button.clicked.connect(slot)
             btn_row.addWidget(button)
@@ -93,23 +93,23 @@ class MainWindow(QMainWindow):
         self.refresh_preset_list()
 
     def _build_toolbar(self):
-        tb = QToolBar("Principal")
+        tb = QToolBar("Main")
         self.addToolBar(tb)
-        tb.addAction("<< Image précédente", self.prev_image)
-        tb.addAction("Image suivante >>", self.next_image)
+        tb.addAction("<< Previous image", self.prev_image)
+        tb.addAction("Next image >>", self.next_image)
         tb.addSeparator()
-        tb.addAction("Ajuster vue", self.canvas.fit_to_view)
-        tb.addAction("Rotation ↺ (Ctrl+Left)", lambda: self.canvas.rotate_view(-90))
-        tb.addAction("Rotation ↻ (Ctrl+Right)", lambda: self.canvas.rotate_view(90))
+        tb.addAction("Fit view", self.canvas.fit_to_view)
+        tb.addAction("Rotate ↺ (Ctrl+Left)", lambda: self.canvas.rotate_view(-90))
+        tb.addAction("Rotate ↻ (Ctrl+Right)", lambda: self.canvas.rotate_view(90))
         tb.addSeparator()
-        tb.addAction("Tout mesurable", lambda: self.set_all_statuses(MEASURABLE))
-        tb.addAction("Tout non mesurable", lambda: self.set_all_statuses(NON_MEASURABLE))
+        tb.addAction("All measurable", lambda: self.set_all_statuses(MEASURABLE))
+        tb.addAction("All non measurable", lambda: self.set_all_statuses(NON_MEASURABLE))
         tb.addSeparator()
-        tb.addAction("Annuler (Ctrl+Z)", self.undo)
-        tb.addAction("Rétablir (Ctrl+Y)", self.redo)
+        tb.addAction("Undo (Ctrl+Z)", self.undo)
+        tb.addAction("Redo (Ctrl+Y)", self.redo)
         tb.addSeparator()
-        tb.addAction("Sauvegarder (Ctrl+S)", self.save)
-        tb.addAction("Valider (Entrée)", self.mark_done)
+        tb.addAction("Save (Ctrl+S)", self.save)
+        tb.addAction("Validate (Enter)", self.mark_done)
 
     def _build_statusbar(self):
         sb = QStatusBar()
@@ -143,9 +143,9 @@ class MainWindow(QMainWindow):
 
         done_count = sum(1 for a in self.annotations if a.done)
         speed_str = f"{(elapsed / 60.0) / done_count:.1f} min/img" if done_count else "— min/img"
-        self.timer_label.setText(f"⏱ {time_str}    {done_count}/{len(self.annotations)} validée(s)    {speed_str}")
+        self.timer_label.setText(f"⏱ {time_str}    {done_count}/{len(self.annotations)} validated    {speed_str}")
 
-    # ---------------- annotation courante ----------------
+    # ---------------- current annotation ----------------
     def current_ann(self):
         return self.annotations[self.index]
 
@@ -153,18 +153,18 @@ class MainWindow(QMainWindow):
         if not self.annotations:
             return
         if not (0 <= idx < len(self.annotations)):
-            logger.error("load_image : index %d hors limites (%d annotations)", idx, len(self.annotations))
+            logger.error("load_image: index %d out of range (%d annotations)", idx, len(self.annotations))
             return
         self.index = idx
         self.undo_stack = []
         self.redo_stack = []
         ann = self.current_ann()
-        logger.debug("load_image(%d) : %s", idx, ann.image_path)
+        logger.debug("load_image(%d): %s", idx, ann.image_path)
         self.canvas.show_annotation(ann)
         self.setWindowTitle(f"{ann.image_name}  [{idx + 1}/{len(self.annotations)}]")
         self.pos_label.setText(
             f"Image {idx + 1}/{len(self.annotations)} — {ann.image_name}"
-            + ("  ✓ validée" if ann.done else "")
+            + ("  ✓ validated" if ann.done else "")
         )
         self.refresh_measure_list()
 
@@ -172,13 +172,13 @@ class MainWindow(QMainWindow):
         if self.index + 1 < len(self.annotations):
             self.load_image(self.index + 1)
         else:
-            self.set_status("Dernière image")
+            self.set_status("Last image")
 
     def prev_image(self):
         if self.index > 0:
             self.load_image(self.index - 1)
         else:
-            self.set_status("Première image")
+            self.set_status("First image")
 
     def first_unvalidated_index(self):
         for i, ann in enumerate(self.annotations):
@@ -201,7 +201,7 @@ class MainWindow(QMainWindow):
 
     def _swap_state(self, from_stack, to_stack, label):
         if not from_stack:
-            self.set_status(f"Rien à {label.lower()}")
+            self.set_status(f"Nothing to {label.lower()}")
             return
         ann = self.current_ann()
         to_stack.append((dict(ann.edge_overrides), ann.done))
@@ -211,20 +211,20 @@ class MainWindow(QMainWindow):
         self.set_status(label)
 
     def undo(self):
-        self._swap_state(self.undo_stack, self.redo_stack, "Annulé")
+        self._swap_state(self.undo_stack, self.redo_stack, "Undo")
 
     def redo(self):
-        self._swap_state(self.redo_stack, self.undo_stack, "Rétabli")
+        self._swap_state(self.redo_stack, self.undo_stack, "Redo")
 
-    # ---------------- classement ----------------
+    # ---------------- classification ----------------
     def set_edge_status(self, key, status):
-        """Appelé par le canvas : classe une arête, et avec elle toutes celles qui
-        doivent suivre le même statut (voir AppConfig.cascade_edges)."""
+        """Called by the canvas: classify an edge, and with it every edge that must
+        follow the same status (see AppConfig.cascade_edges)."""
         ann = self.current_ann()
         for e in self.config.cascade_edges(key):
             a, b = e
             if status == MEASURABLE and not (ann.has_kp(a) and ann.has_kp(b)):
-                continue  # une arête sans ses deux kp reste non mesurable, override inutile
+                continue  # an edge without its two kp stays non measurable, override useless
             ann.edge_overrides[e] = status
             self.canvas.set_link_status(e, status)
         self.refresh_measure_list()
@@ -249,7 +249,7 @@ class MainWindow(QMainWindow):
         self.measure_list.clear()
         for name, keys in self.config.measurement_edges.items():
             status = ann.measurement_status(keys)
-            label = f"{name} : {'mesurable' if status == MEASURABLE else 'non mesurable'}"
+            label = f"{name}: {'measurable' if status == MEASURABLE else 'non measurable'}"
             item = QListWidgetItem(label)
             item.setData(Qt.UserRole, name)
             item.setBackground(QColor(210, 255, 210) if status == MEASURABLE else QColor(230, 230, 230))
@@ -277,7 +277,7 @@ class MainWindow(QMainWindow):
             data = json.loads(PRESETS_PATH.read_text(encoding="utf-8"))
             self.presets = {n: Preset(n, ov) for n, ov in data.items()}
         except Exception:
-            logger.exception("Impossible de lire les presets : %s", PRESETS_PATH)
+            logger.exception("Cannot read the presets: %s", PRESETS_PATH)
             self.presets = {}
 
     def save_presets(self):
@@ -292,7 +292,7 @@ class MainWindow(QMainWindow):
     def save_current_as_preset(self):
         if not self.annotations:
             return
-        name, ok = QInputDialog.getText(self, "Nouveau preset", "Nom du preset :")
+        name, ok = QInputDialog.getText(self, "New preset", "Preset name:")
         if not ok or not name.strip():
             return
         name = name.strip()
@@ -301,7 +301,7 @@ class MainWindow(QMainWindow):
         self.presets[name] = Preset(name, overrides)
         self.save_presets()
         self.refresh_preset_list()
-        self.set_status(f"Preset '{name}' enregistré")
+        self.set_status(f"Preset '{name}' saved")
 
     def apply_selected_preset(self):
         item = self.preset_list.currentItem()
@@ -323,9 +323,9 @@ class MainWindow(QMainWindow):
             ann.edge_overrides[key] = status
         self.canvas.refresh_statuses(ann)
         self.refresh_measure_list()
-        msg = f"Preset '{preset.name}' appliqué"
+        msg = f"Preset '{preset.name}' applied"
         if skipped:
-            msg += f" ({skipped} segment(s) ignoré(s) : keypoints manquants)"
+            msg += f" ({skipped} segment(s) skipped: missing keypoints)"
         self.set_status(msg)
 
     def delete_selected_preset(self):
@@ -336,33 +336,33 @@ class MainWindow(QMainWindow):
         self.save_presets()
         self.refresh_preset_list()
 
-    # ---------------- sauvegarde ----------------
+    # ---------------- saving ----------------
     def mark_done(self):
-        """Valide le classement de l'image courante, sauvegarde et passe à la suivante."""
+        """Validate the classification of the current image, save and move to the next one."""
         if not self.annotations:
             return
         self.current_ann().done = True
-        logger.info("Annotation %d validée : %s", self.index, self.current_ann().image_name)
+        logger.info("Annotation %d validated: %s", self.index, self.current_ann().image_name)
         self.save()
         self.next_image()
 
     def save(self):
-        """Écrit le CSV de statuts (toujours au même endroit, écrasé à chaque fois)
-        et l'état détaillé permettant de reprendre le classement."""
+        """Write the status CSV (always at the same place, overwritten each time) and
+        the detailed state that allows resuming the classification."""
         if not self.annotations:
             return
         try:
             csv_io.export_status_csv(self.annotations, self.config, self.csv_path)
             csv_io.save_state(self.annotations, self.state_path)
-            self.set_status(f"Sauvegardé : {self.csv_path}")
+            self.set_status(f"Saved: {self.csv_path}")
         except Exception:
-            logger.exception("Échec de la sauvegarde")
-            self.set_status("Échec de la sauvegarde (voir logs)")
+            logger.exception("Save failed")
+            self.set_status("Save failed (see logs)")
 
     def closeEvent(self, event):
         reply = QMessageBox.question(
-            self, "Sauvegarder avant de quitter ?",
-            "Voulez-vous sauvegarder le classement avant de quitter ?",
+            self, "Save before quitting?",
+            "Do you want to save the classification before quitting?",
             QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
         )
         if reply == QMessageBox.Cancel:

@@ -1,2 +1,0 @@
-[console_scripts]
-insectpose = insectpose.cli:main

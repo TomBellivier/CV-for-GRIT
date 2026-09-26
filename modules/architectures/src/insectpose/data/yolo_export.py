@@ -1,13 +1,13 @@
-"""Export du format canonique vers le format YOLO-pose (CONVENTIONS.md §9.1).
+"""Export of the canonical format to the YOLO-pose format (CONVENTIONS.md §9.1).
 
-Operation DERIVEE : les fichiers produits sont regeneres a chaque fold a partir des
-splits partages, et ecrits dans le repertoire du run (ou dans `data/interim/`), jamais
-dans `data/processed/`. Le format canonique reste la seule source de verite.
+DERIVED operation: the files produced are regenerated at each fold from the shared
+splits, and written to the run folder (or to `data/interim/`), never to
+`data/processed/`. The canonical format stays the only source of truth.
 
-Format d'un label YOLO-pose, une ligne par instance, tout normalise dans [0, 1] :
-    classe cx cy w h  x1 y1 v1  x2 y2 v2  ...  xK yK vK
-La bbox est CENTREE (cx, cy), contrairement au contrat 1 qui est en coin haut-gauche.
-C'est exactement le genre de divergence que ce module isole en un seul endroit.
+Format of a YOLO-pose label, one line per instance, everything normalised in [0, 1]:
+    class cx cy w h  x1 y1 v1  x2 y2 v2  ...  xK yK vK
+The bbox is CENTRED (cx, cy), unlike contract 1 which uses the top-left corner. It is
+exactly the kind of divergence this module isolates in a single place.
 """
 
 from __future__ import annotations
@@ -25,24 +25,24 @@ from insectpose.utils.logging import get_logger
 
 log = get_logger("yolo_export")
 
-CLASS_NAMES = {0: "insect"}   # une seule classe : "insecte" (§9.1)
+CLASS_NAMES = {0: "insect"}   # a single class: "insect" (§9.1)
 
 
 def flat_name(image_id: str) -> str:
-    """Nom de fichier plat et unique a partir d'un image_id `<dataset>/<stem>`.
+    """Flat, unique file name from an image_id `<dataset>/<stem>`.
 
-    Sans cet aplatissement, deux datasets ayant un `img001.png` se recouvriraient
-    silencieusement dans le repertoire YOLO.
+    Without this flattening, two datasets both having an `img001.png` would silently
+    overwrite each other in the YOLO folder.
     """
     return str(image_id).replace("/", "__")
 
 
 def to_label_lines(instances: pd.DataFrame, width: int, height: int,
                    n_keypoints: int, with_keypoints: bool = True) -> tuple[list[str], int]:
-    """Lignes de label YOLO d'une image. Retourne (lignes, nb de valeurs rognees).
+    """YOLO label lines of an image. Returns (lines, number of clipped values).
 
-    Les coordonnees hors image sont rognees dans [0, 1] (contrainte du format) et le
-    compte est remonte : un rognage massif signale des annotations douteuses.
+    Coordinates outside the image are clipped into [0, 1] (constraint of the format) and
+    the count is reported: a massive clipping signals doubtful annotations.
     """
     lines: list[str] = []
     clipped = 0
@@ -58,13 +58,13 @@ def to_label_lines(instances: pd.DataFrame, width: int, height: int,
         vis = np.asarray(row.kpts_vis, dtype=int)
         if len(kpts) != n_keypoints:
             raise ContractError(
-                f"{row.instance_id} : {len(kpts)} keypoints pour un schema a {n_keypoints}."
+                f"{row.instance_id}: {len(kpts)} keypoints for a schema of {n_keypoints}."
             )
         norm = kpts / np.array([width, height])
         clipped += int((norm[vis > 0] < 0).sum() + (norm[vis > 0] > 1).sum())
         norm = np.clip(norm, 0.0, 1.0)
-        # Un point non annote est ecrit (0, 0, 0) : c'est la convention YOLO pour
-        # "non supervise". Il est masque dans la loss, jamais appris comme un zero.
+        # A point not annotated is written (0, 0, 0): it is the YOLO convention for
+        # "unsupervised". It is masked in the loss, never learnt as a zero.
         norm[vis == 0] = 0.0
 
         values = [0, *box.tolist()]
@@ -78,10 +78,10 @@ def to_label_lines(instances: pd.DataFrame, width: int, height: int,
 
 
 def parse_label_line(line: str, width: int, height: int) -> dict[str, Any]:
-    """Relit une ligne de label YOLO vers le repere de l'image d'origine.
+    """Read a YOLO label line back into the frame of the original image.
 
-    Reciproque exacte de `to_label_lines` : c'est ce qui rend l'export testable
-    par aller-retour, sans jamais lancer d'entrainement.
+    Exact inverse of `to_label_lines`: it is what makes the export testable by a round
+    trip, without ever launching a training.
     """
     parts = [float(v) for v in line.split()]
     cx, cy, nw, nh = parts[1:5]
@@ -98,12 +98,12 @@ def parse_label_line(line: str, width: int, height: int) -> dict[str, Any]:
 
 def export_split(image_set: Any, schema: KeypointSchema, root: Path, split: str,
                  link_images: bool = True, with_keypoints: bool = True) -> int:
-    """Ecrit images/<split>/ et labels/<split>/ pour un ImageSet.
+    """Write images/<split>/ and labels/<split>/ for an ImageSet.
 
-    Les images sont liees telles quelles : le format canonique reste la seule source
-    de verite et les coordonnees ne subissent aucune transformation d'echelle.
+    The images are linked as they are: the canonical format stays the only source of
+    truth and the coordinates undergo no scale transform.
 
-    Effet de bord : cree images/ et labels/ sous `root`. Retourne le nombre d'images.
+    Side effect: creates images/ and labels/ under `root`. Returns the number of images.
     """
     img_dir = root / "images" / split
     lbl_dir = root / "labels" / split
@@ -119,7 +119,7 @@ def export_split(image_set: Any, schema: KeypointSchema, root: Path, split: str,
         if not target.exists():
             if not source.exists():
                 raise FileNotFoundError(
-                    f"Image absente : {source}. L'export YOLO exige les images reelles."
+                    f"Image missing: {source}. The YOLO export requires the real images."
                 )
             if link_images:
                 target.symlink_to(source)
@@ -133,18 +133,18 @@ def export_split(image_set: Any, schema: KeypointSchema, root: Path, split: str,
         (lbl_dir / f"{flat_name(image_id)}.txt").write_text("\n".join(lines) + "\n",
                                                             encoding="utf-8")
     if total_clipped:
-        log.warning("[%s] %d coordonnee(s) rognee(s) dans [0,1] a l'export YOLO : "
-                    "verifier les annotations hors image.", split, total_clipped)
+        log.warning("[%s] %d coordinate(s) clipped into [0,1] at the YOLO export: "
+                    "check the annotations outside the image.", split, total_clipped)
     return len(images)
 
 
 def write_data_yaml(root: Path, schema: KeypointSchema, splits: dict[str, str],
                     with_keypoints: bool = True) -> Path:
-    """Ecrit le data.yaml d'Ultralytics. Effet de bord : cree <root>/data.yaml.
+    """Write the Ultralytics data.yaml. Side effect: creates <root>/data.yaml.
 
-    `flip_idx` est OBLIGATOIRE des lors qu'une augmentation par miroir est active :
-    sans lui, un miroir echange les cotes gauche/droite sans permuter les labels et
-    l'entrainement apprend une anatomie fausse (§3.1).
+    `flip_idx` is MANDATORY as soon as a mirror augmentation is active: without it, a
+    mirror swaps the left/right sides without permuting the labels and the training
+    learns a wrong anatomy (§3.1).
     """
     payload: dict[str, Any] = {"path": str(root.resolve()), "names": CLASS_NAMES}
     if with_keypoints:
@@ -159,12 +159,12 @@ def write_data_yaml(root: Path, schema: KeypointSchema, splits: dict[str, str],
 def export_fold(data: Any, schema: KeypointSchema, root: Path,
                 splits: tuple[str, ...] = ("train", "val"),
                 link_images: bool = True, with_keypoints: bool = True) -> Path:
-    """Exporte un FoldData au format YOLO et retourne le chemin du data.yaml.
+    """Export a FoldData in the YOLO format and return the path of the data.yaml.
 
-    Effet de bord : cree l'arborescence YOLO sous `root`.
+    Side effect: creates the YOLO tree under `root`.
     """
     root.mkdir(parents=True, exist_ok=True)
     for split in splits:
         n = export_split(data.role(split), schema, root, split, link_images, with_keypoints)
-        log.info("Export YOLO [%s] : %d images -> %s", split, n, root / "images" / split)
+        log.info("YOLO export [%s]: %d images -> %s", split, n, root / "images" / split)
     return write_data_yaml(root, schema, {s: s for s in splits}, with_keypoints)

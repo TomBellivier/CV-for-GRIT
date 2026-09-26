@@ -1,5 +1,5 @@
 # @package _global_
-# Experience C : detection poulee puis pose sur crop normalise.
+# Experiment C: pooled detection then pose on a normalised crop.
 defaults:
   - override /data: pooled
   - override /approach: detect_then_pose

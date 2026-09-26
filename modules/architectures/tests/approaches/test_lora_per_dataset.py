@@ -1,7 +1,7 @@
-"""Tests de l'approche H (lora_per_dataset).
+"""Tests of approach H (lora_per_dataset).
 
-La logique risquee est la repartition du budget d'epoques et le gel de la phase 2 :
-toutes deux sont ecrites en fonctions pures et testees ici, sans torch.
+The risky logic is the split of the epoch budget and the freezing of phase 2: both are
+written as pure functions and tested here, without torch.
 """
 
 from __future__ import annotations
@@ -26,21 +26,21 @@ def test_approach_is_registered() -> None:
     assert "lora_per_dataset" in APPROACHES.available()
 
 
-# --- repartition du budget d'epoques ----------------------------------------
+# --- split of the epoch budget ----------------------------------------------
 @pytest.mark.parametrize(
-    ("total", "split", "attendu"),
+    ("total", "split", "expected"),
     [(100, 0.6, (60, 40)), (100, 0.3, (30, 70)), (10, 0.5, (5, 5)), (3, 0.6, (2, 1))],
 )
-def test_epoch_budget_is_split_not_added(config_factory, total, split, attendu) -> None:
-    """§6.3 : le budget est REPARTI. Sinon H aurait plus de calcul que les autres."""
+def test_epoch_budget_is_split_not_added(config_factory, total, split, expected) -> None:
+    """§6.3: the budget is SPLIT. Otherwise H would get more compute than the others."""
     from insectpose.approaches.lora_per_dataset import LoraPerDatasetApproach
 
     cfg = config_factory(["approach=lora_per_dataset"])
     OmegaConf.update(cfg, "train.epochs", total)
     OmegaConf.update(cfg, "approach.epoch_split", split)
     stage1, stage2 = LoraPerDatasetApproach(cfg)._epoch_budget()
-    assert (stage1, stage2) == attendu
-    assert stage1 + stage2 == total or total < 3   # arrondi sur les tres petits budgets
+    assert (stage1, stage2) == expected
+    assert stage1 + stage2 == total or total < 3   # rounding on very small budgets
 
 
 @pytest.mark.parametrize("split", [0.0, 1.0, -0.2, 1.5])
@@ -53,55 +53,55 @@ def test_invalid_epoch_split_is_refused(config_factory, split) -> None:
         LoraPerDatasetApproach(cfg)._epoch_budget()
 
 
-# --- gel de la phase 2 -------------------------------------------------------
+# --- phase 2 freezing --------------------------------------------------------
 def test_phase_two_freezes_everything_but_adapters() -> None:
-    """Les tetes doivent etre GELEES en phase 2 : sinon chaque groupe aurait un modele
-    presque entier, et H basculerait dans la categorie de B."""
+    """The heads must be FROZEN in phase 2: otherwise each group would have an almost
+    complete model, and H would fall into the category of B."""
     parameters = [
         "model.0.conv.weight",
         "model.20.conv.base_layer.weight",
         "model.20.conv.lora_A.default.weight",
         "model.20.conv.lora_B.default.weight",
-        "model.23.one2one_cv4.sigma.2.weight",     # tete
+        "model.23.one2one_cv4.sigma.2.weight",     # head
     ]
     frozen = freeze_patterns_for(parameters, [r"lora_[AB]"])
-    assert "model.23.one2one_cv4.sigma.2.weight" in frozen   # tete gelee
+    assert "model.23.one2one_cv4.sigma.2.weight" in frozen   # frozen head
     assert "model.0.conv.weight" in frozen
     assert not any("lora_" in n for n in frozen)
     assert len(frozen) == 3
 
 
-# --- protocole ---------------------------------------------------------------
+# --- protocol ----------------------------------------------------------------
 def test_same_base_weights_as_other_approaches(config_factory) -> None:
-    socle = config_factory(["approach=yolo_pooled"])
+    baseline = config_factory(["approach=yolo_pooled"])
     h = config_factory(["approach=lora_per_dataset"])
-    assert str(h.approach.weights) == str(socle.approach.weights)
+    assert str(h.approach.weights) == str(baseline.approach.weights)
 
 
 def test_search_space_has_four_dimensions(cfg_h) -> None:
-    """ADR-0031 : budget identique aux autres approches."""
+    """ADR-0031: same budget as the other approaches."""
     space = dict(cfg_h.approach.search_space)
     assert len(space) == 4
-    assert "epoch_split" in space          # l'arbitrage tronc/adaptateurs est cherche
-    assert "lora.alpha" not in space       # alpha est lie au rang
+    assert "epoch_split" in space          # the trunk/adapters trade-off is searched
+    assert "lora.alpha" not in space       # alpha is tied to the rank
 
 
 @pytest.mark.smoke
 def test_adapters_are_injected_in_phase_two_only(
     fake_ultralytics, cfg_h, project  # noqa: ARG001
 ) -> None:
-    """Le tronc sauvegarde a ses adaptateurs FUSIONNES : la phase 2 doit en injecter
-    de nouveaux, pas esperer les retrouver (ADR-0036)."""
+    """The saved trunk has its adapters MERGED: phase 2 must inject new ones, not hope
+    to find them again (ADR-0036)."""
     from insectpose.approaches.lora_per_dataset import LoraPerDatasetApproach
 
     approach = LoraPerDatasetApproach(cfg_h)
 
-    class _Sans:
+    class _WithoutLora:
         def named_parameters(self):
             return [("model.0.conv.weight", object())]
 
-    with pytest.raises(RuntimeError, match="Aucune couche LoRA"):
-        approach._freeze_all_but_adapters(_Sans())
+    with pytest.raises(RuntimeError, match="No LoRA layer"):
+        approach._freeze_all_but_adapters(_WithoutLora())
 
 
 @pytest.mark.smoke
@@ -111,7 +111,7 @@ def test_two_phases_produce_one_model_per_group(
     pipeline.cmd_split(cfg_h)
     ctx = pipeline.cmd_train(cfg_h)
 
-    # Un tronc commun, puis un jeu d'adaptateurs par groupe
+    # A shared trunk, then one adapter set per group
     assert (project.run_dir(ctx.run_id) / "weights" / "trunk" / "best.pt").exists()
     for dataset in DATASETS:
         assert (project.run_dir(ctx.run_id) / "weights" / dataset / "best.pt").exists()
@@ -135,8 +135,8 @@ def test_epoch_budget_is_recorded_and_split(
     assert manifest["n_adapter_sets"] == len(DATASETS)
 
     trainings = [c for c in fake_ultralytics.calls if c["kind"] == "train"]
-    assert trainings[0]["epochs"] == 6                     # tronc
-    assert all(c["epochs"] == 4 for c in trainings[1:])    # adaptateurs
+    assert trainings[0]["epochs"] == 6                     # trunk
+    assert all(c["epochs"] == 4 for c in trainings[1:])    # adapters
 
 
 @pytest.mark.smoke

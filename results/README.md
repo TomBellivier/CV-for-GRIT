@@ -7,6 +7,10 @@ Every script that produces an analysis writes into its sub-folder by default
 
 ```
 results/
+├── annotation_check/             <- annotation_tools/check_annotations.py
+│   ├── issues.csv                ... every problem found, one row per image
+│   └── presence.csv              ... one row per image, one column per annotation source
+├── run_logs/                     <- run_all.py: every command and its output, one log per run
 ├── pose/                         <- modules/architectures (pose models)
 │   ├── master.parquet            ... every evaluated run, one row per metric (`cli report`)
 │   ├── summary_*.parquet         ... report tables (`cli report`)
@@ -28,6 +32,8 @@ results/
 
 | Analysis | Command (from the folder of the script) |
 |----------|------------------------------------------|
+| Everything below, in one run | `python run_all.py` (at the root; settings in `run_config.yaml`) |
+| Annotation check | `python annotation_tools/check_annotations.py` (at the root) |
 | Pose models: report | `python -m insectpose.cli report` (in `modules/architectures`) |
 | Pose models: comparison | `python scripts/compare_models.py` (in `modules/architectures`) |
 | Pose models: HPO | `python plot_optuna.py` (in `modules/architectures`) |

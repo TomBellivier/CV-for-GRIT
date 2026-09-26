@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "insectpose"
 version = "0.1.0"
-description = "Estimation de pose sur 4 datasets d'insectes - socle generique d'experimentation"
+description = "Pose estimation on 4 insect datasets - generic experimentation framework"
 requires-python = ">=3.10"
 dependencies = [
     "numpy>=1.26",
@@ -17,16 +17,16 @@ dependencies = [
     "scikit-learn>=1.4",
     "scipy>=1.11",
     "pillow>=10",
-    # ADR-0019 : torch et ultralytics sont des dependances de premier rang.
+    # ADR-0019: torch and ultralytics are first-rank dependencies.
     "torch>=2.1",
     "torchvision>=0.16",
     "ultralytics>=8.3",
-    # ADR-0025 : adaptateurs LoRA de l'approche D.
+    # ADR-0025: LoRA adapters of approach D.
     "peft>=0.11",
 ]
 
 [project.optional-dependencies]
-# Conserve pour compatibilite : les dependances sont desormais dans `dependencies`.
+# Kept for compatibility: the dependencies are now in `dependencies`.
 yolo = []
 dev = ["pytest>=8", "ruff>=0.5", "mypy>=1.10"]
 
@@ -48,11 +48,11 @@ ignore = ["B008"]
 python_version = "3.10"
 ignore_missing_imports = true
 
-# Coeur du contrat : typage strict obligatoire (CONVENTIONS.md 10)
+# Core of the contract: strict typing mandatory (CONVENTIONS.md 10)
 [[tool.mypy.overrides]]
 module = ["insectpose.contracts", "insectpose.registry", "insectpose.evaluation.*"]
 disallow_untyped_defs = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["smoke: test de bout en bout minimal"]
+markers = ["smoke: minimal end-to-end test"]

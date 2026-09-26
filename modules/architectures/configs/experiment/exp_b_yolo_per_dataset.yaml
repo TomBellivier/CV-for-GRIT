@@ -1,5 +1,5 @@
 # @package _global_
-# Experience B : un modele YOLO-pose par ordre d'insecte, memes folds que l'experience A.
+# Experiment B: one YOLO-pose model per insect order, same folds as experiment A.
 defaults:
   - override /data: pooled
   - override /approach: yolo_per_dataset

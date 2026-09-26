@@ -1,4 +1,4 @@
-"""Tests des decisions de protocole : mesures, normalisateur PCK, resolution commune."""
+"""Tests of the protocol decisions: measurements, PCK normaliser, common resolution."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from insectpose.evaluation.metrics.pose import compute_normalizer
 SCHEMA = "insect42_v1"
 
 
-# --- mesures morphometriques (ADR-0008) -------------------------------------
+# --- morphometric measurements (ADR-0008) ----------------------------------
 def test_measurement_definitions_match_schema(project) -> None:
     schema = load_schema(SCHEMA, project.configs)
     spec = load_measurements()
@@ -53,7 +53,7 @@ def test_measurement_error_is_zero_for_perfect_prediction(cfg, project) -> None:
 
 
 def test_measurement_error_grows_with_displacement(cfg, project) -> None:
-    """Un point deplace doit degrader la mesure qui l'utilise, et elle seule."""
+    """A moved point must degrade the measurement that uses it, and only that one."""
     gt, pred = _instance_frames(project)
     schema = load_schema(SCHEMA, project.configs)
     kpts = np.asarray(pred.loc[0, "kpts_xy"], dtype=float).reshape(-1, 2)
@@ -71,7 +71,7 @@ def test_measurement_error_grows_with_displacement(cfg, project) -> None:
 
 
 def test_symmetry_gap_detects_asymmetric_prediction(cfg, project) -> None:
-    """Controle sans verite terrain : ecart gauche/droite des mesures predites."""
+    """Check without ground truth: left/right gap of the predicted measurements."""
     gt, pred = _instance_frames(project)
     schema = load_schema(SCHEMA, project.configs)
     out = evaluate_predictions(pred, gt, {SCHEMA: schema}, cfg.eval)
@@ -85,7 +85,7 @@ def test_symmetry_gap_detects_asymmetric_prediction(cfg, project) -> None:
     assert degraded > baseline
 
 
-# --- normalisateur PCK (ADR-0009) -------------------------------------------
+# --- PCK normaliser (ADR-0009) -----------------------------------------------
 def test_normalizer_uses_thorax_width(project) -> None:
     schema = load_schema(SCHEMA, project.configs)
     kpts = np.zeros((1, schema.n_keypoints, 2))
@@ -103,18 +103,18 @@ def test_normalizer_uses_thorax_width(project) -> None:
 
 
 def test_normalizer_falls_back_and_reports_it(project) -> None:
-    """Un repli silencieux d'echelle fausserait la comparaison : il est compte."""
+    """A silent scale fallback would distort the comparison: it is counted."""
     schema = load_schema(SCHEMA, project.configs)
     kpts = np.zeros((1, schema.n_keypoints, 2))
     vis = np.ones((1, schema.n_keypoints), dtype=bool)
-    vis[0, schema.index("thorax-left")] = False   # point de reference non annote
+    vis[0, schema.index("thorax-left")] = False   # reference point not annotated
     spec = OmegaConf.create(
         {"name": "thorax_width", "type": "keypoint_distance",
          "keypoints": ["thorax-left", "thorax-right"], "fallback": "bbox_diag"}
     )
     bbox = np.array([[0.0, 0.0, 3.0, 4.0]])
     values, fell_back = compute_normalizer(spec, schema, kpts, vis, bbox)
-    assert values[0] == pytest.approx(5.0)   # diagonale de bbox
+    assert values[0] == pytest.approx(5.0)   # bbox diagonal
     assert fell_back[0]
 
 
@@ -126,11 +126,11 @@ def test_fallback_rate_is_published(cfg, project) -> None:
     assert values[("overall", "pck_normalizer_fallback_rate")] == pytest.approx(1.0)
 
 
-# --- resolution commune (ADR-0013) ------------------------------------------
+# --- common resolution (ADR-0013) --------------------------------------------
 def test_divergent_image_size_is_refused(cfg, project) -> None:  # noqa: ARG001
     pipeline.cmd_split(cfg)
     OmegaConf.update(cfg, "train.image_size", [512, 512])
-    with pytest.raises(ContractError, match="resolution commune"):
+    with pytest.raises(ContractError, match="common resolution"):
         pipeline.cmd_train(cfg)
 
 
@@ -143,7 +143,7 @@ def test_divergent_image_size_allowed_when_guard_disabled(cfg, project) -> None:
 
 # --- helpers ----------------------------------------------------------------
 def _instance_frames(project) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Une instance GT et sa prediction parfaite, geometrie anatomique jouet."""
+    """A GT instance and its perfect prediction, toy anatomical geometry."""
     from insectpose.data.adapters.synthetic import _TEMPLATE_42
 
     schema = load_schema(SCHEMA, project.configs)

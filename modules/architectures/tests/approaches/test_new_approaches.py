@@ -1,8 +1,8 @@
-"""Tests des approches B (yolo_per_dataset) et C (detect_then_pose).
+"""Tests of approaches B (yolo_per_dataset) and C (detect_then_pose).
 
-Comme pour l'approche A, la couche Ultralytics est remplacee par un double : on
-verifie ce que NOUS controlons — routage entre modeles, isolement des artefacts,
-recadrage, retro-projection — sans GPU ni poids a telecharger.
+As for approach A, the Ultralytics layer is replaced by a double: we check what WE
+control — routing between models, isolation of the artefacts, cropping,
+back-projection — without a GPU or weights to download.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ DATASETS = ("coleoptera", "diptera")
 
 
 # ===========================================================================
-# Approche B : un modele par dataset
+# Approach B: one model per dataset
 # ===========================================================================
 @pytest.fixture()
 def cfg_b(config_factory):
@@ -31,7 +31,7 @@ def cfg_b(config_factory):
 
 
 def test_each_dataset_gets_its_own_model(fake_ultralytics, cfg_b, project) -> None:  # noqa: ARG001
-    """B entraine N modeles, isoles les uns des autres dans le meme run."""
+    """B trains N models, isolated from each other in the same run."""
     pipeline.cmd_split(cfg_b)
     ctx = pipeline.cmd_train(cfg_b)
 
@@ -43,7 +43,7 @@ def test_each_dataset_gets_its_own_model(fake_ultralytics, cfg_b, project) -> No
 
 
 def test_base_weights_not_pooled_model(fake_ultralytics, cfg_b, project) -> None:  # noqa: ARG001
-    """ADR-0023 : chaque modele repart des poids de base, jamais du modele poule."""
+    """ADR-0023: each model restarts from the base weights, never from the pooled model."""
     pipeline.cmd_split(cfg_b)
     ctx = pipeline.cmd_train(cfg_b)
     manifest = read_json(project.manifest(ctx.run_id))
@@ -52,7 +52,7 @@ def test_base_weights_not_pooled_model(fake_ultralytics, cfg_b, project) -> None
 
 
 def test_predictions_are_routed_by_dataset(fake_ultralytics, cfg_b, project) -> None:  # noqa: ARG001
-    """Chaque image doit etre predite par le modele de SON dataset."""
+    """Each image must be predicted by the model of ITS dataset."""
     pipeline.cmd_split(cfg_b)
     ctx = pipeline.cmd_train(cfg_b)
     predictions = read_parquet(project.predictions(ctx.run_id, "test", ctx.fold),
@@ -65,20 +65,20 @@ def test_predictions_are_routed_by_dataset(fake_ultralytics, cfg_b, project) -> 
 
 
 def test_shared_search_space_keeps_budget_equal(cfg_b) -> None:
-    """ADR-0023 : un trial entraine les N modeles, donc le budget egale celui de A."""
+    """ADR-0023: a trial trains the N models, so the budget equals that of A."""
     import optuna
 
     from insectpose.registry import APPROACHES
 
     overrides = APPROACHES.get("yolo_per_dataset").search_space(
         optuna.create_study().ask(), cfg_b)
-    assert overrides, "espace de recherche vide"
-    # Aucun hyperparametre n'est declare par dataset : ils sont partages
+    assert overrides, "empty search space"
+    # No hyperparameter is declared per dataset: they are shared
     assert not any(dataset in key for key in overrides for dataset in DATASETS)
 
 
 def test_folds_are_reused_not_regenerated(cfg_b, project) -> None:
-    """§6.2 : B utilise les MEMES folds que A, simplement restreints."""
+    """§6.2: B uses the SAME folds as A, simply restricted."""
     from insectpose.data.splits import fold_assignment, make_split_id
 
     pipeline.cmd_split(cfg_b)
@@ -94,7 +94,7 @@ def test_folds_are_reused_not_regenerated(cfg_b, project) -> None:
 
 
 # ===========================================================================
-# Approche C : detection puis pose sur crop
+# Approach C: detection then pose on a crop
 # ===========================================================================
 @pytest.fixture()
 def cfg_c(config_factory):
@@ -114,7 +114,7 @@ def test_two_models_are_trained(fake_ultralytics, cfg_c, project) -> None:  # no
 
 
 def test_detector_labels_carry_no_keypoints(fake_ultralytics, cfg_c, project) -> None:  # noqa: ARG001
-    """Le detecteur n'a que faire des keypoints : ses labels sont 'classe cx cy w h'."""
+    """The detector does not care about keypoints: its labels are 'class cx cy w h'."""
     import yaml
 
     pipeline.cmd_split(cfg_c)
@@ -128,7 +128,7 @@ def test_detector_labels_carry_no_keypoints(fake_ultralytics, cfg_c, project) ->
 
 
 def test_pose_crops_use_jittered_boxes_in_train_only(fake_ultralytics, cfg_c, project) -> None:  # noqa: ARG001
-    """§9.3 : cadrages bruites a l'entrainement, nets en validation."""
+    """§9.3: jittered crops in training, clean ones in validation."""
     from PIL import Image
 
     pipeline.cmd_split(cfg_c)
@@ -141,7 +141,7 @@ def test_pose_crops_use_jittered_boxes_in_train_only(fake_ultralytics, cfg_c, pr
         assert images and len(images) == len(labels)
         with Image.open(images[0]) as handle:
             assert handle.size == (128, 128)
-    # Un label de crop contient une seule instance, avec ses 42 keypoints
+    # A crop label contains a single instance, with its 42 keypoints
     line = sorted((crops / "labels" / "train").glob("*.txt"))[0].read_text().split()
     assert len(line) == 5 + 42 * 3
 
@@ -149,7 +149,7 @@ def test_pose_crops_use_jittered_boxes_in_train_only(fake_ultralytics, cfg_c, pr
 def test_predictions_are_back_projected_to_the_source_image(
     fake_ultralytics, cfg_c, project  # noqa: ARG001
 ) -> None:
-    """Le contrat 3 impose le repere de l'image d'origine, pas celui du crop (§3.4)."""
+    """Contract 3 imposes the frame of the original image, not that of the crop (§3.4)."""
     pipeline.cmd_split(cfg_c)
     ctx = pipeline.cmd_train(cfg_c)
     predictions = read_parquet(project.predictions(ctx.run_id, "test", ctx.fold),
@@ -162,14 +162,14 @@ def test_predictions_are_back_projected_to_the_source_image(
         width = int(sizes.loc[row.image_id, "image_width"])
         height = int(sizes.loc[row.image_id, "image_height"])
         points = np.asarray(row.kpts_xy, dtype=float).reshape(-1, 2)
-        # Les crops font 128 px : sans retro-projection, tous les points seraient < 128
+        # The crops are 128 px: without back-projection, every point would be < 128
         assert points[:, 0].max() <= 1.5 * width
         assert points[:, 1].max() <= 1.5 * height
         assert len(points) == 42
 
 
 def test_gt_box_mode_is_flagged_as_diagnostic(fake_ultralytics, cfg_c, project) -> None:  # noqa: ARG001
-    """§9.3 : la pose sur bboxes GT est un diagnostic, jamais un resultat bout-en-bout."""
+    """§9.3: pose on GT bboxes is a diagnostic, never an end-to-end result."""
     OmegaConf.update(cfg_c, "approach.pose_on_gt_boxes", True)
     OmegaConf.update(cfg_c, "tag", "diagnostic")
     pipeline.cmd_split(cfg_c)
@@ -179,7 +179,7 @@ def test_gt_box_mode_is_flagged_as_diagnostic(fake_ultralytics, cfg_c, project) 
 
 
 # ===========================================================================
-# Geometrie du recadrage (testable sans Ultralytics)
+# Crop geometry (testable without Ultralytics)
 # ===========================================================================
 def test_expand_bbox_keeps_centre() -> None:
     box = expand_bbox(np.array([10.0, 20.0, 40.0, 60.0]), 0.5)
@@ -189,7 +189,7 @@ def test_expand_bbox_keeps_centre() -> None:
 
 
 def test_crop_label_roundtrip(project) -> None:
-    """Les keypoints du label doivent revenir a leur position d'origine."""
+    """The keypoints of the label must come back to their original position."""
     schema = load_schema(SCHEMA, project.configs)
     rng = np.random.default_rng(0)
     kpts = rng.uniform(40, 160, size=(schema.n_keypoints, 2))
@@ -205,10 +205,10 @@ def test_crop_label_roundtrip(project) -> None:
 
 
 def test_keypoints_outside_the_crop_are_masked(project) -> None:
-    """Un point hors cadre est marque non supervise : ni appris a zero, ni compte faux."""
+    """A point outside the frame is marked unsupervised: neither learned at zero nor counted wrong."""
     schema = load_schema(SCHEMA, project.configs)
     kpts = np.full((schema.n_keypoints, 2), 60.0)
-    kpts[0] = [5000.0, 5000.0]          # tres loin du crop
+    kpts[0] = [5000.0, 5000.0]          # very far from the crop
     vis = np.full(schema.n_keypoints, 2)
     matrix = crop_affine(np.array([40.0, 40.0, 40.0, 40.0]), (128, 128))
 

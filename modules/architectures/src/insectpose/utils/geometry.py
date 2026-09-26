@@ -1,8 +1,8 @@
-"""Geometrie : bboxes, transformations affines, OKS (§3.4, §9.3).
+"""Geometry: bboxes, affine transforms, OKS (§3.4, §9.3).
 
-REGLE : toute coordonnee manipulee ici est en pixels absolus dans le repere de
-l'image d'origine, sauf quand une matrice affine est explicitement appliquee. La
-retro-projection crop -> image est testee en aller-retour (tests/test_geometry.py).
+RULE: every coordinate handled here is in absolute pixels in the frame of the original
+image, except when an affine matrix is explicitly applied. The crop -> image
+back-projection is tested by a round trip (tests/test_geometry.py).
 """
 
 from __future__ import annotations
@@ -13,19 +13,19 @@ Array = np.ndarray
 
 
 def bbox_diag(bbox_xywh: Array) -> Array:
-    """Diagonale d'une (ou N) bbox(es) au format xywh."""
+    """Diagonal of one (or N) bbox(es) in the xywh format."""
     b = np.atleast_2d(np.asarray(bbox_xywh, dtype=float))
     return np.sqrt(b[:, 2] ** 2 + b[:, 3] ** 2)
 
 
 def bbox_area(bbox_xywh: Array) -> Array:
-    """Aire d'une (ou N) bbox(es) au format xywh."""
+    """Area of one (or N) bbox(es) in the xywh format."""
     b = np.atleast_2d(np.asarray(bbox_xywh, dtype=float))
     return b[:, 2] * b[:, 3]
 
 
 def xywh_to_xyxy(bbox_xywh: Array) -> Array:
-    """Conversion xywh -> xyxy (pixels absolus)."""
+    """xywh -> xyxy conversion (absolute pixels)."""
     b = np.atleast_2d(np.asarray(bbox_xywh, dtype=float)).copy()
     b[:, 2] += b[:, 0]
     b[:, 3] += b[:, 1]
@@ -33,7 +33,7 @@ def xywh_to_xyxy(bbox_xywh: Array) -> Array:
 
 
 def bbox_iou(a_xywh: Array, b_xywh: Array) -> Array:
-    """Matrice IoU (N_a, N_b) entre deux jeux de bboxes xywh."""
+    """IoU matrix (N_a, N_b) between two sets of xywh bboxes."""
     a = xywh_to_xyxy(a_xywh)
     b = xywh_to_xyxy(b_xywh)
     if a.size == 0 or b.size == 0:
@@ -51,9 +51,9 @@ def bbox_iou(a_xywh: Array, b_xywh: Array) -> Array:
 
 def bbox_from_keypoints(kpts_xy: Array, kpts_vis: Array, margin: float = 0.05,
                         image_wh: tuple[int, int] | None = None) -> Array:
-    """Bbox englobante des keypoints visibles, avec marge relative. Format xywh.
+    """Bounding box of the visible keypoints, with a relative margin. xywh format.
 
-    Utilisee uniquement pour `bbox_source='derived'` : ce n'est jamais une detection.
+    Only used for `bbox_source='derived'`: it is never a detection.
     """
     pts = np.asarray(kpts_xy, dtype=float).reshape(-1, 2)
     vis = np.asarray(kpts_vis).reshape(-1)
@@ -77,7 +77,7 @@ def bbox_from_keypoints(kpts_xy: Array, kpts_vis: Array, margin: float = 0.05,
 
 def jitter_bbox(bbox_xywh: Array, rng: np.random.Generator, scale_std: float = 0.15,
                 shift_std: float = 0.10) -> Array:
-    """Bruite une bbox GT (§9.3) : sans ce bruit, decalage train/test garanti."""
+    """Add noise to a GT bbox (§9.3): without this noise, a train/test shift is guaranteed."""
     x, y, w, h = np.asarray(bbox_xywh, dtype=float)
     s = float(np.exp(rng.normal(0.0, scale_std)))
     cx = x + w / 2 + rng.normal(0.0, shift_std) * w
@@ -87,10 +87,10 @@ def jitter_bbox(bbox_xywh: Array, rng: np.random.Generator, scale_std: float = 0
 
 
 def crop_affine(bbox_xywh: Array, out_wh: tuple[int, int], keep_aspect: bool = True) -> Array:
-    """Matrice affine 2x3 image -> crop pour une bbox donnee.
+    """2x3 image -> crop affine matrix for a given bbox.
 
-    A conserver dans `meta.transform_matrix` : toute prediction faite dans le repere
-    du crop DOIT etre retro-projetee avec `invert_affine` avant ecriture (§3.4).
+    To be kept in `meta.transform_matrix`: every prediction made in the frame of the
+    crop MUST be back-projected with `invert_affine` before writing (§3.4).
     """
     x, y, w, h = np.asarray(bbox_xywh, dtype=float)
     ow, oh = out_wh
@@ -105,7 +105,7 @@ def crop_affine(bbox_xywh: Array, out_wh: tuple[int, int], keep_aspect: bool = T
 
 
 def invert_affine(matrix: Array) -> Array:
-    """Inverse d'une matrice affine 2x3."""
+    """Inverse of a 2x3 affine matrix."""
     m = np.asarray(matrix, dtype=float)
     full = np.vstack([m, [0.0, 0.0, 1.0]])
     inv = np.linalg.inv(full)
@@ -113,7 +113,7 @@ def invert_affine(matrix: Array) -> Array:
 
 
 def apply_affine(matrix: Array, points_xy: Array) -> Array:
-    """Applique une affine 2x3 a des points (N, 2) ou a un vecteur plat (2K,)."""
+    """Apply a 2x3 affine to points (N, 2) or to a flat vector (2K,)."""
     pts = np.asarray(points_xy, dtype=float)
     flat = pts.ndim == 1
     p = pts.reshape(-1, 2)
@@ -123,10 +123,10 @@ def apply_affine(matrix: Array, points_xy: Array) -> Array:
 
 def oks_matrix(gt_kpts: Array, gt_vis: Array, pred_kpts: Array, sigmas: Array,
                gt_areas: Array, eps: float = 1e-9) -> Array:
-    """Matrice OKS (P, G) entre predictions et verites terrain d'une image.
+    """OKS matrix (P, G) between the predictions and the ground truths of an image.
 
-    gt_kpts : (G, K, 2) - pred_kpts : (P, K, 2) - gt_vis : (G, K) - sigmas : (K,)
-    Les points `vis == 0` sont exclus du calcul (jamais comptes comme erreur nulle).
+    gt_kpts: (G, K, 2) - pred_kpts: (P, K, 2) - gt_vis: (G, K) - sigmas: (K,)
+    Points with `vis == 0` are excluded from the computation (never counted as a zero error).
     """
     g = np.asarray(gt_kpts, dtype=float)
     p = np.asarray(pred_kpts, dtype=float)

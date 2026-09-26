@@ -1,1 +1,1 @@
-"""Adaptateurs raw -> format canonique. SEULS modules autorises a connaitre un format source."""
+"""Raw -> canonical format adapters. The ONLY modules allowed to know a source format."""

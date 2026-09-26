@@ -1,10 +1,10 @@
-"""Modèles de données internes : une annotation d'image = des keypoints (px absolus,
-lus tels quels, jamais modifiés) + le statut mesurable/non-mesurable de ses mesures.
+"""Internal data models: an image annotation = keypoints (absolute px, read as is,
+never modified) + the measurable/non-measurable status of its measurements.
 
-Le statut est stocké par arête (segment entre deux kp consécutifs) et non par
-mesure : plusieurs mesures peuvent partager la même arête (ex. "fémur" et
-"longueur de patte"), ce qui fait cascader le grisage d'une arête vers toutes
-les mesures qui en dépendent.
+The status is stored per edge (segment between two consecutive kp) and not per
+measurement: several measurements can share the same edge (e.g. "femur" and
+"leg length"), which makes the greying of an edge cascade to every measurement that
+depends on it.
 """
 from dataclasses import dataclass, field
 from typing import Dict, Tuple
@@ -20,21 +20,21 @@ def edge_key(a, b):
 @dataclass
 class ImageAnnotation:
     image_name: str
-    image_path: str  # chemin vers l'image, tel qu'écrit dans le CSV d'entrée
+    image_path: str  # path to the image, as written in the input CSV
     width: int
     height: int
     annotation_id: str = ""
-    # rotation d'affichage en degrés (0/90/180/270) : n'affecte que la vue, jamais
-    # les coordonnées des keypoints, qui restent dans le repère de l'image d'origine.
+    # display rotation in degrees (0/90/180/270): only affects the view, never the
+    # keypoint coordinates, which stay in the frame of the original image.
     image_rotation: int = 0
     keypoints: Dict[str, Tuple[float, float]] = field(default_factory=dict)
-    # (kpA, kpB) triés -> MEASURABLE | NON_MEASURABLE (override manuel d'une arête)
+    # sorted (kpA, kpB) -> MEASURABLE | NON_MEASURABLE (manual override of an edge)
     edge_overrides: Dict[Tuple[str, str], str] = field(default_factory=dict)
-    done: bool = False  # classement validé par l'utilisateur
+    done: bool = False  # classification validated by the user
 
     def key(self):
-        """Identifiant stable, utilisé pour sauvegarder/restaurer l'état de classement
-        (une même image peut apparaître deux fois si elle a été annotée deux fois)."""
+        """Stable identifier, used to save/restore the classification state
+        (a same image can appear twice if it was annotated twice)."""
         return f"{self.image_name}::{self.annotation_id}"
 
     def has_kp(self, name):
@@ -47,7 +47,7 @@ class ImageAnnotation:
         return self.edge_overrides.get(key, MEASURABLE)
 
     def measurement_status(self, edge_keys):
-        """Retourne MEASURABLE seulement si toutes les arêtes de la mesure le sont."""
+        """Return MEASURABLE only if every edge of the measurement is."""
         if not edge_keys:
             return NON_MEASURABLE
         return MEASURABLE if all(self.edge_status(k) == MEASURABLE for k in edge_keys) else NON_MEASURABLE
@@ -56,5 +56,5 @@ class ImageAnnotation:
 @dataclass
 class Preset:
     name: str
-    # "kpA::kpB" (triés) -> statut forcé
+    # "kpA::kpB" (sorted) -> forced status
     overrides: Dict[str, str] = field(default_factory=dict)

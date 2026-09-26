@@ -1,5 +1,5 @@
-"""Metriques. Une metrique = un module + un nom enregistre (CONVENTIONS.md §7.2).
+"""Metrics. One metric = one module + one registered name (CONVENTIONS.md §7.2).
 
-Signature imposee : fn(bundle: EvalBundle) -> list[dict] (lignes du contrat 4).
-Aucune metrique ne lit un modele, un log de framework ou un fichier hors bundle.
+Imposed signature: fn(bundle: EvalBundle) -> list[dict] (rows of contract 4).
+No metric reads a model, a framework log or a file outside the bundle.
 """

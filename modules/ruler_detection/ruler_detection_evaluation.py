@@ -1,4 +1,4 @@
-from ruler_detection import detect_ruler_from_rgb # retrun value and line
+from ruler_detection import detect_ruler_from_rgb # returns value and line
 
 from pathlib import Path
 import pandas as pd
@@ -12,13 +12,13 @@ import json
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# Table d'annotation unique : pose + scale + validite des mesures, une ligne par
-# image (voir annotation_tools/build_annotation_data.py). Les regles y sont les
-# lignes qui portent une plage ruler_line_min / ruler_line_max.
+# Single annotation table: pose + scale + measurement validity, one row per image
+# (see annotation_tools/build_annotation_data.py). The rulers are the rows that carry
+# a ruler_line_min / ruler_line_max range.
 ANNOTATION_DATA = REPO_ROOT / "annotation_data" / "annotation_data.csv"
 ALL_IMAGES_DIR = REPO_ROOT / "all_images" / "full databases"
-# Sorties dans le dossier results/ commun du depot (voir results/README.md) ; le
-# notebook ruler_detection_evaluation.ipynb les relit de la.
+# Outputs in the shared results/ folder of the repository (see results/README.md); the
+# ruler_detection_evaluation.ipynb notebook reads them back from there.
 RESULTS_DIR = REPO_ROOT / "results" / "ruler_detection"
 
 path_images = list(ALL_IMAGES_DIR.rglob("*.jpg")) + list(ALL_IMAGES_DIR.rglob("*.png")) + list(ALL_IMAGES_DIR.rglob("*.jpeg"))+ list(ALL_IMAGES_DIR.rglob("*.JPG"))
@@ -26,13 +26,13 @@ images = [Path(str(i).replace("\\", "/")).name for i in path_images]
 
 if not ANNOTATION_DATA.is_file():
     raise SystemExit(
-        f"Table d'annotation absente : {ANNOTATION_DATA}\n"
-        "La construire avec : python annotation_tools/build_annotation_data.py"
+        f"Annotation table missing: {ANNOTATION_DATA}\n"
+        "Build it with: python annotation_tools/build_annotation_data.py"
     )
 df = pd.read_csv(ANNOTATION_DATA)
 df = df.rename(columns={"image_name": "Name", "ruler_line_min": "Min", "ruler_line_max": "Max"})
 annotated = df["Min"].notna() & df["Max"].notna()
-print(f"{int(annotated.sum())}/{len(df)} image(s) avec une plage de regle annotee")
+print(f"{int(annotated.sum())}/{len(df)} image(s) with an annotated ruler range")
 df = df.loc[annotated].reset_index(drop=True)
 
 ONLY_HORIZONTAL_RULER = True
@@ -88,7 +88,7 @@ def process_images(ratio, phase=0):
             label_maxs.append(label_max)
             label_mins.append(label_min)
         else:
-            print(img, "does not exists")
+            print(img, "does not exist")
     return predicted_lines, ruler_confidences, prediction_times, image_sizes, scale_values, label_mins, label_maxs, directions
 
 all_ratios = [i for i in range(1, 11)]

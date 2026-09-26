@@ -1,4 +1,4 @@
-"""Tests unitaires de geometrie : la retro-projection est le bug classique du §9.3."""
+"""Geometry unit tests: the back-projection is the classic bug of §9.3."""
 
 from __future__ import annotations
 

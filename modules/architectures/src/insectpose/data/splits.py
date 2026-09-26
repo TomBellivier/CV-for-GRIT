@@ -1,7 +1,7 @@
-"""Generation et lecture des folds partages (CONVENTIONS.md §3.3, §6.1, §6.2).
+"""Generation and reading of the shared folds (CONVENTIONS.md §3.3, §6.1, §6.2).
 
-Les folds sont generes UNE FOIS et utilises par toutes les approches. Une approche
-qui fabrique son propre decoupage rend toute comparaison invalide.
+The folds are generated ONCE and used by every approach. An approach that builds its
+own split makes any comparison invalid.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ log = get_logger("splits")
 
 
 def make_split_id(cfg: Any) -> str:
-    """Identifiant canonique d'un decoupage, derive de la config CV."""
+    """Canonical identifier of a split, derived from the CV config."""
     if cfg.get("split_id"):
         return str(cfg.split_id)
     cv = cfg.cv
@@ -32,9 +32,9 @@ def make_split_id(cfg: Any) -> str:
 
 
 def _image_level(annotations: pd.DataFrame, group_by: str) -> pd.DataFrame:
-    """Table au niveau image : une image = une unite de decoupage."""
+    """Image-level table: one image = one unit of the split."""
     if group_by not in annotations.columns:
-        raise ContractError(f"Colonne de groupement '{group_by}' absente des annotations.")
+        raise ContractError(f"Grouping column '{group_by}' missing from the annotations.")
     per_image = (
         annotations.groupby("image_id")
         .agg(dataset=("dataset", "first"), group_id=(group_by, "first"),
@@ -44,14 +44,14 @@ def _image_level(annotations: pd.DataFrame, group_by: str) -> pd.DataFrame:
     ambiguous = per_image.loc[per_image["n_groups"] > 1, "image_id"]
     if len(ambiguous):
         raise ContractError(
-            f"{len(ambiguous)} images ont plusieurs '{group_by}' (ex. {ambiguous.iloc[0]}). "
-            "Le groupe doit etre constant par image, sinon l'anti-fuite ne tient pas."
+            f"{len(ambiguous)} images have several '{group_by}' (e.g. {ambiguous.iloc[0]}). "
+            "The group must be constant per image, otherwise the anti-leakage does not hold."
         )
     return per_image.drop(columns=["n_groups"])
 
 
 def _carve_val(train_images: pd.DataFrame, val_fraction: float, seed: int) -> pd.DataFrame:
-    """Extrait un sous-ensemble val du train, par groupe et stratifie par dataset."""
+    """Carve a val subset out of the train, by group and stratified by dataset."""
     if val_fraction <= 0:
         return train_images.assign(role="train")
     n_splits = max(2, int(round(1.0 / val_fraction)))
@@ -66,9 +66,9 @@ def _carve_val(train_images: pd.DataFrame, val_fraction: float, seed: int) -> pd
 
 
 def build_splits(annotations: pd.DataFrame, cfg: Any) -> tuple[pd.DataFrame, dict[str, Any]]:
-    """Construit la table des folds + ses metadonnees. Aucun effet de bord.
+    """Build the fold table + its metadata. No side effect.
 
-    Retourne (table conforme au contrat 2, metadonnees a serialiser).
+    Returns (table complying with contract 2, metadata to serialise).
     """
     cv = cfg.cv
     split_id = make_split_id(cfg)
@@ -80,7 +80,7 @@ def build_splits(annotations: pd.DataFrame, cfg: Any) -> tuple[pd.DataFrame, dic
     elif strategy == "stratified_group_holdout":
         n_folds = 1
     else:
-        raise ContractError(f"Strategie de decoupage inconnue : {strategy}")
+        raise ContractError(f"Unknown split strategy: {strategy}")
 
     n_groups = images["group_id"].nunique()
     k = int(cv.n_folds) if strategy == "stratified_group_kfold" else max(
@@ -88,8 +88,8 @@ def build_splits(annotations: pd.DataFrame, cfg: Any) -> tuple[pd.DataFrame, dic
     )
     if n_groups < k:
         raise ContractError(
-            f"{n_groups} groupes pour {k} folds : impossible de decouper sans fuite. "
-            "Reduire cv.n_folds ou revoir group_id (DECISION OPEN-04)."
+            f"{n_groups} groups for {k} folds: impossible to split without leakage. "
+            "Reduce cv.n_folds or review group_id (DECISION OPEN-04)."
         )
 
     splitter = StratifiedGroupKFold(n_splits=k, shuffle=True, random_state=int(cv.seed))
@@ -133,15 +133,15 @@ def build_splits(annotations: pd.DataFrame, cfg: Any) -> tuple[pd.DataFrame, dic
     }
     if meta["group_is_image_id"]:
         log.info(
-            "group_id == image_id : une image = un specimen (ADR-0011). Si un dataset "
-            "apporte un jour plusieurs vues par specimen, renseigner "
-            "data.adapter_options.group_id_field, sinon il y aura fuite."
+            "group_id == image_id: one image = one specimen (ADR-0011). If a dataset one "
+            "day brings several views per specimen, fill "
+            "data.adapter_options.group_id_field, otherwise there will be leakage."
         )
     return table, meta
 
 
 def write_splits(table: pd.DataFrame, meta: dict[str, Any], paths: ProjectPaths) -> Path:
-    """Ecrit contrat 2 + metadonnees. Effet de bord : data/splits/<split_id>.{parquet,json}."""
+    """Write contract 2 + metadata. Side effect: data/splits/<split_id>.{parquet,json}."""
     split_id = meta["split_id"]
     out = write_parquet(paths.split_file(split_id), table, artifact="splits")
     write_json(paths.split_meta(split_id), meta)
@@ -150,41 +150,41 @@ def write_splits(table: pd.DataFrame, meta: dict[str, Any], paths: ProjectPaths)
 
 def load_splits(split_id: str, paths: ProjectPaths, annotations: pd.DataFrame | None = None
                 ) -> tuple[pd.DataFrame, dict[str, Any]]:
-    """Charge un decoupage et REFUSE de le servir si les annotations ont change (§3.3)."""
+    """Load a split and REFUSE to serve it if the annotations have changed (§3.3)."""
     table = read_parquet(paths.split_file(split_id), artifact="splits", validate=True)
     meta = read_json(paths.split_meta(split_id))
     if annotations is not None:
         current = content_hash_annotations(annotations)
         if current != meta.get("content_hash"):
             raise ContractError(
-                f"Le decoupage '{split_id}' a ete genere sur des annotations differentes "
-                f"(hash {meta.get('content_hash')} != {current}). Regenerer les splits, ou "
-                "les resultats ne seront pas comparables."
+                f"The split '{split_id}' was generated on different annotations "
+                f"(hash {meta.get('content_hash')} != {current}). Regenerate the splits, or "
+                "the results will not be comparable."
             )
     return table, meta
 
 
 def inner_split_id(split_id: str, outer_fold: int) -> str:
-    """Identifiant du decoupage INTERNE associe a un fold externe."""
+    """Identifier of the INNER split attached to an outer fold."""
     return f"{split_id}__outer{outer_fold}"
 
 
 def build_inner_splits(annotations: pd.DataFrame, outer_table: pd.DataFrame, outer_fold: int,
                        cfg: Any) -> tuple[pd.DataFrame, dict[str, Any]]:
-    """Decoupage interne d'un fold externe, pour l'HPO niche (ADR-0012).
+    """Inner split of an outer fold, for the nested HPO (ADR-0012).
 
-    Construit uniquement a partir des images train+val du fold externe : le test
-    externe n'entre JAMAIS dans la recherche d'hyperparametres. Aucun effet de bord.
+    Built only from the train+val images of the outer fold: the outer test NEVER enters
+    the hyperparameter search. No side effect.
     """
     from omegaconf import OmegaConf
 
     outer = outer_table[outer_table["fold"] == outer_fold]
     if outer.empty:
-        raise ContractError(f"Fold externe {outer_fold} absent du decoupage parent.")
+        raise ContractError(f"Outer fold {outer_fold} missing from the parent split.")
     inner_images = set(outer.loc[outer["role"].isin(["train", "val"]), "image_id"])
     subset = annotations[annotations["image_id"].isin(inner_images)]
     if subset.empty:
-        raise ContractError(f"Aucune image d'entrainement dans le fold externe {outer_fold}.")
+        raise ContractError(f"No training image in outer fold {outer_fold}.")
 
     inner_cfg = cfg.copy()
     OmegaConf.update(inner_cfg, "cv.n_folds", int(cfg.tuning.inner_folds))
@@ -199,8 +199,8 @@ def build_inner_splits(annotations: pd.DataFrame, outer_table: pd.DataFrame, out
         "parent_split_id": parent,
         "outer_fold": outer_fold,
         "role_in_protocol": "inner",
-        # Le hash porte sur les annotations COMPLETES : toute modification des donnees
-        # invalide aussi les decoupages internes.
+        # The hash covers the WHOLE annotations: any change of the data also
+        # invalidates the inner splits.
         "content_hash": content_hash_annotations(annotations),
         "subset_content_hash": content_hash_annotations(subset),
     })
@@ -208,28 +208,27 @@ def build_inner_splits(annotations: pd.DataFrame, outer_table: pd.DataFrame, out
 
 
 def full_split_id(split_id: str) -> str:
-    """Identifiant du decoupage 'toutes les images' derive d'un decoupage parent."""
+    """Identifier of the 'all images' split derived from a parent split."""
     return f"{split_id}__full"
 
 
 def build_full_split(annotations: pd.DataFrame, cfg: Any, val_fraction: float | None = None
                      ) -> tuple[pd.DataFrame, dict[str, Any]]:
-    """Decoupage du modele LIVRE : toutes les images, aucun test. Aucun effet de bord.
+    """Split of the full-data model: all the images, no test. No side effect.
 
-    Un modele de production doit voir toutes les donnees disponibles ; un modele de
-    fold n'en voit que 4/5. Ce decoupage n'a donc pas de role 'test' : le modele qui
-    en sort NE S'EVALUE PAS (ADR-0012 -- ses metriques porteraient sur des images
-    vues a l'entrainement). L'estimation de performance reste celle des folds
-    externes.
+    A model trained this way sees all the available data; a fold model only sees 4/5 of
+    it. This split therefore has no 'test' role: the model coming out of it IS NOT
+    EVALUATED (ADR-0012 -- its metrics would be about images seen at training time). The
+    performance estimate remains that of the outer folds.
 
-    Seule la part `val` est retiree du train : elle sert uniquement a choisir le
-    checkpoint (early stopping), pas a mesurer quoi que ce soit.
+    Only the `val` share is removed from the train: it is only used to choose the
+    checkpoint (early stopping), not to measure anything.
     """
     fraction = float(cfg.cv.val_fraction if val_fraction is None else val_fraction)
     if not 0.0 < fraction < 1.0:
         raise ContractError(
-            f"val_fraction={fraction} : le modele final a besoin d'une part val non vide "
-            "pour choisir son checkpoint, et non vide de tout le reste."
+            f"val_fraction={fraction}: the final model needs a non-empty val share to "
+            "choose its checkpoint, and a non-empty rest."
         )
 
     images = _image_level(annotations, str(cfg.cv.group_by))
@@ -264,14 +263,14 @@ def build_full_split(annotations: pd.DataFrame, cfg: Any, val_fraction: float | 
             .to_dict(orient="records")
         ),
     }
-    log.info("Decoupage final '%s' : %d images (train %d, val %d), aucun test.",
+    log.info("Final split '%s': %d images (train %d, val %d), no test.",
              identifier, len(table), int(counts.get("train", 0)), int(counts.get("val", 0)))
     return table, meta
 
 
 @dataclass(frozen=True)
 class FoldAssignment:
-    """Identifiants d'images d'un fold, par role."""
+    """Image identifiers of a fold, per role."""
 
     split_id: str
     fold: int
@@ -280,23 +279,23 @@ class FoldAssignment:
     test: tuple[str, ...]
 
     def check_disjoint(self) -> None:
-        """Verifie qu'aucune image n'apparait dans deux roles (invariant teste)."""
+        """Check that no image appears in two roles (tested invariant)."""
         s = [set(self.train), set(self.val), set(self.test)]
         for i, j in ((0, 1), (0, 2), (1, 2)):
             overlap = s[i] & s[j]
             if overlap:
                 raise ContractError(
-                    f"Fuite detectee dans {self.split_id} fold {self.fold} : "
-                    f"{len(overlap)} images partagees (ex. {sorted(overlap)[:2]})."
+                    f"Leakage detected in {self.split_id} fold {self.fold}: "
+                    f"{len(overlap)} shared images (e.g. {sorted(overlap)[:2]})."
                 )
 
 
 def fold_assignment(table: pd.DataFrame, fold: int) -> FoldAssignment:
-    """Extrait les listes d'images d'un fold et verifie leur disjonction."""
+    """Extract the image lists of a fold and check that they are disjoint."""
     sub = table[table["fold"] == fold]
     if sub.empty:
         known = sorted(table["fold"].unique())
-        raise ContractError(f"Fold {fold} absent du decoupage (folds disponibles : {known}).")
+        raise ContractError(f"Fold {fold} missing from the split (available folds: {known}).")
     assignment = FoldAssignment(
         split_id=str(sub["split_id"].iloc[0]),
         fold=fold,

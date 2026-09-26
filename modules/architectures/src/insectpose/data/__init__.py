@@ -1,1 +1,1 @@
-"""Donnees : adaptateurs, format canonique, schemas de keypoints, splits, batches."""
+"""Data: adapters, canonical format, keypoint schemas, splits, batches."""

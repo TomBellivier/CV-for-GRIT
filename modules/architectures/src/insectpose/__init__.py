@@ -1,6 +1,6 @@
-"""insectpose - socle experimental d'estimation de pose sur 4 datasets d'insectes.
+"""insectpose - experimental framework for pose estimation on 4 insect datasets.
 
-Toute la doctrine du projet est dans CONVENTIONS.md a la racine du depot.
+The whole doctrine of the project is in CONVENTIONS.md at the root of the module.
 """
 
 __version__ = "0.1.0"

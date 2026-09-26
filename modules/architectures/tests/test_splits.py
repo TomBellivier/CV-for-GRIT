@@ -1,4 +1,4 @@
-"""Tests des folds : anti-fuite, reproductibilite, invalidation (§3.3, §6.1)."""
+"""Tests of the folds: anti-leakage, reproducibility, invalidation (§3.3, §6.1)."""
 
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ def test_modified_annotations_invalidate_splits(cfg, project) -> None:
     table, meta = build_splits(ann, cfg)
     write_splits(table, meta, project)
     tampered = ann.iloc[:-1]
-    with pytest.raises(ContractError, match="annotations differentes"):
+    with pytest.raises(ContractError, match="different annotations"):
         load_splits(meta["split_id"], project, tampered)
 
 

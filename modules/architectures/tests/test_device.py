@@ -1,7 +1,7 @@
-"""Tests de la resolution du peripherique de calcul (ADR-0019).
+"""Tests of the compute device resolution (ADR-0019).
 
-Le materiel fait partie des conditions d'une comparaison : il doit etre resolu
-explicitement, journalise, et enregistre dans le manifeste.
+The hardware is part of the conditions of a comparison: it must be resolved explicitly,
+logged, and recorded in the manifest.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ def test_auto_resolves_to_gpu_or_cpu() -> None:
 
 
 def test_explicit_device_is_respected() -> None:
-    """Demander 'cpu' sur une machine a GPU est un choix legitime, pas une erreur."""
+    """Asking for 'cpu' on a GPU machine is a legitimate choice, not an error."""
     assert resolve_device("cpu") == "cpu"
     assert resolve_device("0,1") == "0,1"
     assert resolve_device(0) == "0"
@@ -40,13 +40,13 @@ def test_device_info_is_serialisable(cfg) -> None:
 
     info = device_info(cfg.train.device)
     assert {"requested", "resolved", "cuda_available"} <= set(info)
-    json.dumps(info)   # doit pouvoir entrer tel quel dans le manifeste
+    json.dumps(info)   # must be able to go as is into the manifest
 
 
 def test_amp_is_disabled_in_debug_mode() -> None:
-    """En mode debug, la reproductibilite prime sur la vitesse (§6.4)."""
+    """In debug mode, reproducibility takes precedence over speed (§6.4)."""
     assert not amp_enabled(True, "debug", "0")
-    assert not amp_enabled(True, "full", "cpu")   # sans effet hors CUDA
+    assert not amp_enabled(True, "full", "cpu")   # no effect outside CUDA
     assert not amp_enabled(False, "full", "0")
     assert amp_enabled(True, "full", "0")
 

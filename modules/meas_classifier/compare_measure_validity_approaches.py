@@ -1,22 +1,20 @@
-"""Comparaison des approches de classification de validite de mesure (recherche).
+"""Comparison of the measurement-validity classification approaches (research).
 
-Conversion 1:1 de ``measure_validity_classifiers.ipynb`` : pour chaque mesure
-(27), compare 8 approches (seuils sur la confiance, XGBoost et Random Forest
-sur 3 jeux de features -- direct / related / all) et produit les figures et
-tableaux de comparaison (classement MCC, heatmap, importance des variables,
-etc).
+1:1 conversion of ``measure_validity_classifiers.ipynb``: for each measurement (27),
+compares 8 approaches (thresholds on the confidence, XGBoost and Random Forest on 3
+feature sets -- direct / related / all) and produces the comparison figures and tables
+(MCC ranking, heatmap, feature importance, etc).
 
-**Recherche uniquement : ne sauvegarde aucun modele de production.** Les
-modeles utilises par ``pipeline/`` sont entraines par
-``train_measure_validity.py`` (une seule approche, "rf_related"), qui est le
-script a lancer pour (re)produire les ``.joblib`` consommes par
-``pipeline/processing/measurement_classifier.py``. Desactive par defaut : ce
-script n'est pas appele par un README ou une CLI de production, il se lance a
-la main quand on veut reevaluer si "rf_related" reste le meilleur choix.
+**Research only: saves no production model.** The models used by ``pipeline/`` are
+trained by ``train_measure_validity.py`` (a single approach, "rf_related"), which is the
+script to run to (re)produce the ``.joblib`` files consumed by
+``pipeline/processing/measurement_classifier.py``. Disabled by default: this script is
+not called by a README or a production CLI, it is run by hand when one wants to
+re-assess whether "rf_related" is still the best choice.
 
-Toutes les sorties vont dans ``results/meas_classifier/comparison/`` a la racine
-du depot (pas dans ``retained_models/``, qui porte les seuils lus par
-``pipeline/``), pour ne jamais ecraser les seuils de production.
+Every output goes to ``results/meas_classifier/comparison/`` at the repository root
+(not to ``retained_models/``, which carries the thresholds read by ``pipeline/``), so
+as never to overwrite the production thresholds.
 
 Usage
 -----
@@ -24,9 +22,9 @@ Usage
 
     python compare_measure_validity_approaches.py
 
-Ne duplique pas ``dataset.py`` / ``insect_anatomy.py`` (import direct) ni
-``evaluation.py`` / ``features.py``, qui appartiennent a l'ancien script de
-comparaison ``conf_classifier.py`` et ne sont pas utilises ici.
+Does not duplicate ``dataset.py`` / ``insect_anatomy.py`` (direct import) nor
+``evaluation.py`` / ``features.py``, which belong to the old comparison script
+``conf_classifier.py`` and are not used here.
 """
 
 from __future__ import annotations
@@ -39,7 +37,7 @@ import matplotlib
 import numpy as np
 import pandas as pd
 
-matplotlib.use("Agg")  # pas de fenetre : on ecrit des PNG
+matplotlib.use("Agg")  # no window: PNG files are written
 import matplotlib.pyplot as plt
 
 from insect_anatomy import INSECT_GROUPS, MEASUREMENTS, POINTS
@@ -63,46 +61,46 @@ from measure_validity_lib import (
 
 warnings.filterwarnings("ignore")
 
-APPROACHES = ALL_APPROACHES                # les 8 approches comparees
+APPROACHES = ALL_APPROACHES                # the 8 compared approaches
 NAMES = names_of(APPROACHES)
 
-# --- chemins ----------------------------------------------------------------
+# --- paths -------------------------------------------------------------------
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[1]
-# Meme entree unique que l'entrainement de production : la table d'annotation du
-# depot (annotation_tools/build_annotation_data.py).
+# Same single input as the production training: the annotation table of the
+# repository (annotation_tools/build_annotation_data.py).
 ANNOTATION_DATA = REPO_ROOT / "annotation_data" / "annotation_data.csv"
-# Dans results/ commun du depot, a cote (jamais a la place) des sorties de production.
+# In the shared results/ of the repository, next to (never instead of) the production outputs.
 OUT_DIR = REPO_ROOT / "results" / "meas_classifier" / "comparison"
 
-# --- protocole ---------------------------------------------------------------
+# --- protocol ----------------------------------------------------------------
 N_FOLDS = 5
 RANDOM_STATE = 0
-MIN_MINORITY = 20   # garde-fou : mesure ignoree en dessous de ce nombre
-NA_FILL = -1.0       # sentinelle d'imputation pour la random forest
+MIN_MINORITY = 20   # safeguard: measurement skipped below this number
+NA_FILL = -1.0       # imputation sentinel for the random forest
 
 
 def main() -> None:
     for sub in ("pr_curves", "confusion", "importance"):
         (OUT_DIR / sub).mkdir(parents=True, exist_ok=True)
 
-    # --- Chargement des donnees -----------------------------------------------
+    # --- Data loading --------------------------------------------------------
     if not ANNOTATION_DATA.is_file():
         raise SystemExit(
-            f"Table d'annotation absente : {ANNOTATION_DATA}\n"
-            "La construire avec : python annotation_tools/build_annotation_data.py"
+            f"Annotation table missing: {ANNOTATION_DATA}\n"
+            "Build it with: python annotation_tools/build_annotation_data.py"
         )
     frame, columns = load_annotation_data(ANNOTATION_DATA)
     group_cols = [f"{g}_one_hot" for g in INSECT_GROUPS]
     print(f"{len(frame)} images | {columns.summary()}")
 
-    # Prevalence par mesure : sert au garde-fou et a la lecture des accuracies.
+    # Prevalence per measurement: used by the safeguard and to read the accuracies.
     prevalence = []
     for measure in MEASUREMENTS:
         status = f"{measure}{STATUS_SUFFIX}"
         if status not in frame.columns:
             continue
-        y = 1 - frame[status].astype(int).to_numpy()   # 1 = non mesurable
+        y = 1 - frame[status].astype(int).to_numpy()   # 1 = non measurable
         prevalence.append({
             "measure": measure,
             "n": len(y),
@@ -115,16 +113,16 @@ def main() -> None:
 
     kept = prevalence.loc[prevalence["kept"], "measure"].tolist()
     skipped = prevalence.loc[~prevalence["kept"], "measure"].tolist()
-    print(f"{len(kept)} mesures retenues, {len(skipped)} ignorees (< {MIN_MINORITY} exemples minoritaires)")
-    print("ignorees :", skipped)
+    print(f"{len(kept)} measurements kept, {len(skipped)} skipped (< {MIN_MINORITY} minority examples)")
+    print("skipped:", skipped)
 
-    # Memes features que la production : geometrie des keypoints ramenee dans leur
-    # boite. Les approches "regle" gardent les confiances, un seuil n'ayant de sens
-    # que sur un score (voir measure_validity_lib.make_feature_sets).
+    # Same features as production: keypoint geometry brought back into its box. The
+    # "rule" approaches keep the confidences, a threshold only making sense on a score
+    # (see measure_validity_lib.make_feature_sets).
     coords = add_relative_coordinates(frame, columns)
     all_coords = make_coord_columns(coords, POINTS)
 
-    # --- Boucle principale (pas de sauvegarde de modele : models_dir=None) ----
+    # --- Main loop (no model saving: models_dir=None) -------------------------
     rows, oof = [], {}
     for i, measure in enumerate(kept, start=1):
         print(f"[{i:2d}/{len(kept)}] {measure}", flush=True)
@@ -141,9 +139,9 @@ def main() -> None:
 
     metrics = pd.DataFrame(rows)
     metrics.to_csv(OUT_DIR / "metrics.csv", index=False)
-    print(f"\n{len(metrics)} lignes ecrites dans {OUT_DIR / 'metrics.csv'}")
+    print(f"\n{len(metrics)} rows written to {OUT_DIR / 'metrics.csv'}")
 
-    # --- Comparaison des approches -----------------------------------------
+    # --- Approach comparison ----------------------------------------------
     mcc = metrics.pivot(index="measure", columns="model", values="mcc")[NAMES]
     ranks = mcc.rank(axis=1, ascending=False)
 
@@ -159,7 +157,7 @@ def main() -> None:
     }).sort_values("mean_rank")
     ranking.to_csv(OUT_DIR / "ranking.csv")
 
-    # Heatmap mesure x approche (MCC)
+    # Measurement x approach heatmap (MCC)
     fig, ax = plt.subplots(figsize=(9, 0.42 * len(mcc) + 2.5))
     image = ax.imshow(mcc.to_numpy(), cmap="viridis", vmin=0, vmax=1, aspect="auto")
     ax.set_xticks(range(len(NAMES)))
@@ -172,12 +170,12 @@ def main() -> None:
             ax.text(j, i, f"{value:.2f}", ha="center", va="center", fontsize=6.5,
                     color="white" if value < 0.6 else "black")
     fig.colorbar(image, ax=ax, label="MCC")
-    ax.set_title("MCC out-of-fold par mesure et par approche")
+    ax.set_title("Out-of-fold MCC per measure and per approach")
     fig.tight_layout()
     fig.savefig(OUT_DIR / "heatmap_mcc.png", dpi=140)
     plt.close(fig)
 
-    # Barplot du rang moyen
+    # Mean rank barplot
     fig, ax = plt.subplots(figsize=(8, 4.5))
     ax.barh(ranking.index[::-1], ranking["mean_rank"][::-1], color="steelblue")
     for name, value in zip(ranking.index[::-1], ranking["mean_rank"][::-1]):
@@ -187,9 +185,9 @@ def main() -> None:
     fig.tight_layout()
     fig.savefig(OUT_DIR / "ranking.png", dpi=140)
     plt.close(fig)
-    print("Figures ecrites :", len(list(OUT_DIR.rglob("*.png"))))
+    print("Figures written:", len(list(OUT_DIR.rglob("*.png"))))
 
-    # --- Tableau recapitulatif : MCC, precision, rappel (classe "non mesurable")
+    # --- Summary table: MCC, precision, recall ("non measurable" class)
     summary = (
         metrics
         .rename(columns={
@@ -203,16 +201,16 @@ def main() -> None:
         .round(3)
     )
     summary.columns = [f"{metric}_{stat}" for metric, stat in summary.columns]
-    summary.insert(0, "n_mesures", metrics.groupby("model")["measure"].nunique().reindex(summary.index))
+    summary.insert(0, "n_measures", metrics.groupby("model")["measure"].nunique().reindex(summary.index))
     summary.to_csv(OUT_DIR / "summary_mcc_precision_recall.csv")
 
-    # --- Consequence pratique : mesures exploitables par image -----------------
-    baseline = "seuil_conf_min"          # "avant" : seuil sur la confiance minimale
+    # --- Practical consequence: usable measurements per image -----------------
+    baseline = "rule_conf_min"           # "before": threshold on the minimum confidence
     best = ranking.index[1] if len(ranking.index) > 1 else ranking.index[0]
-    print(f"avant = {baseline} | apres = {best}")
+    print(f"before = {baseline} | after = {best}")
 
-    y_true = np.column_stack([oof[m]["y"] for m in kept])        # 1 = non mesurable
-    valid = y_true == 0                                          # mesure reellement exploitable
+    y_true = np.column_stack([oof[m]["y"] for m in kept])        # 1 = non measurable
+    valid = y_true == 0                                          # measurement actually usable
 
     practical_rows, per_image = [], {
         "image_name": frame["image_name"], "group": frame["group"].astype(str),
@@ -221,30 +219,30 @@ def main() -> None:
     def summarise(label, rejected):
         keep = ~rejected
         keep_valid = keep & valid
-        per_image[f"n_conservees_{label}"] = keep.sum(axis=1)
-        per_image[f"n_valides_conservees_{label}"] = keep_valid.sum(axis=1)
+        per_image[f"n_kept_{label}"] = keep.sum(axis=1)
+        per_image[f"n_valid_kept_{label}"] = keep_valid.sum(axis=1)
         practical_rows.append({
-            "filtrage": label,
-            "mesures_conservees_par_image": keep.sum(axis=1).mean(),
-            "dont_reellement_valides": keep_valid.sum(axis=1).mean(),
-            "valides_perdues_par_image": (valid & rejected).sum(axis=1).mean(),
-            "retention_des_valides": keep_valid.sum() / valid.sum(),
-            "contamination_des_conservees": (keep & ~valid).sum() / max(keep.sum(), 1),
+            "filtering": label,
+            "kept_measures_per_image": keep.sum(axis=1).mean(),
+            "of_which_actually_valid": keep_valid.sum(axis=1).mean(),
+            "valid_lost_per_image": (valid & rejected).sum(axis=1).mean(),
+            "valid_retention": keep_valid.sum() / valid.sum(),
+            "kept_contamination": (keep & ~valid).sum() / max(keep.sum(), 1),
         })
 
-    summarise("sans_filtrage", np.zeros_like(y_true, dtype=bool))
+    summarise("no_filtering", np.zeros_like(y_true, dtype=bool))
     for name in (baseline, best):
         if name not in NAMES:
             continue
         predicted = np.column_stack([oof[m][name] for m in kept])
         summarise(name, predicted == 1)
 
-    practical = pd.DataFrame(practical_rows).set_index("filtrage").round(3)
-    practical.to_csv(OUT_DIR / "impact_filtrage.csv")
-    pd.DataFrame(per_image).to_csv(OUT_DIR / "mesures_par_image.csv", index=False)
-    print(f"\n{len(kept)} mesures evaluees, {valid.mean():.1%} reellement exploitables\n")
+    practical = pd.DataFrame(practical_rows).set_index("filtering").round(3)
+    practical.to_csv(OUT_DIR / "filtering_impact.csv")
+    pd.DataFrame(per_image).to_csv(OUT_DIR / "measures_per_image.csv", index=False)
+    print(f"\n{len(kept)} measurements evaluated, {valid.mean():.1%} actually usable\n")
 
-    # --- Nombre de variables d'entree par approche ------------------------------
+    # --- Number of input variables per approach ---------------------------------
     counts = []
     for measure in kept:
         sets = make_feature_sets(columns, coords, all_coords, measure)
@@ -266,8 +264,8 @@ def main() -> None:
     n_features = n_features.sort_values("mean_n_features")
     n_features.to_csv(OUT_DIR / "n_features.csv")
 
-    # --- Figures complementaires --------------------------------------------
-    # Repartition des labels par mesure (barres empilees)
+    # --- Additional figures -------------------------------------------------
+    # Label distribution per measurement (stacked bars)
     order = prevalence.sort_values("prevalence_unmeasurable")
     n_ok = (order["n"] - order["n_unmeasurable"]).to_numpy()
     n_ko = order["n_unmeasurable"].to_numpy()
@@ -283,11 +281,11 @@ def main() -> None:
     ax.tick_params(labelsize=8)
     ax.legend(loc="lower right")
     fig.tight_layout()
-    fig.savefig(OUT_DIR / "labels_par_mesure.png", dpi=140)
+    fig.savefig(OUT_DIR / "labels_per_measure.png", dpi=140)
     plt.close(fig)
-    print("ecrit :", OUT_DIR / "labels_par_mesure.png")
+    print("written:", OUT_DIR / "labels_per_measure.png")
 
-    # MCC par mesure : xgb_related vs rf_related
+    # MCC per measurement: xgb_related vs rf_related
     pair = [n for n in ("xgb_related", "rf_related") if n in NAMES]
     if len(pair) == 2:
         pair_mcc = mcc[pair].sort_values(pair[0])
@@ -304,23 +302,23 @@ def main() -> None:
         ax.set_xlim(min(0.0, float(pair_mcc.min().min()) - 0.05), 1.0)
         ax.axvline(0, color="black", lw=0.8)
         ax.set_xlabel("MCC (out-of-fold)")
-        ax.set_title("MCC per measure : models trained on all keypoints and measures")
+        ax.set_title("MCC per measure: models trained on all keypoints and measures")
         ax.legend(loc="lower right")
         fig.tight_layout()
         fig.savefig(OUT_DIR / "mcc_xgb_related_vs_rf_related.png", dpi=140)
         plt.close(fig)
-        print("ecrit :", OUT_DIR / "mcc_xgb_related_vs_rf_related.png")
+        print("written:", OUT_DIR / "mcc_xgb_related_vs_rf_related.png")
 
-    # --- Importance des variables ------------------------------------------------
-    # Le modele le mieux classe (hors regles de seuil, qui n'ont pas de
-    # variables) est reentraine sur l'integralite des donnees, mesure par
-    # mesure. Ces importances sont descriptives : elles servent a voir quels
-    # keypoints portent le signal, pas a mesurer une performance.
+    # --- Feature importance ------------------------------------------------------
+    # The best-ranked model (excluding the threshold rules, which have no variables)
+    # is retrained on the whole data, measurement by measurement. These importances
+    # are descriptive: they show which keypoints carry the signal, they do not measure
+    # a performance.
     model_approaches = {a[0]: (a[2], a[3]) for a in APPROACHES if a[1] == "model"}
     best_model = next((name for name in ranking.index if name in model_approaches), None)
     if best_model is not None:
         which, factory = model_approaches[best_model]
-        print(f"Meilleur modele : {best_model} (features : {which})")
+        print(f"Best model: {best_model} (features: {which})")
 
         def pretty(column: str) -> str:
             """'head-top kp_x_rel' -> 'head-top x', 'coleoptera_one_hot' -> 'coleoptera'."""
@@ -350,7 +348,7 @@ def main() -> None:
             fig, ax = plt.subplots(figsize=(6.5, 0.32 * len(top) + 1.6))
             ax.barh(top.index, top.to_numpy(), color="steelblue")
             ax.set_xlabel("importance")
-            ax.set_title(f"{best_model} : {measure}", fontsize=10)
+            ax.set_title(f"{best_model}: {measure}", fontsize=10)
             ax.tick_params(labelsize=8)
             fig.tight_layout()
             fig.savefig(OUT_DIR / "importance" / f"{slug(measure)}.png", dpi=140)
@@ -358,9 +356,9 @@ def main() -> None:
 
         importance = pd.concat(series, axis=1).T
         importance.to_csv(OUT_DIR / "feature_importance.csv")
-        print(f"{len(importance)} mesures, {importance.shape[1]} variables")
+        print(f"{len(importance)} measurements, {importance.shape[1]} variables")
 
-        # Importance moyenne sur l'ensemble des mesures
+        # Mean importance over all the measurements
         mean_importance = importance.mean().sort_values().tail(20)
         coverage = importance.notna().sum()
 
@@ -370,15 +368,15 @@ def main() -> None:
             ax.text(mean_importance[name], i, f"  {coverage[name]}/{len(importance)}",
                     va="center", fontsize=7, color="grey")
         ax.set_xlim(0, float(mean_importance.max()) * 1.12)
-        ax.set_xlabel("mean importance (grey number : number of measure where variable exists)")
+        ax.set_xlabel("mean importance (grey number: number of measures where the variable exists)")
         ax.set_title(f"Most used variables ({best_model})")
         ax.tick_params(labelsize=8)
         fig.tight_layout()
-        fig.savefig(OUT_DIR / "importance_moyenne.png", dpi=140)
+        fig.savefig(OUT_DIR / "mean_importance.png", dpi=140)
         plt.close(fig)
-        print("ecrit :", OUT_DIR / "importance_moyenne.png")
+        print("written:", OUT_DIR / "mean_importance.png")
 
-    # --- Mesures dont le label est quasi determine par le groupe taxonomique ---
+    # --- Measurements whose label is almost determined by the taxonomic group ---
     suspects = []
     for measure in kept:
         y = pd.Series(make_target(frame, STATUS_SUFFIX, measure))
@@ -389,7 +387,7 @@ def main() -> None:
     suspects = pd.DataFrame(suspects)
     if not suspects.empty:
         suspects.to_csv(OUT_DIR / "group_determined_measures.csv", index=False)
-        print("Taux de non-mesurable par groupe (mesures triviales) :")
+        print("Non-measurable rate per group (trivial measurements):")
         print(suspects)
 
 

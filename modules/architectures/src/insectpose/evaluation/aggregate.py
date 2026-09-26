@@ -1,7 +1,7 @@
-"""Agregation de tous les runs (CONVENTIONS.md §8.3).
+"""Aggregation of every run (CONVENTIONS.md §8.4).
 
-Unique chemin vers un tableau de resultats. Un run sans manifeste est ignore :
-il n'est pas reproductible, donc pas citable.
+The only path to a results table. A run without a manifest is ignored: it cannot be
+reproduced, hence cannot be quoted.
 """
 
 from __future__ import annotations
@@ -20,13 +20,13 @@ _MANIFEST_FIELDS = (
     "approach", "data_scope", "split_id", "tag", "mode", "seed", "content_hash",
     "variant_hash",
     "eval_version", "primary_metric", "duration_s",
-    # Couts au niveau run : une approche les renseigne via ctx.extra (§7.2).
+    # Run-level costs: an approach fills them through ctx.extra (§7.2).
     "model_params", "train_time_s", "peak_vram_mb", "n_qualitative_figures",
 )
 
 
 def collect_runs(paths: ProjectPaths) -> pd.DataFrame:
-    """Scanne runs/ et assemble metriques + metadonnees de manifeste."""
+    """Scan runs/ and assemble metrics + manifest metadata."""
     frames: list[pd.DataFrame] = []
     skipped: list[str] = []
     for run_dir in sorted(p for p in paths.runs.glob("*") if p.is_dir()):
@@ -41,11 +41,11 @@ def collect_runs(paths: ProjectPaths) -> pd.DataFrame:
         metrics = read_parquet(metrics_path)
         for field in _MANIFEST_FIELDS:
             metrics[field] = manifest.get(field)
-        # Un run d'HPO n'est PAS un resultat : il a servi a choisir des hyperparametres,
-        # sur un decoupage interne. L'agreger avec les runs finaux fausserait le rapport.
+        # An HPO run is NOT a result: it served to choose hyperparameters, on an inner
+        # split. Aggregating it with the final runs would bias the report.
         metrics["role_in_protocol"] = manifest.get("role_in_protocol", "final")
-        # Un decoupage interne s'appelle <split_id>__outer<k> : le `fold` est alors un
-        # fold INTERNE, et l'outer est porte par le nom du decoupage.
+        # An inner split is called <split_id>__outer<k>: the `fold` is then an INNER
+        # fold, and the outer one is carried by the name of the split.
         split_id = str(manifest.get("split_id", ""))
         if "__outer" in split_id:
             metrics["outer_fold"] = int(split_id.rsplit("__outer", 1)[-1])
@@ -63,7 +63,7 @@ def collect_runs(paths: ProjectPaths) -> pd.DataFrame:
         frames.append(metrics)
 
     if skipped:
-        log.warning("%d run(s) ignore(s) (manifeste ou metriques manquants) : %s",
+        log.warning("%d run(s) ignored (missing manifest or metrics): %s",
                     len(skipped), skipped[:5])
     if not frames:
         return pd.DataFrame()
@@ -71,10 +71,10 @@ def collect_runs(paths: ProjectPaths) -> pd.DataFrame:
 
 
 def model_label(frame: pd.DataFrame) -> pd.Series:
-    """Etiquette de modele : approche · tag, complete du hash si deux variantes coexistent.
+    """Model label: approach · tag, completed by the hash if two variants coexist.
 
-    C'est ce qui empeche deux modeles distincts portant le meme tag (deux poids de
-    depart, par exemple) d'etre moyennes ensemble comme s'ils etaient deux folds.
+    It is what keeps two distinct models carrying the same tag (two starting weights,
+    for instance) from being averaged together as if they were two folds.
     """
     approach = frame["approach"].astype(str)
     tag = frame["tag"].astype(str) if "tag" in frame.columns else ""
@@ -87,44 +87,44 @@ def model_label(frame: pd.DataFrame) -> pd.Series:
 
 
 def final_runs(master: pd.DataFrame) -> pd.DataFrame:
-    """Runs citables : hors trials d'HPO (§6.3, §8.3)."""
+    """Quotable runs: excluding the HPO trials (§6.3, §8.4)."""
     if "role_in_protocol" not in master.columns:
         return master
     return master[master["role_in_protocol"].fillna("final") == "final"]
 
 
 def write_master(paths: ProjectPaths) -> Path:
-    """Ecrit results/master.parquet. Effet de bord : ecrit ce fichier."""
+    """Write results/master.parquet. Side effect: writes this file."""
     table = collect_runs(paths)
     if table.empty:
         raise FileNotFoundError(
-            f"Aucun run complet dans {paths.runs}. Lancer au moins un 'train' avant 'report'."
+            f"No complete run in {paths.runs}. Run at least one 'train' before 'report'."
         )
     trials = len(table) - len(final_runs(table))
     if trials:
-        log.info("%d ligne(s) de trials d'HPO conservees dans master.parquet pour audit, "
-                 "mais exclues des tableaux de resultats.", trials)
+        log.info("%d row(s) of HPO trials kept in master.parquet for auditing, "
+                 "but excluded from the results tables.", trials)
     _warn_on_incomparable(final_runs(table))
     return write_parquet(paths.master_results(), table)
 
 
 def _warn_on_incomparable(table: pd.DataFrame) -> None:
-    """Alerte si des runs agreges ne sont pas comparables entre eux (§6.2, §7.2)."""
+    """Warn if aggregated runs are not comparable with each other (§6.2, §7.2)."""
     for column, message in (
-        ("split_id", "folds differents : les approches ne sont pas comparables"),
-        ("content_hash", "annotations differentes entre runs"),
-        ("eval_version", "versions de configuration d'evaluation differentes"),
-        ("device", "materiels differents : les couts (latence, VRAM) ne sont pas comparables"),
-        ("primary_metric", "objectifs d'optimisation differents entre runs"),
+        ("split_id", "different folds: the approaches are not comparable"),
+        ("content_hash", "different annotations between runs"),
+        ("eval_version", "different evaluation configuration versions"),
+        ("device", "different hardware: the costs (latency, VRAM) are not comparable"),
+        ("primary_metric", "different optimisation objectives between runs"),
     ):
         values = table[column].dropna().unique()
         if len(values) > 1:
-            log.warning("Attention - %s (%s : %s).", message, column, list(values)[:4])
+            log.warning("Warning - %s (%s: %s).", message, column, list(values)[:4])
 
 
 def fold_table(master: pd.DataFrame, metric: str, scope: str = "overall",
                split: str = "test", include_trials: bool = False) -> pd.DataFrame:
-    """Tableau approche x fold pour une metrique : base des tests apparies (§8.3)."""
+    """Approach x fold table for a metric: basis of the paired tests (§8.4)."""
     master = master if include_trials else final_runs(master)
     sel = master[
         (master["metric"] == metric) & (master["scope"] == scope) & (master["split"] == split)
@@ -135,10 +135,10 @@ def fold_table(master: pd.DataFrame, metric: str, scope: str = "overall",
 
 def summary_table(master: pd.DataFrame, metric: str, scope: str = "overall",
                   split: str = "test", include_trials: bool = False) -> pd.DataFrame:
-    """Moyenne, ecart-type et n inter-folds par MODELE (§6.2).
+    """Mean, standard deviation and n across folds per MODEL (§6.2).
 
-    Le regroupement se fait par variante, pas par approche : deux modeles differents
-    portant le meme tag ne doivent pas etre moyennes comme s'ils etaient deux folds.
+    The grouping is done by variant, not by approach: two different models carrying the
+    same tag must not be averaged as if they were two folds.
     """
     master = master if include_trials else final_runs(master)
     sel = master[

@@ -1,28 +1,28 @@
 # @package _global_
-# Approche G : reentrainement des tetes seules (ADR-0035).
-# Temoin indispensable de l'approche D : sur YOLO26 les tetes pesent ~2/3 des parametres
-# a l'entrainement, donc "LoRA + tetes" en entraine ~67 % contre ~1,3 % d'adaptateurs.
-# Sans ce temoin, un gain de D serait ininterpretable.
+# Approach G: retraining the heads only (ADR-0035).
+# Essential control of approach D: on YOLO26 the heads weigh ~2/3 of the parameters
+# at training time, so "LoRA + heads" trains ~67 % of them against ~1.3 % of adapters.
+# Without this control, a gain of D could not be interpreted.
 approach:
   name: head_only
   _target_: insectpose.approaches.head_only.HeadOnlyApproach
 
-  weights: yolo26n-pose.pt      # ADR-0033 : meme base que les six autres approches
+  weights: yolo26n-pose.pt      # ADR-0033: same base as the six other approaches
   prunable: false
 
   head:
-    # Nombre de blocs FINAUX laisses entrainables. 1 = la tete seule ; au-dela, on
-    # degele progressivement la fin du cou. Les index sont calcules depuis la structure
-    # du modele, donc changer de taille de reseau ne casse rien.
-    # Pour etre le temoin exact de D avec train_head=true, garder 1.
+    # Number of FINAL blocks left trainable. 1 = the head only; beyond that, the end of
+    # the neck is progressively unfrozen. The indices are computed from the structure
+    # of the model, so changing the network size breaks nothing.
+    # To be the exact control of D with train_head=true, keep 1.
     blocks: 1
 
   # --- inference ---
-  max_det: 1                    # ADR-0017 : une image = un insecte
-  conf: 0.001                   # seuil BAS : ne jamais tronquer les courbes AP (§3.4)
+  max_det: 1                    # ADR-0017: one image = one insect
+  conf: 0.001                   # LOW threshold: never truncate the AP curves (§3.4)
   iou: 0.7
   inference_precision: fp16
-  predict_chunk_size: 16        # ADR-0021 : inference bornee en memoire
+  predict_chunk_size: 16        # ADR-0021: memory-bounded inference
 
   # --- optimisation ---
   optimizer: auto
@@ -33,14 +33,14 @@ approach:
   warmup_epochs: 3.0
   cos_lr: false
 
-  # --- ponderation des pertes ---
+  # --- loss weights ---
   box: 7.5
   pose: 12.0
   kobj: 1.0
   cls: 0.5
   dfl: 1.5
 
-  # --- augmentation : FIXE (ADR-0032), identique aux autres approches ---
+  # --- augmentation: FIXED (ADR-0032), identical to the other approaches ---
   fliplr: 0.5
   flipud: 0.0
   degrees: 10.0
@@ -56,9 +56,9 @@ approach:
   mixup: 0.0
   erasing: 0.0
 
-  # ADR-0031 : QUATRE hyperparametres, budget identique aux autres approches.
-  # Memes cles que le socle A/B/E/F, pour que la comparaison avec D isole bien le
-  # seul effet des adaptateurs et non un ecart de reglage.
+  # ADR-0031: FOUR hyperparameters, budget identical to the other approaches.
+  # Same keys as the A/B/E/F base, so that the comparison with D isolates the effect of
+  # the adapters alone and not a tuning gap.
   search_space:
     lr0: {type: float, low: 1.0e-4, high: 5.0e-2, log: true}
     pose: {type: float, low: 4.0, high: 30.0}

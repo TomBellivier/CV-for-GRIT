@@ -1,6 +1,6 @@
-"""Fixtures partagees : mini-corpus synthetique et projet jetable.
+"""Shared fixtures: synthetic mini-corpus and throwaway project.
 
-Le smoke test tourne de bout en bout sur ces fixtures en quelques secondes (§10.3).
+The smoke test runs end to end on these fixtures in a few seconds (§10.3).
 """
 
 from __future__ import annotations
@@ -15,24 +15,24 @@ from insectpose.data.adapters.synthetic import SyntheticAdapter
 from insectpose.paths import ProjectPaths
 from insectpose.registry import load_all_plugins
 
-# Les plugins sont charges A L'IMPORT : la parametrisation de tests/test_smoke.py et
-# des tests d'approches lit le registre au moment de la COLLECTE pytest, avant toute
-# fixture. Un chargement differe laisserait le registre vide et ferait echouer toutes
-# les fixtures qui en dependent.
+# The plugins are loaded AT IMPORT: the parametrisation of tests/test_smoke.py and of
+# the approach tests reads the registry at pytest COLLECTION time, before any fixture.
+# A deferred loading would leave the registry empty and make every fixture depending
+# on it fail.
 load_all_plugins()
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DATASETS = ["coleoptera", "diptera"]
-SCHEMA = "insect42_v1"   # ADR-0006 : schema commun aux 4 datasets
+SCHEMA = "insect42_v1"   # ADR-0006: schema shared by the 4 datasets
 N_KPTS = 42
-# ADR-0016 : le corpus de test reproduit l'absence de certains points selon l'ordre
-# (ici : pas d'ailes posterieures annotees chez les "diptera" du corpus jouet).
+# ADR-0016: the test corpus reproduces the absence of some points depending on the order
+# (here: no annotated hind wings for the "diptera" of the toy corpus).
 ABSENT_KEYPOINTS = {"coleoptera": [], "diptera": list(range(26, 34))}
 
 
 @pytest.fixture()
 def project(tmp_path: Path) -> ProjectPaths:
-    """Projet jetable : configs reelles copiees, donnees synthetiques."""
+    """Throwaway project: real configs copied, synthetic data."""
     shutil.copytree(REPO_ROOT / "configs", tmp_path / "configs")
     paths = ProjectPaths.default(tmp_path)
     paths.ensure_writable_dirs()
@@ -44,7 +44,7 @@ def project(tmp_path: Path) -> ProjectPaths:
                 "n_images": 24, "n_keypoints": N_KPTS, "n_groups": 8, "seed": 7,
                 "keypoint_schema": SCHEMA, "image_size": 192,
                 "absent_keypoints": ABSENT_KEYPOINTS[dataset],
-                # Images reelles : l'export qualitatif (§8.4) fait partie du smoke test.
+                # Real images: the qualitative export (§8.5) is part of the smoke test.
                 "write_images": True, "images_root": str(paths.data),
             },
         )
@@ -54,7 +54,7 @@ def project(tmp_path: Path) -> ProjectPaths:
 
 @pytest.fixture()
 def raw_coco(project: ProjectPaths) -> ProjectPaths:
-    """Ajoute des annotations COCO brutes, pour tester la chaine `prepare` complete."""
+    """Add raw COCO annotations, to test the full `prepare` chain."""
     import json
 
     import numpy as np
@@ -80,19 +80,19 @@ def raw_coco(project: ProjectPaths) -> ProjectPaths:
 
 @pytest.fixture()
 def config_factory(project: ProjectPaths):
-    """Fabrique de configs pointant vers le projet jetable.
+    """Factory of configs pointing to the throwaway project.
 
-    Changer d'approche EXIGE de recomposer le groupe Hydra (`approach=<nom>`) : patcher
-    `approach.name` laisserait les cles de l'approche precedente en place, ce qui est
-    une source d'erreurs silencieuses.
+    Changing approach REQUIRES recomposing the Hydra group (`approach=<name>`): patching
+    `approach.name` would leave the keys of the previous approach in place, which is a
+    source of silent errors.
     """
     from insectpose.cli import load_config
 
     def build(extra: list[str] | None = None) -> DictConfig:
         overrides = [
             f"paths.root={project.root}",
-            # Les analyses vont par defaut dans <depot>/results/pose (paths.yaml),
-            # hors de la racine du module : les garder dans le projet jetable.
+            # The analyses go by default to <repo>/results/pose (paths.yaml), outside
+            # the module root: keep them in the throwaway project.
             f"paths.results={project.results}",
             f"paths.reports={project.reports}",
             "data=pooled",
@@ -113,5 +113,5 @@ def config_factory(project: ProjectPaths):
 
 @pytest.fixture()
 def cfg(config_factory) -> DictConfig:
-    """Config par defaut (approche de reference)."""
+    """Default config (reference approach)."""
     return config_factory()

@@ -90,6 +90,20 @@ def _restore_drive_letter(path: str) -> str:
     return path
 
 
+def image_name_of(data_img: str) -> str:
+    """File name of the data.img field of a task, Label Studio upload hash removed.
+
+    Reads nothing from the disk: this is the name every other annotation file uses
+    (annotation_tools/check_annotations.py relies on it).
+    """
+    if data_img.startswith(_LOCAL_FILES_PREFIX):
+        path = unquote(data_img[len(_LOCAL_FILES_PREFIX):])
+    else:
+        path = data_img.replace("%5C", "/")
+    name = path.replace("\\", "/").rsplit("/", 1)[-1]
+    return _HASH_PREFIX_RE.sub("", name)
+
+
 def decode_image(data_img: str):
     """Return (image_name, image_path) for the data.img field of a task.
 
@@ -100,12 +114,8 @@ def decode_image(data_img: str):
     """
     if data_img.startswith(_LOCAL_FILES_PREFIX):
         path = unquote(data_img[len(_LOCAL_FILES_PREFIX):]).replace("\\", "/")
-        path = _restore_drive_letter(path)
-        name = path.rsplit("/", 1)[-1]
-        return _HASH_PREFIX_RE.sub("", name), path
-
-    name = data_img.replace("%5C", "/").replace("\\", "/").rsplit("/", 1)[-1]
-    return _HASH_PREFIX_RE.sub("", name), data_img
+        return image_name_of(data_img), _restore_drive_letter(path)
+    return image_name_of(data_img), data_img
 
 
 def parse_annotation(results: list) -> dict:

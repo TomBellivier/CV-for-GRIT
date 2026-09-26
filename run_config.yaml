@@ -1,0 +1,110 @@
+# =============================================================================
+# run_config.yaml - settings of the end-to-end run
+# =============================================================================
+# Read by run_all.py, which the launchers call:
+#     Windows:  run_windows.bat          Linux:  bash run_linux.sh          macOS:  bash run_macos.sh
+# Launcher options are passed on to run_all.py, e.g.
+#     run_windows.bat --dry-run                  print the commands, run nothing
+#     bash run_linux.sh --only pose analysis     run these steps only
+#     bash run_macos.sh --skip annotations       run every step but this one
+#
+# Steps, in order: annotations -> images -> check -> pose -> classifiers -> pipeline -> analysis
+# Paths are relative to the repository root (absolute paths work too).
+# A missing setting takes its default value (the one written here).
+
+# --- 1. Annotations ------------------------------------------------------------------
+annotations:
+  # Convert the Label Studio exports into the pose CSV, then merge pose + scale +
+  # measurement statuses into the annotation table (step "annotations").
+  rebuild_table: true
+  # Check every annotation file and report the images missing from some of them
+  # (step "check", annotation_tools/check_annotations.py; report in results/annotation_check/).
+  check: true
+  stop_on_errors: true              # stop the run when the check finds an ERROR
+  stop_on_warnings: false           # also stop on a WARNING
+  label_studio_dir: annotation_data/label_studio_annotations   # one sub-folder per insect group
+  pose_csv: annotation_data/pose/pose_annotations.csv
+  scale_csv: annotation_data/scale/scale_annotations.csv
+  measurements_dir: annotation_data/meas_classifier
+  table: annotation_data/annotation_data.csv                   # the merged table every module trains on
+  check_report_dir: results/annotation_check                   # issues.csv and presence.csv of the check
+
+# --- 2. Images ---------------------------------------------------------------------------
+images:
+  # Image database, one sub-folder per insect group (coleoptera, diptera, hymenoptera,
+  # lepidoptera). Also used by the pipeline to find the group of an image.
+  database_dir: all_images/full databases
+  # How the flat folders read by pose training, modules/architectures/data/raw/<group>/images/,
+  # are filled from database_dir (step "images"):
+  #   link  hard links: no extra disk space (a copy when the two folders are on different drives)
+  #   copy  copies
+  #   none  nothing: you fill these folders yourself
+  training_images: link
+
+# --- 3. Pose model training (modules/architectures) ---------------------------------------
+pose_training:
+  enabled: true                     # false: the pipeline uses the models already in retained_models/pose/
+  # train     one training per fold, with the fixed hyperparameters of the experiment
+  # optimise  Optuna hyperparameter search, then one training per fold with the best ones
+  mode: train
+  # Outer folds to train, among the 5 of the protocol (0 to 4): a list such as [0] or
+  # [0, 1, 2], or "all". Every fold trained is one model of the ensemble the pipeline averages.
+  # With mode: optimise, these are the folds retrained after the search.
+  folds: [0]
+  experiment: exp_a_yolo_pooled     # modules/architectures/configs/experiment/; only yolo_pooled models reach the pipeline
+  epochs: 100                       # training epochs of each model
+  device: auto                      # auto | cpu | "0" | "0,1" (several GPUs) | mps (Apple GPU)
+  tag: null                         # label of the runs (null: the experiment's)
+  force: false                      # true: retrain the runs that are already complete
+  optimisation:                     # used with mode: optimise
+    # tune_once  one search, on the inner folds of search_fold, reused for every fold
+    # nested     one search per fold (folds x n_trials x inner_folds trainings: expensive)
+    search: tune_once
+    search_fold: 0
+    n_trials: 20                    # trials of each search
+    inner_folds: 3                  # inner folds each trial is trained on
+    final_full_fit: false           # also train a model on ALL the images, added to the ensemble
+  extra_overrides: []               # any other setting of the module, e.g. ["train.batch_size=8"]
+
+# --- 4. Scale extraction (optional) ---------------------------------------------------------
+scale_extraction:
+  enabled: true                     # false: no scale, hence no millimetre values
+  # auto       scale bar, then ruler when no scale bar is found
+  # scale_bar  scale bar only        ruler  ruler only
+  # auto and scale_bar need the detector at retained_models/scale_bar/best.pt
+  method: auto
+
+# --- 5. Measurement classification (optional) --------------------------------------------------
+measurement_classification:
+  enabled: true                     # false: no measurement-validity columns in the pipeline output
+  train: true                       # (re)train the classifiers before the pipeline (step "classifiers")
+  min_per_class: 20                 # a measurement gets a classifier with at least this many images in each class
+  n_folds: 5                        # folds of the out-of-fold evaluation of the classifiers
+  compare_approaches: false         # also compare the 8 original approaches (research, slow; reads the default table)
+
+# --- 6. Pipeline on new images -------------------------------------------------------------------
+pipeline:
+  enabled: true
+  source: folder                    # folder | hf (Hugging Face dataset; token: environment variable HF_TOKEN)
+  input: images_to_process          # source: folder - searched recursively
+  hf_dataset: TomBellivier/all_images   # source: hf
+  hf_folders: []                    # source: hf - e.g. [1, 2]; [] = every folder
+  output: images_to_process/results.csv
+  models: null                      # null: retained_models/pose/; or another folder / .pt file
+  workers: null                     # null: sized to the machine (GPUs, CPUs, free memory)
+
+# --- 7. Analyses ---------------------------------------------------------------------------------
+analysis:
+  enabled: true
+  pose_report: true                 # tables and figures of every pose run -> results/pose/
+  pose_comparison: true             # heatmaps and cost figures of the pose models -> results/pose/comparison/
+  optuna_plots: true                # diagnostics of the hyperparameter searches -> results/pose/optuna/
+  pipeline_results: true            # figures and summary of the pipeline output -> results/pipeline/
+  review_threshold: 0.5             # confidence below which an image counts as "needs review"
+  ground_truth: true                # measure the real error on the annotated images of the table
+  annotated_copies: false           # also write every image with its keypoints and scale drawn on it
+  ruler_evaluation: false           # evaluate the ruler detector on the database (slow) -> results/ruler_detection/
+
+# --- Run ------------------------------------------------------------------------------------------
+run:
+  log_dir: results/run_logs         # every command and its output, one log per run

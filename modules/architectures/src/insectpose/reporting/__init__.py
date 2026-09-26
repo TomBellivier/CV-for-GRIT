@@ -1,1 +1,1 @@
-"""Production des tableaux et figures du rapport, a partir du seul master.parquet."""
+"""Production of the report tables and figures, from master.parquet only."""

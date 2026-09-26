@@ -1,12 +1,11 @@
-"""Comparaison de tous les modeles entraines (CONVENTIONS.md §8.3).
+"""Comparison of every trained model (CONVENTIONS.md §8.4).
 
-Lit `results/master.parquet`, filtre les runs voulus et produit des heatmaps. Comme
-le reste du reporting, ce module ne recalcule aucune metrique et ignore les trials
-d'HPO : ce sont des essais, pas des resultats.
+Reads `results/master.parquet`, filters the wanted runs and produces heatmaps. Like the
+rest of the reporting, this module recomputes no metric and ignores the HPO trials:
+they are attempts, not results.
 
-Les filtres portent sur des champs de manifeste (approche, etiquette, perimetre de
-donnees, decoupage), jamais sur les valeurs : filtrer sur un resultat pour le mettre
-en valeur serait de la selection a posteriori.
+The filters are on manifest fields (approach, tag, data scope, split), never on the
+values: filtering on a result to highlight it would be a posteriori selection.
 """
 
 from __future__ import annotations
@@ -29,8 +28,8 @@ from insectpose.utils.logging import get_logger  # noqa: E402
 
 log = get_logger("compare")
 
-# Metriques ou une valeur BASSE est meilleure : la palette doit etre inversee,
-# sinon la lecture visuelle du tableau dit l'inverse des chiffres.
+# Metrics where a LOW value is better: the palette must be reversed, otherwise the
+# visual reading of the table says the opposite of the numbers.
 LOWER_IS_BETTER = (
     "nme", "nme_matched_only", "measurement_mape_median", "measurement_mape_worst",
     "symmetry_gap_median", "symmetry_gap_p90", "latency_ms_per_instance",
@@ -40,7 +39,7 @@ LOWER_IS_BETTER = (
 
 @dataclass
 class CompareFilter:
-    """Filtres de selection des runs. Aucun ne porte sur une valeur de metrique."""
+    """Run selection filters. None is on a metric value."""
 
     approaches: tuple[str, ...] = ()
     tags: tuple[str, ...] = ()
@@ -50,14 +49,14 @@ class CompareFilter:
     split: str = "test"
     label_by: tuple[str, ...] = ("approach", "tag")
     metrics: tuple[str, ...] = ()
-    # Motifs de keypoints a exclure des heatmaps par point. Indispensable pour comparer
-    # equitablement une approche entrainee sans certains points (ADR-0027) : ses scopes
-    # `overall` sont mecaniquement moins bons, seuls les points conserves sont comparables.
+    # Keypoint patterns to exclude from the per-point heatmaps. Essential to compare fairly
+    # an approach trained without some points (ADR-0027): its `overall` scopes are
+    # mechanically worse, only the kept points are comparable.
     exclude_keypoints: tuple[str, ...] = ()
     excluded: dict[str, int] = field(default_factory=dict)
 
     def apply(self, master: pd.DataFrame) -> pd.DataFrame:
-        """Applique les filtres et journalise ce qui a ete ecarte."""
+        """Apply the filters and log what was left out."""
         data = final_runs(master)
         self.excluded["hpo_trials"] = int(
             master["run_id"].nunique() - data["run_id"].nunique()
@@ -77,11 +76,11 @@ class CompareFilter:
         return data
 
     def label(self, frame: pd.DataFrame) -> pd.Series:
-        """Etiquette de ligne des heatmaps.
+        """Row label of the heatmaps.
 
-        Si deux VARIANTES distinctes partagent la meme etiquette — deux poids de depart
-        sous le meme tag, par exemple — le hash de variante est ajoute. Sans cela, deux
-        modeles differents seraient moyennes ensemble comme s'ils etaient deux folds.
+        If two distinct VARIANTS share the same label — two starting weights under the
+        same tag, for instance — the variant hash is added. Without it, two different
+        models would be averaged together as if they were two folds.
         """
         columns = [c for c in self.label_by if c in frame.columns]
         if not columns:
@@ -95,36 +94,35 @@ class CompareFilter:
 
 
 def load_master(paths: ProjectPaths) -> pd.DataFrame:
-    """Charge l'agregat. Echoue si `report` n'a jamais tourne."""
+    """Load the aggregate. Fails if `report` never ran."""
     path = paths.master_results()
     if not path.exists():
         raise FileNotFoundError(
-            f"{path} absent. Lancer d'abord : python -m insectpose.cli report"
+            f"{path} missing. Run first: python -m insectpose.cli report"
         )
     return read_parquet(path)
 
 
 def text_color(rgba: tuple[float, ...]) -> str:
-    """Noir ou blanc, selon la luminance REELLE de la case.
+    """Black or white, depending on the ACTUAL luminance of the cell.
 
-    Une palette comme viridis va du violet fonce au jaune vif : un seuil fonde sur la
-    valeur numerique se trompe aux deux extremites. On calcule donc la luminance
-    perceptuelle de la couleur effectivement tracee (coefficients sRGB), apres
-    linearisation gamma.
+    A palette such as viridis goes from dark purple to bright yellow: a threshold based on
+    the numeric value is wrong at both ends. The perceptual luminance of the colour
+    actually drawn (sRGB coefficients) is therefore computed, after gamma linearisation.
     """
     channels = []
     for component in rgba[:3]:
         c = float(component)
         channels.append(c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4)
     luminance = 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
-    # 0.179 est le point ou le contraste WCAG du noir egale celui du blanc :
-    # (L + 0.05)^2 = 0.05 x 1.05. Au-dessus, le noir est plus lisible.
+    # 0.179 is the point where the WCAG contrast of black equals that of white:
+    # (L + 0.05)^2 = 0.05 x 1.05. Above it, black is more readable.
     return "black" if luminance > 0.179 else "white"
 
 
 def _heatmap(matrix: pd.DataFrame, title: str, path: Path, lower_is_better: bool,
              dpi: int = 150, value_format: str = "{:.3f}") -> Path:
-    """Trace une heatmap annotee. Effet de bord : ecrit `path`."""
+    """Draw an annotated heatmap. Side effect: writes `path`."""
     height = 0.5 * len(matrix) + 2.5
     width = 1.1 * len(matrix.columns) + 4
     fig, ax = plt.subplots(figsize=(width, height))
@@ -160,7 +158,7 @@ def _heatmap(matrix: pd.DataFrame, title: str, path: Path, lower_is_better: bool
 
 def heatmap_metric_by_dataset(data: pd.DataFrame, metric: str, selection: CompareFilter,
                               out_dir: Path, dpi: int = 150) -> Path | None:
-    """Heatmap modeles x datasets pour une metrique (moyenne inter-folds)."""
+    """Models x datasets heatmap for a metric (mean across folds)."""
     sub = data[data["metric"] == metric].copy()
     sub = sub[(sub["scope"] == "overall") | sub["scope"].str.startswith("dataset:")]
     if sub.empty:
@@ -179,8 +177,8 @@ def heatmap_metric_by_dataset(data: pd.DataFrame, metric: str, selection: Compar
 def heatmap_keypoint_by_model(data: pd.DataFrame, selection: CompareFilter, out_dir: Path,
                               metric_prefix: str = "pck@", dataset: str | None = None,
                               dpi: int = 150) -> Path | None:
-    """Heatmap keypoints x modeles : montre si une approche gagne partout ou seulement
-    sur les points faciles."""
+    """Keypoints x models heatmap: shows whether an approach wins everywhere or only on
+    the easy points."""
     sub = data[data["scope"].str.startswith("keypoint:")
                & data["metric"].str.startswith(metric_prefix)].copy()
     if sub.empty:
@@ -199,7 +197,7 @@ def heatmap_keypoint_by_model(data: pd.DataFrame, selection: CompareFilter, out_
     sub["label"] = selection.label(sub)
     matrix = sub.pivot_table(index="keypoint", columns="label", values="value", aggfunc="mean")
     if selection.exclude_keypoints:
-        # La moyenne sur les points CONSERVES est le chiffre de comparaison recherche.
+        # The mean over the KEPT points is the comparison number sought.
         matrix.loc["MEAN (retained)"] = matrix.mean(axis=0)
     suffix = f"_{dataset}" if dataset else ""
     title = "PCK by keypoint and model" + (f" - {dataset}" if dataset else "")
@@ -208,12 +206,12 @@ def heatmap_keypoint_by_model(data: pd.DataFrame, selection: CompareFilter, out_
 
 def write_comparison(paths: ProjectPaths, selection: CompareFilter, out_dir: Path | None = None,
                      dpi: int = 150, per_dataset_keypoints: bool = True) -> list[Path]:
-    """Produit toutes les heatmaps de comparaison. Effet de bord : ecrit `out_dir`."""
+    """Produce every comparison heatmap. Side effect: writes `out_dir`."""
     master = load_master(paths)
     data = selection.apply(master)
     if data.empty:
         raise ValueError(
-            "Aucun run ne correspond aux filtres. Runs disponibles : "
+            "No run matches the filters. Available runs: "
             f"{sorted(final_runs(master)['approach'].dropna().unique())}"
         )
     out_dir = out_dir or (paths.results / "comparison")
@@ -236,7 +234,7 @@ def write_comparison(paths: ProjectPaths, selection: CompareFilter, out_dir: Pat
     table = data.pivot_table(index=["approach", "tag", "fold"], columns=["scope", "metric"],
                              values="value", aggfunc="mean")
     table.to_parquet(out_dir / "comparison.parquet")
-    log.info("%d heatmap(s) et 1 table ecrites dans %s | runs compares : %d | ecartes : %s",
+    log.info("%d heatmap(s) and 1 table written to %s | runs compared: %d | left out: %s",
              len(produced), out_dir, data["run_id"].nunique(),
              {k: v for k, v in selection.excluded.items() if v})
     return produced

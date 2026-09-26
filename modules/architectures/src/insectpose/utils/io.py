@@ -1,7 +1,7 @@
-"""Lecture / ecriture des artefacts. Ecritures atomiques, validation optionnelle.
+"""Reading / writing of the artefacts. Atomic writes, optional validation.
 
-Toute ecriture passe ici : cela garantit qu'un fichier partiellement ecrit n'est
-jamais visible et que les contrats sont valides au meme endroit (§10).
+Every write goes through here: it guarantees that a partially written file is never
+visible and that the contracts are validated in a single place (§10).
 """
 
 from __future__ import annotations
@@ -16,19 +16,19 @@ import pandas as pd
 
 
 def write_json(path: Path, payload: dict[str, Any]) -> Path:
-    """Ecrit un JSON de facon atomique. Effet de bord : cree `path` et ses parents."""
+    """Write a JSON file atomically. Side effect: creates `path` and its parents."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2, ensure_ascii=False, default=str)
-    os.replace(tmp, path)  # noqa: PTH105  # remplacement atomique
+    os.replace(tmp, path)  # noqa: PTH105  # atomic replacement
     return path
 
 
 def read_json(path: Path) -> dict[str, Any]:
-    """Lit un JSON. Echoue si absent (jamais de valeur de repli silencieuse)."""
+    """Read a JSON file. Fails if missing (never a silent fallback value)."""
     if not path.exists():
-        raise FileNotFoundError(f"Fichier attendu introuvable : {path}")
+        raise FileNotFoundError(f"Expected file not found: {path}")
     with path.open(encoding="utf-8") as f:
         data: dict[str, Any] = json.load(f)
     return data
@@ -36,9 +36,9 @@ def read_json(path: Path) -> dict[str, Any]:
 
 def write_parquet(path: Path, df: pd.DataFrame, artifact: str | None = None,
                   validate: bool = True) -> Path:
-    """Ecrit un parquet de facon atomique, apres validation du contrat si demande.
+    """Write a parquet file atomically, after validating the contract if asked.
 
-    Effet de bord : cree `path` et ses parents.
+    Side effect: creates `path` and its parents.
     """
     if artifact is not None and validate:
         from insectpose.data.schema import validate_frame
@@ -47,14 +47,14 @@ def write_parquet(path: Path, df: pd.DataFrame, artifact: str | None = None,
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     df.to_parquet(tmp, index=False)
-    os.replace(tmp, path)  # noqa: PTH105  # remplacement atomique
+    os.replace(tmp, path)  # noqa: PTH105  # atomic replacement
     return path
 
 
 def read_parquet(path: Path, artifact: str | None = None, validate: bool = False) -> pd.DataFrame:
-    """Lit un parquet, avec validation de contrat optionnelle."""
+    """Read a parquet file, with an optional contract validation."""
     if not path.exists():
-        raise FileNotFoundError(f"Artefact attendu introuvable : {path}")
+        raise FileNotFoundError(f"Expected artefact not found: {path}")
     df = pd.read_parquet(path)
     if artifact is not None and validate:
         from insectpose.data.schema import validate_frame
@@ -64,7 +64,7 @@ def read_parquet(path: Path, artifact: str | None = None, validate: bool = False
 
 
 def purge_incomplete_runs(runs_dir: Path, dry_run: bool = True) -> list[str]:
-    """Liste (et supprime si dry_run=False) les runs sans manifeste (§8.2)."""
+    """List (and delete if dry_run=False) the runs without a manifest (§8.2)."""
     import shutil
 
     victims: list[str] = []

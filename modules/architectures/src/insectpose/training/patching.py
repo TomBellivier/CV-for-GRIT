@@ -1,37 +1,37 @@
-"""Patch du modele Ultralytics avant entrainement (ADR-0025, ADR-0026, ADR-0028).
+"""Patch of the Ultralytics model before training (ADR-0025, ADR-0026, ADR-0028).
 
-Ultralytics ne prevoit ni adaptateurs LoRA ni normalisation conditionnelle. Les deux
-approches doivent donc modifier le `nn.Module` construit par le trainer. Ce module
-isole tout ce qui depend des internes d'Ultralytics, pour qu'une mise a jour de la
-bibliotheque ne casse qu'un seul endroit.
+Ultralytics foresees neither LoRA adapters nor conditional normalisation. Both
+approaches must therefore modify the `nn.Module` built by the trainer. This module
+isolates everything that depends on the Ultralytics internals, so that an update of the
+library only breaks one place.
 
-Trois internes sont utilises, verifies sur les sources de la version installee :
+Three internals are used, checked on the sources of the installed version:
 
-1. **Les callbacks ne conviennent pas.** `on_pretrain_routine_start` se declenche AVANT
-   la construction du modele ; `on_pretrain_routine_end` APRES la creation de
-   l'optimiseur et de l'EMA. Un patch pose a ces moments serait soit perdu, soit absent
-   de l'optimiseur. On passe donc un trainer personnalise (`train(trainer=...)`), et le
-   patch est applique dans `get_model`, au moment meme de la construction.
+1. **Callbacks do not fit.** `on_pretrain_routine_start` fires BEFORE the model is
+   built; `on_pretrain_routine_end` AFTER the optimiser and the EMA are created. A patch
+   applied at these moments would either be lost or missing from the optimiser. A custom
+   trainer is therefore passed (`train(trainer=...)`), and the patch is applied in
+   `get_model`, at the very moment of the construction.
 
-2. **Ultralytics degele ce que l'on gele.** Sa boucle de `freeze` remet
-   `requires_grad=True` sur tout parametre gele dont le nom ne correspond pas a
-   `args.freeze`, en emettant "setting 'requires_grad=True' for frozen layer '...'".
-   Un simple `requires_grad=False` est donc silencieusement annule.
+2. **Ultralytics unfreezes what we freeze.** Its `freeze` loop sets `requires_grad=True`
+   again on every frozen parameter whose name does not match `args.freeze`, emitting
+   "setting 'requires_grad=True' for frozen layer '...'". A plain
+   `requires_grad=False` is therefore silently undone.
 
-   **L'ordre reel compte** : cette boucle vit dans `_setup_train`, qui appelle ENSUITE
-   `_build_train_pipeline` pour construire l'optimiseur. Reappliquer le gel dans
-   `_build_train_pipeline` — comme le faisait une version anterieure de ce module —
-   arrivait donc AVANT le degel, et etait annule : l'entrainement mettait a jour tout
-   le reseau en se presentant comme du LoRA. Le gel est desormais applique a la SORTIE
-   de `_setup_train`, apres le degel.
+   **The actual order matters**: this loop lives in `_setup_train`, which THEN calls
+   `_build_train_pipeline` to build the optimiser. Re-applying the freeze in
+   `_build_train_pipeline` — as an earlier version of this module did — therefore came
+   BEFORE the unfreeze, and was undone: the training updated the whole network while
+   presenting itself as LoRA. The freeze is now applied at the EXIT of `_setup_train`,
+   after the unfreeze.
 
-3. **Le pipeline peut etre reconstruit en cours d'entrainement** (changement de taille
-   de lot, reprise), ce qui relancerait la boucle de degel. Le gel est donc reapplique
-   a chaque epoque via `_model_train`.
+3. **The pipeline can be rebuilt during training** (batch size change, resume), which
+   would run the unfreeze loop again. The freeze is therefore re-applied at every epoch
+   through `_model_train`.
 
-Le compte de parametres entrainables est journalise et enregistre au manifeste : c'est
-le seul signal fiable qu'un patch a pris. Un ratio proche de 1 sur une approche LoRA
-signale immediatement que le gel n'a pas fonctionne.
+The count of trainable parameters is logged and recorded in the manifest: it is the only
+reliable signal that a patch took. A ratio close to 1 on a LoRA approach immediately
+signals that the freeze did not work.
 """
 
 from __future__ import annotations
@@ -47,12 +47,12 @@ log = get_logger("patching")
 PatchFn = Callable[[Any], None]
 
 
-# --- selection de modules : pur, testable sans torch -------------------------
+# --- module selection: pure, testable without torch ----------------------------
 def match_module_names(names: Iterable[str], patterns: Iterable[str]) -> list[str]:
-    """Noms de modules correspondant a au moins une expression reguliere.
+    """Module names matching at least one regular expression.
 
-    Fonction pure : c'est elle qui decide OU vont les adaptateurs, et c'est donc elle
-    qu'il faut tester. Le reste du patch n'est que de la plomberie torch.
+    Pure function: it is what decides WHERE the adapters go, and so it is what must be
+    tested. The rest of the patch is only torch plumbing.
     """
     compiled = [re.compile(p) for p in patterns]
     return [name for name in names if any(c.search(name) for c in compiled)]
@@ -60,13 +60,12 @@ def match_module_names(names: Iterable[str], patterns: Iterable[str]) -> list[st
 
 def match_conv_targets(convolutions: Iterable[tuple[str, int]],
                        patterns: Iterable[str]) -> tuple[list[str], list[str]]:
-    """Convolutions adaptables par LoRA parmi celles correspondant aux motifs.
+    """Convolutions that LoRA can adapt among those matching the patterns.
 
-    Retourne (retenues, ecartees). Une convolution GROUPEE (depthwise, `groups > 1`)
-    est ecartee : peft exige alors un rang divisible par `groups`, ce qui imposerait un
-    rang de plusieurs dizaines pour un gain nul — une depthwise ne porte qu'une poignee
-    de parametres. Les architectures YOLO en contiennent dans le cou, d'ou la necessite
-    de ce filtre.
+    Returns (kept, skipped). A GROUPED convolution (depthwise, `groups > 1`) is skipped:
+    peft then requires a rank divisible by `groups`, which would impose a rank of several
+    dozens for no gain — a depthwise convolution carries only a handful of parameters.
+    The YOLO architectures have some in the neck, hence the need for this filter.
     """
     compiled = [re.compile(p) for p in patterns]
     kept: list[str] = []
@@ -79,28 +78,28 @@ def match_conv_targets(convolutions: Iterable[tuple[str, int]],
 
 
 def head_index(names: Iterable[str]) -> int:
-    """Index du dernier bloc de `model.<i>` : la tete de detection/pose.
+    """Index of the last `model.<i>` block: the detection/pose head.
 
-    Convention Ultralytics : le reseau est un `Sequential` dont le dernier element est
-    la tete. Tout ce qui precede est backbone + cou.
+    Ultralytics convention: the network is a `Sequential` whose last element is the
+    head. Everything before it is backbone + neck.
     """
     indices = {int(m.group(1)) for name in names if (m := re.match(r"model\.(\d+)\.", name))}
     if not indices:
-        raise ValueError("Aucun module 'model.<i>.' trouve : structure inattendue.")
+        raise ValueError("No 'model.<i>.' module found: unexpected structure.")
     return max(indices)
 
 
 def freeze_patterns_for(names: Iterable[str], trainable: Iterable[str]) -> list[str]:
-    """Noms de parametres a geler : tous sauf ceux correspondant a `trainable`."""
+    """Names of the parameters to freeze: all but those matching `trainable`."""
     keep = [re.compile(p) for p in trainable]
     return [name for name in names if not any(c.search(name) for c in keep)]
 
 
 def parameter_report(model: Any) -> dict[str, Any]:
-    """Compte des parametres entrainables. A enregistrer dans le manifeste.
+    """Count of the trainable parameters. To be recorded in the manifest.
 
-    Un ratio inattendu est le seul signal fiable qu'un patch n'a pas pris : sans lui,
-    un entrainement "LoRA" ou tout serait entrainable passerait inapercu.
+    An unexpected ratio is the only reliable signal that a patch did not take: without
+    it, a "LoRA" training where everything is trainable would go unnoticed.
     """
     total = trainable = 0
     trainable_names: list[str] = []
@@ -119,22 +118,21 @@ def parameter_report(model: Any) -> dict[str, Any]:
     }
 
 
-# --- integration Ultralytics ------------------------------------------------
+# --- Ultralytics integration --------------------------------------------------
 def pose_trainer_class() -> Any:
-    """Classe de trainer YOLO-pose de la version installee."""
+    """YOLO-pose trainer class of the installed version."""
     from ultralytics.models.yolo.pose import PoseTrainer
 
     return PoseTrainer
 
 
 def disable_fuse(model: Any) -> None:
-    """Neutralise la fusion conv+BN d'Ultralytics sur un modele patche.
+    """Neutralise the Ultralytics conv+BN fusion on a patched model.
 
-    La fusion suppose une BatchNorm classique par convolution. Elle est donc
-    impossible avec une normalisation conditionnelle (elle ecraserait N jeux de
-    statistiques en un seul) et fausse avec des adaptateurs non fusionnes (elle
-    n'utiliserait que les poids de base). Neutralisee, elle coute un peu de vitesse
-    d'inference et ne change aucun resultat.
+    The fusion assumes a classic BatchNorm per convolution. It is therefore impossible
+    with a conditional normalisation (it would crush N sets of statistics into one) and
+    wrong with unmerged adapters (it would only use the base weights). Neutralised, it
+    costs a little inference speed and changes no result.
     """
     import types
 
@@ -147,18 +145,18 @@ def make_patched_trainer(base_cls: Any, patch: PatchFn | None = None,
                          on_batch: Callable[[Any, Any], Any] | None = None,
                          report: dict[str, Any] | None = None,
                          skip_final_eval: bool = False) -> Any:
-    """Trainer derive appliquant un patch au modele, puis un gel apres le degel.
+    """Derived trainer applying a patch to the model, then a freeze after the unfreeze.
 
-    - `patch` s'execute a la construction du modele (`get_model`) ;
-    - `freeze` s'execute a la SORTIE de `_setup_train`, donc apres la boucle de degel
-      d'Ultralytics, puis a chaque epoque via `_model_train` — le pipeline pouvant etre
-      reconstruit en cours de route ;
-    - `on_batch` s'execute a chaque lot pretraite, **cote entrainement ET cote
-      validation** : le validateur possede son propre `preprocess` et ne passe pas par
-      celui du trainer ;
-    - `skip_final_eval` desactive l'evaluation finale, qui recharge le meilleur point de
-      sauvegarde et le FUSIONNE : sur un modele patche, la fusion echoue ou fausse le
-      resultat. Ses metriques ne servent de toute facon qu'au monitoring (§7.1).
+    - `patch` runs when the model is built (`get_model`);
+    - `freeze` runs at the EXIT of `_setup_train`, hence after the Ultralytics unfreeze
+      loop, then at every epoch through `_model_train` — the pipeline can be rebuilt
+      along the way;
+    - `on_batch` runs at every preprocessed batch, **on the training AND on the
+      validation side**: the validator has its own `preprocess` and does not go through
+      the trainer's;
+    - `skip_final_eval` disables the final evaluation, which reloads the best checkpoint
+      and FUSES it: on a patched model, the fusion fails or biases the result. Its
+      metrics are only used for monitoring anyway (§7.1).
     """
 
     class _PatchedTrainer(base_cls):  # type: ignore[misc, valid-type]
@@ -166,36 +164,36 @@ def make_patched_trainer(base_cls: Any, patch: PatchFn | None = None,
             model = super().get_model(cfg=cfg, weights=weights, verbose=verbose)
             if patch is not None:
                 patch(model)
-                log.info("Patch applique au modele a sa construction.")
+                log.info("Patch applied to the model when it was built.")
             return model
 
         def _setup_train(self) -> Any:
             result = super()._setup_train()
-            # La boucle de degel d'Ultralytics vient de s'executer : notre gel doit venir
-            # APRES elle, sinon il est annule sans le moindre effet.
+            # The Ultralytics unfreeze loop has just run: our freeze must come AFTER it,
+            # otherwise it is undone without any effect.
             self._apply_insectpose_freeze()
             return result
 
         def _apply_insectpose_freeze(self) -> None:
-            """Applique le gel et journalise la part reellement entrainable."""
+            """Apply the freeze and log the share that is actually trainable."""
             if freeze is None:
                 return
             freeze(self.model)
             summary = parameter_report(self.model)
-            log.info("Parametres entrainables : %d / %d (%.2f %%)",
+            log.info("Trainable parameters: %d / %d (%.2f %%)",
                      summary["trainable_params"], summary["total_params"],
                      100 * summary["trainable_ratio"])
             if report is not None:
                 report.update(summary)
             if summary["trainable_params"] == 0:
                 raise RuntimeError(
-                    "Aucun parametre entrainable apres patch : verifier les motifs de "
-                    "selection (l'entrainement ne ferait rien)."
+                    "No trainable parameter after the patch: check the selection "
+                    "patterns (the training would do nothing)."
                 )
 
         def _model_train(self) -> Any:
-            # Reapplique a chaque epoque : Ultralytics peut reconstruire le pipeline en
-            # cours d'entrainement, ce qui relancerait la boucle de degel.
+            # Re-applied at every epoch: Ultralytics can rebuild the pipeline during
+            # training, which would run the unfreeze loop again.
             result = super()._model_train()
             if freeze is not None:
                 freeze(self.model)
@@ -211,9 +209,9 @@ def make_patched_trainer(base_cls: Any, patch: PatchFn | None = None,
             validator = super().get_validator()
             if on_batch is None:
                 return validator
-            # Le validateur a son PROPRE preprocess : sans ce relais, le contexte
-            # garderait les indices du dernier lot d'entrainement face a un lot de
-            # validation de taille differente.
+            # The validator has its OWN preprocess: without this relay, the context would
+            # keep the indices of the last training batch while facing a validation
+            # batch of a different size.
             original = validator.preprocess
             trainer = self
 
@@ -227,8 +225,8 @@ def make_patched_trainer(base_cls: Any, patch: PatchFn | None = None,
 
         def final_eval(self) -> Any:
             if skip_final_eval:
-                log.info("Evaluation finale d'Ultralytics ignoree (modele patche) : "
-                         "ses metriques ne servent qu'au monitoring (§7.1).")
+                log.info("Ultralytics final evaluation skipped (patched model): "
+                         "its metrics are only used for monitoring (§7.1).")
                 return None
             return super().final_eval()
 

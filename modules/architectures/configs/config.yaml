@@ -1,4 +1,4 @@
-# Config racine. Toute cle a une valeur par defaut explicite (CONVENTIONS.md §5.2).
+# Root config. Every key has an explicit default value (CONVENTIONS.md §5.2).
 defaults:
   - paths
   - data: pooled
@@ -7,78 +7,87 @@ defaults:
   - tuning: optuna_default
   - approach: mean_pose
   - _self_
-  # Place en dernier : une experience figee (§5.3) surcharge tout le reste.
+  # Placed last: a frozen experiment (§5.3) overrides everything else.
   - experiment: null
 
 # --- identification ---
-tag: dev                  # etiquette libre, entre dans le run_id
-force: false              # true = re-executer meme si le run existe deja (idempotence §8.1)
-mode: full                # full | debug (deterministe, plus lent) | smoke (fixture minimal)
+tag: dev                  # free label, part of the run_id
+force: false              # true = run again even if the run already exists (idempotence §8.1)
+mode: full                # full | debug (deterministic, slower) | smoke (minimal fixture)
 
-# --- protocole ---
+# --- protocol ---
 seed: 42
-split_id: null            # null = derive de cv.* ; sinon nom explicite d'un split existant
-fold: 0                   # fold externe courant
+split_id: null            # null = derived from cv.*; otherwise explicit name of an existing split
+fold: 0                   # current outer fold
+# Outer folds run by `train` and `tune` (ADR-0039): null = `fold` only for `train`, every
+# outer fold for `tune`; otherwise a list ([0, 2]) or "all". The folds run form ONE
+# ensemble in retained_models/pose/. Operational key: it enters neither the run_id nor
+# the variant_hash (each fold stays a run of its own).
+folds: null
 
-# --- protocole commun : NE PAS surcharger par approche (ADR-0013) ---
-# Une approche entrainee a une autre resolution ne compare plus la methode mais la
-# resolution. Le garde-fou strict.enforce_common_image_size refuse la divergence.
+# --- common protocol: DO NOT override per approach (ADR-0013) ---
+# An approach trained at another resolution no longer compares the method but the
+# resolution. The strict.enforce_common_image_size guard refuses the divergence.
 protocol:
   image_size: [640, 640]
 
-# --- entrainement generique (surchargeable par approche, SAUF image_size) ---
+# --- generic training (overridable per approach, EXCEPT image_size) ---
 train:
   epochs: 100
-  batch_size: 16          # -1 = taille automatique (Ultralytics, CUDA uniquement)
-  num_workers: 4
+  # Fixed on purpose: two runs only compare at an equal batch size (ADR-0013/0019). -1 =
+  # automatic size from the VRAM (Ultralytics, CUDA only), outside the protocol.
+  batch_size: 16
+  # Data-loading workers. auto = usable CPUs - 1, capped at 8 (0 on a single-CPU
+  # machine: loading in the main process).
+  num_workers: auto
   image_size: ${protocol.image_size}
   early_stopping_patience: 20
-  # ADR-0019 : materiel. 'auto' => GPU 0 si CUDA disponible, sinon cpu.
-  # Multi-GPU : device: "0,1". Le materiel resolu est enregistre dans le manifeste.
+  # ADR-0019: hardware. 'auto' => GPU 0 if CUDA is available, else the Apple GPU (mps),
+  # else cpu. Multi-GPU: device: "0,1". The resolved hardware is recorded in the manifest.
   device: auto            # auto | cpu | "0" | "0,1" | mps
-  amp: true               # precision mixte ; desactivee d'office en mode=debug
-  cache: false            # false | ram | disk : cache dataset, gain net si I/O limitantes
-  plots: false            # figures Ultralytics : bruit dans les runs d'HPO
+  amp: true               # mixed precision; automatically off on CPU and in mode=debug
+  cache: false            # false | ram | disk: dataset cache, a net gain if I/O is limiting
+  plots: false            # Ultralytics figures: noise in the HPO runs
 
-# --- modeles retenus (consommes tels quels par pipeline/) ---
-# retained_models/pose/ contient UN ENSEMBLE de modeles : le pipeline les infere
-# tous et moyenne chaque coordonnee de point (moyenne + ecart-type dans son CSV).
-#   train    -> l'ensemble est remplace par CE modele (ecart-type nul au pipeline)
-#   tune     -> l'ensemble est remplace par les modeles des folds externes (un par fold)
-#   evaluate -> l'ensemble est remplace par le run donne : un run deja entraine
-#               s'exporte sans reentrainement, `evaluate run_id=<run_id>`
-# L'export copie runs/<run_id>/weights/ vers retained_models/pose/<name>/, avec un
-# model_card.json. Un run `mode: smoke` et un trial d'HPO ne sont jamais exportes.
-# Ces cles sont operationnelles : elles n'entrent NI dans le run_id NI dans le
-# variant_hash (voir context.py), sinon `retain.name=x` reentrainerait tout.
+# --- retained models (used as they are by pipeline/) ---
+# retained_models/pose/ holds AN ENSEMBLE of models: the pipeline runs them all and
+# averages every keypoint coordinate (mean + standard deviation in its CSV).
+#   train    -> the ensemble is replaced by THIS model (zero std in the pipeline)
+#   tune     -> the ensemble is replaced by the models of the outer folds (one per fold)
+#   evaluate -> the ensemble is replaced by the given run: an already-trained run is
+#               exported without retraining, `evaluate run_id=<run_id>`
+# The export copies runs/<run_id>/weights/ to retained_models/pose/<name>/, with a
+# model_card.json. A `mode: smoke` run and an HPO trial are never exported.
+# These keys are operational: they enter NEITHER the run_id NOR the variant_hash (see
+# context.py), otherwise `retain.name=x` would retrain everything.
 retain:
-  enabled: true           # false = le run reste dans runs/ sans etre exporte
-  # Approches exportables : un YOLO-pose unique sur le schema complet, que le
-  # pipeline charge comme n'importe quel membre de l'ensemble. Les autres
-  # (lora, group_bn, per_dataset, reduced...) restent des objets d'etude.
+  enabled: true           # false = the run stays in runs/ without being exported
+  # Exportable approaches: a single YOLO-pose on the full schema, which the pipeline
+  # loads like any other member of the ensemble. The others (lora, group_bn,
+  # per_dataset, reduced...) remain study objects.
   approaches: [yolo_pooled]
-  # null = un dossier par run (run_id). Un nom fixe est ecrase par chaque run qui
-  # le reutilise : `tune` exporte un fold par fold externe, seul le dernier
-  # resterait. A reserver a un run unique.
+  # null = one folder per run (run_id). A fixed name is overwritten by every run that
+  # reuses it: `tune` exports one fold per outer fold, only the last one would remain.
+  # To be kept for a single run.
   name: null
-  hpo_trials: false       # true = exporter aussi les trials d'HPO (un modele par trial)
+  hpo_trials: false       # true = also export the HPO trials (one model per trial)
 
-# --- rapport ---
+# --- report ---
 report:
-  figures: true           # false = tableaux seuls (agregation plus rapide)
-  # Un dossier de figures par run, sous results/runs/<run_id>/. Le rapport global
-  # compare les modeles ; ces dossiers permettent d'examiner un run isolement sans
-  # que le suivant ne l'ecrase.
+  figures: true           # false = tables only (faster aggregation)
+  # One folder of figures per run, under results/runs/<run_id>/. The global report
+  # compares the models; these folders let one examine a run in isolation without the
+  # next one overwriting it.
   per_run_figures: true
   dpi: 150
-  split: test             # split sur lequel portent les figures
+  split: test             # split the figures are about
 
-# --- garde-fous ---
+# --- guards ---
 strict:
-  require_validated_keypoints: true    # refuse les schemas PLACEHOLDER (schema fige : ADR-0006)
-  enforce_common_image_size: true      # refuse une approche a resolution divergente (ADR-0013)
-  require_clean_git: false             # true => refuse un depot avec des modifications non commitees
-  validate_contracts: true             # valide chaque artefact a l'ecriture
+  require_validated_keypoints: true    # refuses PLACEHOLDER schemas (frozen schema: ADR-0006)
+  enforce_common_image_size: true      # refuses an approach with a diverging resolution (ADR-0013)
+  require_clean_git: false             # true => refuses a repository with uncommitted changes
+  validate_contracts: true             # validates every artefact when it is written
 
 hydra:
   run:

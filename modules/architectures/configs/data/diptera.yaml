@@ -2,22 +2,22 @@
 data:
   scope: diptera
   datasets: [diptera]
-  # ADR-0017 : une image = un insecte. Viole => erreur bloquante a la preparation.
+  # ADR-0017: one image = one insect. Violated => blocking error at preparation.
   single_instance_per_image: true
-  # ADR-0016 : certains keypoints n'existent pas chez tous les ordres d'insectes.
+  # ADR-0016: some keypoints do not exist in every insect order.
   coverage:
-    absent_max: 0.01            # <= ce taux d'annotation => point considere absent
-    rare_max: 0.5               # < ce taux => point rare, PCK par point peu informatif
-    measurement_min_rate: 0.5   # < ce taux => mesure non exploitable pour ce dataset
-  adapter: annotation_csv       # nom enregistre dans le registre 'adapter'
+    absent_max: 0.01            # <= this annotation rate => point considered absent
+    rare_max: 0.5               # < this rate => rare point, per-point PCK not very informative
+    measurement_min_rate: 0.5   # < this rate => measurement not usable for this dataset
+  adapter: annotation_csv       # name registered in the 'adapter' registry
   raw_subdir: diptera
-  keypoint_schema: insect42_v1   # ADR-0006 : schema commun aux 4 datasets
+  keypoint_schema: insect42_v1   # ADR-0006: schema common to the 4 datasets
   adapter_options:
-    # Table unique du depot : pose + scale + validite des mesures, une ligne par
-    # image (annotation_tools/build_annotation_data.py). Les lignes sont filtrees
-    # sur la colonne 'group', qui porte l'ordre d'insecte.
-    # chemin relatif a la racine du module (modules/architectures/)
+    # Single table of the repository: pose + scale + measurement validity, one row per
+    # image (annotation_tools/build_annotation_data.py). The rows are filtered on the
+    # 'group' column, which holds the insect order.
+    # path relative to the module root (modules/architectures/)
     csv_path: ../../annotation_data/annotation_data.csv
     group_column: group
-    images_subdir: raw/diptera/images   # relatif a paths.data
-    margin: 10                  # marge en pixels autour des keypoints pour la bbox
+    images_subdir: raw/diptera/images   # relative to paths.data
+    margin: 10                  # margin in pixels around the keypoints for the bbox

@@ -262,7 +262,7 @@ def load_annotation_data(path: Path) -> tuple:
         values = frame[column]
         frame[column] = (
             values.astype(str).str.strip().str.lower().eq(MEASURABLE_LABEL)
-            .astype(float).where(values.notna())      # jamais 0 par defaut : NaN = non annote
+            .astype(float).where(values.notna())      # never 0 by default: NaN = not annotated
         )
 
     index = ColumnIndex()
@@ -270,9 +270,9 @@ def load_annotation_data(path: Path) -> tuple:
         if f"{point}_x" in frame.columns and f"{point}_y" in frame.columns:
             index.x[point] = f"{point}_x"
             index.y[point] = f"{point}_y"
-        # Pas de colonne de confiance : ces coordonnees sont des annotations
-        # humaines, pas des predictions. index.conf reste vide, et les approches
-        # a seuil de confiance se desactivent d'elles-memes.
+        # No confidence column: these coordinates are human annotations, not
+        # predictions. index.conf stays empty, and the confidence-threshold approaches
+        # disable themselves.
     for measure in MEASUREMENTS:
         if f"{measure}_{MEAS_TOKEN}" in frame.columns:
             index.measure[measure] = f"{measure}_{MEAS_TOKEN}"

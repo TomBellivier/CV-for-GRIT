@@ -1,4 +1,4 @@
-"""Adaptateur raw YOLO-pose -> format canonique (contrat 1)."""
+"""Raw YOLO-pose -> canonical format adapter (contract 1)."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ _EXTENSIONS = (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp")
 
 @register_adapter("yolo")
 class YoloPoseAdapter(BaseAdapter):
-    """Lit images/<split>/ + labels/<split>/ au format YOLO-pose normalisé."""
+    """Read images/<split>/ + labels/<split>/ in the normalised YOLO-pose format."""
 
     def read(self) -> pd.DataFrame:
         splits = [str(s) for s in self.options.get("splits", ["train", "val", "test"])]
@@ -36,7 +36,7 @@ class YoloPoseAdapter(BaseAdapter):
                 )
                 if image_path is None:
                     raise FileNotFoundError(
-                        f"Aucune image pour {label_file} dans {image_dir}"
+                        f"No image for {label_file} in {image_dir}"
                     )
                 with Image.open(image_path) as img:
                     width, height = img.size
@@ -66,7 +66,7 @@ class YoloPoseAdapter(BaseAdapter):
                         "image_width": width,
                         "image_height": height,
                         "instance_id": f"{image_id}#{n}",
-                        "group_id": None,       # ADR-0011 : une image = un spécimen
+                        "group_id": None,       # ADR-0011: one image = one specimen
                         "bbox_xywh": [x, y, bw * width, bh * height],
                         "kpts_xy": [float(v) for v in xy.reshape(-1)],
                         "kpts_vis": [int(v) for v in vis],

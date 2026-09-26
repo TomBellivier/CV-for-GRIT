@@ -1,8 +1,8 @@
-"""Objectif Optuna generique (CONVENTIONS.md §6.3).
+"""Generic Optuna objective (CONVENTIONS.md §6.3).
 
-Un trial = un run complet, avec son propre run_id et son manifeste : les trials sont
-donc auditables et re-evaluables comme n'importe quel run. L'objectif est TOUJOURS la
-metrique primaire calculee par l'evaluateur partage, jamais une loss de framework.
+A trial = a complete run, with its own run_id and manifest: the trials can therefore be
+audited and re-evaluated like any run. The objective is ALWAYS the primary metric
+computed by the shared evaluator, never a framework loss.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ RunFn = Callable[[DictConfig, dict[str, Any]], float]
 
 
 def build_study(cfg: DictConfig, paths: ProjectPaths, suffix: str = "") -> optuna.Study:
-    """Cree ou reprend une etude Optuna. Effet de bord : cree runs/optuna/<study>.db."""
+    """Create or resume an Optuna study. Side effect: creates runs/optuna/<study>.db."""
     study_name = study_name_for(cfg, suffix)
     sampler = (
         optuna.samplers.TPESampler(
@@ -58,13 +58,13 @@ def build_study(cfg: DictConfig, paths: ProjectPaths, suffix: str = "") -> optun
 
 
 def protocol_hash(cfg: DictConfig) -> str:
-    """Empreinte de l'espace de recherche ET des reglages de tuning (ADR-0031).
+    """Fingerprint of the search space AND of the tuning settings (ADR-0031).
 
-    Elle entre dans le nom de l'etude : modifier l'espace ou le budget cree donc
-    AUTOMATIQUEMENT une nouvelle etude, et l'ancienne reste intacte a cote. Sans cela,
-    une reprise apres modification melangerait des trials evalues sous deux protocoles
-    differents — le TPE construirait ses densites sur du bruit, et `best_trial` pourrait
-    retenir un trial dont les parametres ne sont meme plus cherches.
+    It enters the name of the study: changing the space or the budget therefore
+    AUTOMATICALLY creates a new study, and the old one stays intact next to it. Without
+    it, a resume after a change would mix trials evaluated under two different
+    protocols — the TPE would build its densities on noise, and `best_trial` could retain
+    a trial whose parameters are not even searched any more.
     """
     payload = {
         "search_space": OmegaConf.to_container(
@@ -82,17 +82,17 @@ def protocol_hash(cfg: DictConfig) -> str:
 
 
 def study_name_for(cfg: DictConfig, suffix: str = "") -> str:
-    """Nom canonique : <approche>__<split_id>__<metrique>__sp<hash>[__<suffixe>]."""
+    """Canonical name: <approach>__<split_id>__<metric>__sp<hash>[__<suffix>]."""
     name = (f"{cfg.approach.name}__{cfg.split_id}__{cfg.eval.primary_metric}"
             f"__sp{protocol_hash(cfg)}")
     return f"{name}__{suffix}" if suffix else name
 
 
 def make_objective(cfg: DictConfig, run_fn: RunFn) -> Callable[[optuna.Trial], float]:
-    """Fabrique l'objectif : echantillonne l'espace, execute les folds, retourne la moyenne.
+    """Build the objective: samples the space, runs the folds, returns the mean.
 
-    `run_fn(cfg, overrides) -> valeur de la metrique primaire` est injectee par le
-    pipeline : le module de tuning n'appelle jamais directement une approche.
+    `run_fn(cfg, overrides) -> value of the primary metric` is injected by the pipeline:
+    the tuning module never calls an approach directly.
     """
     approach_cls = APPROACHES.get(str(cfg.approach.name))
 
@@ -106,7 +106,7 @@ def make_objective(cfg: DictConfig, run_fn: RunFn) -> Callable[[optuna.Trial], f
             values.append(value)
             trial.report(float(np.mean(values)), step=step)
             if trial.should_prune():
-                log.info("Trial %d elague apres %d fold(s).", trial.number, step + 1)
+                log.info("Trial %d pruned after %d fold(s).", trial.number, step + 1)
                 raise optuna.TrialPruned
         trial.set_user_attr("overrides", to_hydra_overrides(overrides))
         trial.set_user_attr("per_fold", values)
@@ -116,26 +116,26 @@ def make_objective(cfg: DictConfig, run_fn: RunFn) -> Callable[[optuna.Trial], f
 
 
 def completed_trials(study: optuna.Study) -> int:
-    """Nombre de trials REELLEMENT termines dans l'etude."""
+    """Number of trials ACTUALLY finished in the study."""
     return sum(t.state == optuna.trial.TrialState.COMPLETE for t in study.trials)
 
 
 def remaining_trials(study: optuna.Study, budget: int) -> int:
-    """Trials restants pour atteindre le budget TOTAL de l'etude (§6.3).
+    """Trials left to reach the TOTAL budget of the study (§6.3).
 
-    `study.optimize(n_trials=N)` ajoute N trials A CHAQUE APPEL. Sur une etude reprise
-    apres interruption, cela gonflerait le budget d'un fold sans toucher aux autres, et
-    la comparaison entre folds — puis entre approches — mesurerait le budget autant que
-    la methode. On vise donc un total, pas un increment.
+    `study.optimize(n_trials=N)` adds N trials AT EVERY CALL. On a study resumed after an
+    interruption, it would inflate the budget of one fold without touching the others,
+    and the comparison between folds — then between approaches — would measure the
+    budget as much as the method. A total is therefore targeted, not an increment.
     """
     done = completed_trials(study)
     return max(0, int(budget) - done)
 
 
 def save_best(study: optuna.Study, cfg: DictConfig, paths: ProjectPaths) -> dict[str, Any]:
-    """Serialise le meilleur trial et le budget effectivement consomme (§6.3).
+    """Serialise the best trial and the budget actually consumed (§6.3).
 
-    Effet de bord : ecrit runs/optuna/<study>_best.json.
+    Side effect: writes runs/optuna/<study>_best.json.
     """
     best = study.best_trial
     payload = {

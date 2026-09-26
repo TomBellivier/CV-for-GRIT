@@ -1,6 +1,6 @@
-"""RunContext : identite, seeds, repertoires et manifeste d'une execution (§6.4, §8).
+"""RunContext: identity, seeds, folders and manifest of a run (§6.4, §8).
 
-Un run = un `run_id` deterministe + un repertoire + un manifeste ecrit EN DERNIER.
+A run = a deterministic `run_id` + a folder + a manifest written LAST.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from insectpose.utils.seeding import seed_for, set_global_seed
 
 
 def _git_state(root: Path) -> dict[str, Any]:
-    """Commit courant et proprete du depot ; valeurs 'unknown' hors depot git."""
+    """Current commit and cleanliness of the repository; 'unknown' values outside git."""
 
     def run(*args: str) -> str | None:
         try:
@@ -44,17 +44,18 @@ def _git_state(root: Path) -> dict[str, Any]:
 
 
 def make_run_id(cfg: DictConfig, content_hash: str) -> str:
-    """run_id deterministe (§8.1) : deux configs identiques donnent le meme id.
+    """Deterministic run_id (§8.1): two identical configs give the same id.
 
-    Format : <approach>__<data_scope>__<split_id>__fold<k>__<tag>__<hash8>
+    Format: <approach>__<data_scope>__<split_id>__fold<k>__<tag>__<hash8>
     """
     resolved = OmegaConf.to_container(cfg, resolve=True)
     assert isinstance(resolved, dict)
-    # Les cles purement operationnelles ne doivent pas changer l'identite du run.
-    # `retain` en fait partie : exporter ou non le modele, et sous quel nom, ne change
-    # rien a ce qui est entraine. L'y laisser casserait l'idempotence (§8.1) --
-    # `retain.name=x` reentrainerait tous les folds au lieu de les sauter.
-    for volatile in ("force", "paths", "hydra", "retain"):
+    # Purely operational keys must not change the identity of the run. `retain` is one
+    # of them: exporting the model or not, and under which name, changes nothing to what
+    # is trained. Leaving it in would break the idempotence (§8.1) -- `retain.name=x`
+    # would retrain every fold instead of skipping them. `folds` only says which folds a
+    # command runs (ADR-0039): the fold of THIS run is `fold`, which stays in the id.
+    for volatile in ("force", "paths", "hydra", "retain", "folds"):
         resolved.pop(volatile, None)
     digest = short_hash(stable_hash({"cfg": resolved, "data": content_hash}))
     return "__".join(
@@ -70,20 +71,20 @@ def make_run_id(cfg: DictConfig, content_hash: str) -> str:
 
 
 def variant_hash(cfg: DictConfig, ignored_keys: list[str] | None = None) -> str:
-    """Empreinte du MODELE, independante du fold.
+    """Fingerprint of the MODEL, independent of the fold.
 
-    Deux runs partagent cette empreinte si et seulement s'ils sont le meme modele
-    entraine sur des folds differents. Sans elle, deux variantes portant le meme tag
-    (par exemple deux poids de depart differents) seraient moyennees ensemble dans les
-    tableaux : un resultat faux, et silencieux.
+    Two runs share this fingerprint if and only if they are the same model trained on
+    different folds. Without it, two variants carrying the same tag (for instance two
+    different starting weights) would be averaged together in the tables: a wrong
+    result, and a silent one.
 
-    `ignored_keys` sert au protocole niche (ADR-0012), ou chaque fold externe retient
-    LEGITIMEMENT des hyperparametres differents : ces cles sont exclues pour que les
-    folds d'une meme experience restent regroupes.
+    `ignored_keys` serves the nested protocol (ADR-0012), where each outer fold
+    LEGITIMATELY retains different hyperparameters: these keys are excluded so that the
+    folds of one experiment stay grouped.
     """
     resolved = OmegaConf.to_container(cfg, resolve=True)
     assert isinstance(resolved, dict)
-    for volatile in ("fold", "force", "paths", "hydra", "split_id", "retain"):
+    for volatile in ("fold", "folds", "force", "paths", "hydra", "split_id", "retain"):
         resolved.pop(volatile, None)
     for key in ignored_keys or []:
         node = resolved
@@ -97,7 +98,7 @@ def variant_hash(cfg: DictConfig, ignored_keys: list[str] | None = None) -> str:
 
 @dataclass
 class RunContext:
-    """Contexte d'execution partage par toutes les etapes d'un run."""
+    """Run context shared by every step of a run."""
 
     run_id: str
     cfg: DictConfig
@@ -110,7 +111,7 @@ class RunContext:
 
     @property
     def run_dir(self) -> Path:
-        """Repertoire du run. Aucune approche n'ecrit ailleurs."""
+        """Folder of the run. No approach writes anywhere else."""
         return self.paths.run_dir(self.run_id)
 
     @property
@@ -122,23 +123,23 @@ class RunContext:
         return get_logger(self.run_id)
 
     def subdir(self, name: str) -> Path:
-        """Cree et retourne un sous-repertoire du run ('weights', 'logs', 'figures'...)."""
+        """Create and return a sub-folder of the run ('weights', 'logs', 'figures'...)."""
         d = self.run_dir / name
         d.mkdir(parents=True, exist_ok=True)
         return d
 
     def seed(self, purpose: str = "global") -> int:
-        """Seed derivee, stable pour (run_id, fold, purpose) (§6.4)."""
+        """Derived seed, stable for (run_id, fold, purpose) (§6.4)."""
         return seed_for(self.run_id, self.fold, purpose, base=int(self.cfg.seed))
 
     def apply_seed(self, purpose: str = "global") -> int:
-        """Fixe les RNG python/numpy/torch et retourne la seed utilisee."""
+        """Set the python/numpy/torch RNGs and return the seed used."""
         s = self.seed(purpose)
         set_global_seed(s, deterministic=str(self.cfg.mode) == "debug")
         return s
 
     def setup(self) -> RunContext:
-        """Cree le repertoire du run et y ecrit la config resolue AVANT tout calcul."""
+        """Create the folder of the run and write the resolved config to it BEFORE any computation."""
         self.run_dir.mkdir(parents=True, exist_ok=True)
         (self.run_dir / "config.yaml").write_text(
             OmegaConf.to_yaml(self.cfg, resolve=True), encoding="utf-8"
@@ -147,13 +148,13 @@ class RunContext:
         return self
 
     def is_complete(self) -> bool:
-        """True si le manifeste existe : le run est rejouable et agregeable."""
+        """True if the manifest exists: the run can be replayed and aggregated."""
         return self.paths.manifest(self.run_id).exists()
 
     def write_manifest(self, **fields: Any) -> Path:
-        """Ecrit `manifest.json` EN DERNIER (contrat 5, §3.5).
+        """Write `manifest.json` LAST (contract 5, §3.5).
 
-        Effet de bord : ecrit runs/<run_id>/manifest.json.
+        Side effect: writes runs/<run_id>/manifest.json.
         """
         resolved = OmegaConf.to_container(self.cfg, resolve=True)
         manifest = {
@@ -167,7 +168,7 @@ class RunContext:
             "mode": str(self.cfg.mode),
             "seed": int(self.cfg.seed),
             "content_hash": self.content_hash,
-            # Identifie le MODELE, folds confondus (§8.1).
+            # Identifies the MODEL, all folds together (§8.1).
             "variant_hash": self.extra.get(
                 "variant_hash",
                 variant_hash(self.cfg, list(self.extra.get("hpo_overridden_keys", []))),
@@ -182,7 +183,7 @@ class RunContext:
                 "python": platform.python_version(),
                 "platform": platform.platform(),
                 "packages": _package_versions(),
-                # Le materiel fait partie des conditions de comparaison (ADR-0019).
+                # The hardware is part of the comparison conditions (ADR-0019).
                 "device": device_info(self.cfg.train.get("device", "auto")),
             },
             "config": resolved,
@@ -193,7 +194,7 @@ class RunContext:
 
 
 def _package_versions() -> dict[str, str]:
-    """Versions des dependances qui influencent les resultats."""
+    """Versions of the dependencies that influence the results."""
     from importlib.metadata import PackageNotFoundError, version
 
     out: dict[str, str] = {}

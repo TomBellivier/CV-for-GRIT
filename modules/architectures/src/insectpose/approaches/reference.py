@@ -1,10 +1,10 @@
-"""Approche de REFERENCE : gabarit, smoke test et baseline plancher.
+"""REFERENCE approach: template, smoke test and floor baseline.
 
-Predit la pose moyenne du train, replacee dans la bbox GT de chaque instance.
-Elle utilise donc les bboxes GT (`bbox_source='gt'`) : c'est un DIAGNOSTIC, jamais
-une ligne comparable aux approches bout-en-bout (CONVENTIONS.md §9.3).
+Predicts the mean pose of the train set, placed back into the GT bbox of each instance.
+It therefore uses the GT bboxes (`bbox_source='gt'`): it is a DIAGNOSTIC, never a row
+comparable with the end-to-end approaches (CONVENTIONS.md §9.3).
 
-Ce fichier est le modele a copier pour implementer une vraie approche (§11).
+This file is the model to copy to implement a real approach (§11).
 """
 
 from __future__ import annotations
@@ -24,19 +24,19 @@ from insectpose.registry import register_approach
 
 @register_approach("mean_pose")
 class MeanPoseApproach(BaseApproach):
-    """Pose moyenne normalisee par dataset, replacee dans chaque bbox."""
+    """Mean normalised pose per dataset, placed back into each bbox."""
 
     def __init__(self, cfg: Any) -> None:
         super().__init__(cfg)
         self.priors: dict[str, np.ndarray] = {}
 
-    # --- entrainement ------------------------------------------------------
+    # --- training ---------------------------------------------------------------
     def fit(self, data: FoldData, ctx: RunContext) -> None:
-        """Calcule la pose moyenne en coordonnees relatives a la bbox.
+        """Compute the mean pose in coordinates relative to the bbox.
 
-        Effet de bord : ecrit runs/<run_id>/weights/priors.json.
+        Side effect: writes runs/<run_id>/weights/priors.json.
         """
-        train = data.train.annotations  # data.test n'est jamais lu (§4.2)
+        train = data.train.annotations  # data.test is never read (§4.2)
         per_dataset = bool(self.cfg.approach.per_dataset_prior)
         key = "dataset" if per_dataset else "keypoint_schema"
 
@@ -53,9 +53,9 @@ class MeanPoseApproach(BaseApproach):
                 rel.append(norm)
             if rel:
                 stacked = np.stack(rel)
-                # ADR-0016 : un keypoint jamais annote dans ce dataset n'a pas de moyenne.
-                # On le place au centre de la bbox, ce qui est explicite et sans effet sur
-                # les metriques (il est exclu de l'evaluation, faute d'annotation).
+                # ADR-0016: a keypoint never annotated in this dataset has no mean. It is
+                # placed at the centre of the bbox, which is explicit and has no effect on
+                # the metrics (it is excluded from the evaluation, for lack of annotation).
                 observed = np.isfinite(stacked).any(axis=0)
                 prior = np.full(stacked.shape[1:], 0.5, dtype=float)
                 if observed.any():
@@ -71,12 +71,12 @@ class MeanPoseApproach(BaseApproach):
         weights.write_text(
             json.dumps({k: v.tolist() for k, v in self.priors.items()}), encoding="utf-8"
         )
-        ctx.logger.info("mean_pose : %d prior(s) estime(s) sur %d instances.",
+        ctx.logger.info("mean_pose: %d prior(s) estimated on %d instances.",
                         len(self.priors), len(train))
 
-    # --- inference ---------------------------------------------------------
+    # --- inference --------------------------------------------------------------
     def predict_instances(self, images: ImageSet, ctx: RunContext) -> pd.DataFrame:  # noqa: ARG002
-        """Replace le prior dans chaque bbox GT (repere image d'origine)."""
+        """Place the prior back into each GT bbox (frame of the original image)."""
         per_dataset = bool(self.cfg.approach.per_dataset_prior)
         rows = []
         for row in images.annotations.itertuples(index=False):
@@ -95,15 +95,15 @@ class MeanPoseApproach(BaseApproach):
                     "kpts_xy": [float(v) for v in pts.reshape(-1)],
                     "kpts_score": [1.0] * len(prior),
                     "keypoint_schema": row.keypoint_schema,
-                    "bbox_source": "gt",  # DIAGNOSTIC : non comparable au bout-en-bout
+                    "bbox_source": "gt",  # DIAGNOSTIC: not comparable with end-to-end
                 }
             )
         return pd.DataFrame(rows)
 
-    # --- rechargement ------------------------------------------------------
+    # --- reloading --------------------------------------------------------------
     @classmethod
     def load(cls, run_dir: Path, cfg: Any) -> MeanPoseApproach:
-        """Recharge les priors sans reentrainement."""
+        """Reload the priors without retraining."""
         obj = cls(cfg)
         payload = json.loads((run_dir / "weights" / "priors.json").read_text(encoding="utf-8"))
         obj.priors = {k: np.asarray(v, dtype=float) for k, v in payload.items()}

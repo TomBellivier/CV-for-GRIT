@@ -10,52 +10,31 @@ A single Ultralytics model is NOT safe to call from several threads at once
 (each predict() call mutates internal state). The clean fix is to give every
 worker thread its OWN model instances, created lazily the first time that
 thread needs them. Threads still share everything read-only (config, the image
-loader, dataset membership), so the only duplicated objects are the models.
+loader, the classifiers), so the only duplicated objects are the models.
 
-    Memory cost: one (pose ensemble + scale-bar + EasyOCR) set per worker thread,
-    and the ensemble holds every model of retained_models/pose/ (5 after a
-    `tune`). With --workers 4 you hold 4 copies of all of them. Lower --workers if RAM is tight; raise it to
-    overlap more inferences / downloads.
+    Memory cost: one (pose ensemble + scale-bar) set per worker thread, and the
+    ensemble holds every model of retained_models/pose/ (5 after a `tune`); the
+    EasyOCR reader is shared. hardware.plan_resources() sizes the number of
+    workers so that these copies fit in the free RAM (and VRAM).
 
-CPU sharing
------------
-PyTorch uses intra-op threads for a single inference and by default grabs all
-cores. Running W worker threads that each grab all cores would oversubscribe
-the 16 CPUs. configure_cpu_threads() therefore splits the cores across workers
-(≈ cpus // workers) so the total stays around the physical core count.
+Devices and CPU sharing
+-----------------------
+Each worker thread runs its models on one device, handed out in turn by
+hardware.next_device() (the GPUs one after the other, or the CPU). PyTorch and
+OpenCV compute threads are split across workers (hardware.apply_threads), so
+the workers share the cores instead of each grabbing all of them.
 """
 
 from __future__ import annotations
 
-import os
 import threading
 
 from . import config
+from .hardware import next_device
 from .pipeline import Models, process_image
 
 # Each thread gets its own attribute bag; models live here.
 _local = threading.local()
-
-
-def configure_cpu_threads(workers: int, cpus: int | None = None,
-                          torch_threads: int | None = None) -> None:
-    """Balance PyTorch/OpenCV threads across the worker threads.
-
-    Called ONCE from the main thread before the pool starts.
-    """
-    cpus = cpus or os.cpu_count() or 1
-    per_worker = torch_threads or max(1, cpus // max(1, workers))
-    try:
-        import torch
-        torch.set_num_threads(per_worker)
-    except Exception:  # noqa: BLE001 - torch always present with ultralytics, but be safe
-        pass
-    try:
-        import cv2
-        cv2.setNumThreads(per_worker)
-    except Exception:  # noqa: BLE001
-        pass
-    print(f"[cpu] {cpus} CPUs, {workers} worker(s) -> {per_worker} compute thread(s) each")
 
 
 def _get_models() -> Models:
@@ -66,19 +45,20 @@ def _get_models() -> Models:
         from .scale import load_scale_bar_model
 
         tid = threading.get_ident()
-        print(f"[worker {tid}] loading models for this thread...")
+        device = next_device()
+        print(f"[worker {tid}] loading models for this thread on {device}...")
         pose = load_pose_models()
         scale_bar = load_scale_bar_model() if config.USE_SCALE_BAR else None
-        _local.models = Models(pose_models=pose, scale_bar_model=scale_bar)
+        _local.models = Models(pose_models=pose, scale_bar_model=scale_bar, device=device)
     return _local.models
 
 
-def make_task(load_fn, membership, measurement_classifiers=None, group_index=None):
+def make_task(load_fn, measurement_classifiers=None, group_index=None):
     """Build the function run for each item: load the image, then process it.
 
     `measurement_classifiers` and `group_index` are shared read-only across
-    every worker thread (like `membership`): unlike the YOLO models, scoring a
-    fitted random forest does not mutate it, so one set of models is enough.
+    every worker thread: unlike the YOLO models, scoring a fitted random forest
+    does not mutate it, so one set of models is enough.
 
     Returned callable maps  (key, image_name)  ->  record dict.
     Exceptions propagate to parallel.bounded_unordered_map, which reports them
@@ -88,6 +68,6 @@ def make_task(load_fn, membership, measurement_classifiers=None, group_index=Non
         key, image_name = item
         img_bgr = load_fn(key)               # download/decode (HF) or read (local)
         models = _get_models()
-        return process_image(img_bgr, image_name, models, membership,
+        return process_image(img_bgr, image_name, models,
                              measurement_classifiers, group_index)
     return task

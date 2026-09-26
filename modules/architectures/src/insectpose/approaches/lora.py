@@ -1,18 +1,17 @@
-"""Approche D : adaptateurs LoRA sur un YOLO-pose pre-entraine (ADR-0025).
+"""Approach D: LoRA adapters on a pre-trained YOLO-pose (ADR-0025).
 
-Le reseau part des poids COCO. Backbone et cou sont **geles** ; des adaptateurs LoRA
-sont injectes sur les convolutions situees juste apres le cou, et les tetes de
-detection/pose restent entrainables.
+The network starts from the COCO weights. Backbone and neck are **frozen**; LoRA
+adapters are injected on the convolutions right before the head, and the
+detection/pose heads stay trainable.
 
-Ce que cette approche teste : peut-on atteindre la performance d'un entrainement
-complet en n'entrainant qu'une fraction des parametres ? Le manifeste enregistre donc
-le **nombre de parametres entrainables** : sans lui, "LoRA" ne veut rien dire, puisque
-la meme etiquette recouvre des configurations tres differentes selon ce qui reste
-degele a cote des adaptateurs.
+What this approach tests: can the performance of a full training be reached while
+training only a fraction of the parameters? The manifest therefore records the **number
+of trainable parameters**: without it, "LoRA" means nothing, since the same label covers
+very different configurations depending on what stays unfrozen next to the adapters.
 
-Contrainte Ultralytics : le modele est reconstruit au debut de `train()` et le gel
-manuel y est annule. Tout passe donc par `training/patching.py`, seul endroit qui
-depend des internes de la bibliotheque.
+Ultralytics constraint: the model is rebuilt at the start of `train()` and the manual
+freeze is undone there. Everything therefore goes through `training/patching.py`, the
+only place that depends on the internals of the library.
 """
 
 from __future__ import annotations
@@ -38,23 +37,23 @@ log = get_logger("lora")
 
 
 def _lora_layer_class() -> Any:
-    """Classe de couche LoRA de la version de peft installee."""
+    """LoRA layer class of the installed peft version."""
     try:
         from peft.tuners.lora.layer import LoraLayer
-    except ImportError:  # organisation differente selon les versions
+    except ImportError:  # different layout depending on the versions
         from peft.tuners.lora import LoraLayer
     return LoraLayer
 
 
 def merge_lora_weights(model: Any) -> int:
-    """Fusionne les adaptateurs dans les poids de base et retire les enveloppes.
+    """Merge the adapters into the base weights and remove the wrappers.
 
-    Sans cette fusion, le point de sauvegarde contient des `peft.tuners.lora.Conv2d`
-    qui n'exposent pas les attributs d'une convolution (`out_channels`...). Ultralytics
-    echoue alors des qu'il fusionne conv+BN, c'est-a-dire au chargement pour inference.
+    Without this merge, the checkpoint contains `peft.tuners.lora.Conv2d` that do not
+    expose the attributes of a convolution (`out_channels`...). Ultralytics then fails as
+    soon as it fuses conv+BN, i.e. when loading for inference.
 
-    Apres fusion, le checkpoint est un YOLO parfaitement standard : rechargeable,
-    fusionnable, et exploitable sans peft. Retourne le nombre de couches fusionnees.
+    After the merge, the checkpoint is a perfectly standard YOLO: reloadable, fusable, and
+    usable without peft. Returns the number of layers merged.
     """
     lora_cls = _lora_layer_class()
 
@@ -66,14 +65,14 @@ def merge_lora_weights(model: Any) -> int:
         model,
         is_target=lambda m: isinstance(m, lora_cls),
         make_replacement=_merge,
-        # Une couche fusionnee redevient une convolution simple : rien a ignorer.
+        # A merged layer becomes a plain convolution again: nothing to skip.
         is_replacement=lambda _m: False,
     )
 
 
 @register_approach("lora")
 class LoraApproach(YoloPooledApproach):
-    """YOLO-pose poule dont seuls les adaptateurs et les tetes sont entraines."""
+    """Pooled YOLO-pose whose adapters and heads only are trained."""
 
     REQUIRED_APPROACH_KEYS = (
         "weights", "max_det", "conf", "iou", "inference_precision", "predict_chunk_size",
@@ -88,15 +87,15 @@ class LoraApproach(YoloPooledApproach):
         try:
             import peft  # noqa: F401
         except ImportError:
-            return False, "peft absent : pip install -e \".[dev]\""
+            return False, "peft missing: pip install -e \".[dev]\""
         return True, ""
 
-    # --- patch du modele ---------------------------------------------------
+    # --- patch of the model -----------------------------------------------------
     def _target_modules(self, model: Any) -> list[str]:
-        """Convolutions recevant les adaptateurs : le dernier bloc du cou par defaut.
+        """Convolutions receiving the adapters: the last block of the neck by default.
 
-        Le motif est calcule depuis la STRUCTURE du modele, pas ecrit en dur : un
-        changement de taille de reseau (n/s/m/l) decale les index de blocs.
+        The pattern is computed from the STRUCTURE of the model, not hard-coded: a change
+        of network size (n/s/m/l) shifts the block indices.
         """
         import torch
 
@@ -113,20 +112,20 @@ class LoraApproach(YoloPooledApproach):
         ]
         targets, skipped = match_conv_targets(convolutions, [pattern])
         if skipped:
-            log.info("%d convolution(s) groupee(s) (depthwise) ecartee(s) : peft exige un "
-                     "rang divisible par `groups`, pour un gain nul.", len(skipped))
+            log.info("%d grouped (depthwise) convolution(s) skipped: peft requires a "
+                     "rank divisible by `groups`, for no gain.", len(skipped))
         if not targets:
             raise RuntimeError(
-                f"Aucune convolution adaptable pour LoRA (motif '{pattern}', "
-                f"{len(skipped)} depthwise ecartee(s)). Augmenter "
-                "approach.lora.neck_blocks pour remonter vers des blocs contenant des "
-                "convolutions standard."
+                f"No convolution LoRA can adapt (pattern '{pattern}', "
+                f"{len(skipped)} depthwise skipped). Increase "
+                "approach.lora.neck_blocks to go up to blocks containing standard "
+                "convolutions."
             )
         self._lora_skipped = skipped
         return targets
 
     def _apply_lora(self, model: Any) -> None:
-        """Injecte les adaptateurs en place. Effet de bord : modifie `model`."""
+        """Inject the adapters in place. Side effect: modifies `model`."""
         from peft import LoraConfig, inject_adapter_in_model
 
         targets = self._target_modules(model)
@@ -137,16 +136,16 @@ class LoraApproach(YoloPooledApproach):
             target_modules=targets, bias="none",
         )
         inject_adapter_in_model(config, model)
-        log.info("LoRA injecte sur %d convolution(s), rang %d.", len(targets), int(lora.r))
+        log.info("LoRA injected on %d convolution(s), rank %d.", len(targets), int(lora.r))
         self._lora_targets = targets
 
     def _alpha(self) -> float:
-        """Facteur d'echelle des adaptateurs.
+        """Scale factor of the adapters.
 
-        Derive du rang (`alpha = alpha_ratio x r`) sauf si `alpha` est renseigne
-        explicitement. peft divise la contribution par alpha/r : a ratio constant, le
-        taux d'apprentissage optimal reste quasi independant du rang, ce qui evite de
-        depenser une dimension de recherche sur une redondance (ADR-0031).
+        Derived from the rank (`alpha = alpha_ratio x r`) unless `alpha` is set
+        explicitly. peft scales the contribution by alpha/r: at a constant ratio, the
+        optimal learning rate stays almost independent of the rank, which avoids spending
+        a search dimension on a redundancy (ADR-0031).
         """
         lora = self.cfg.approach.lora
         explicit = lora.get("alpha")
@@ -155,10 +154,10 @@ class LoraApproach(YoloPooledApproach):
         return float(lora.get("alpha_ratio", 2.0)) * int(lora.r)
 
     def _freeze(self, model: Any) -> None:
-        """Gele tout sauf les adaptateurs et la tete.
+        """Freeze everything but the adapters and the head.
 
-        Reapplique APRES la boucle de gel d'Ultralytics, qui reactiverait sinon
-        `requires_grad` sur les parametres geles (cf. training/patching.py).
+        Re-applied AFTER the Ultralytics freeze loop, which would otherwise re-enable
+        `requires_grad` on the frozen parameters (see training/patching.py).
         """
         names = [name for name, _ in model.named_parameters()]
         last = head_index([n for n, _ in model.named_modules()])
@@ -169,20 +168,20 @@ class LoraApproach(YoloPooledApproach):
             dict(model.named_parameters())[name].requires_grad = False
 
     def _trainer_class(self, ctx: RunContext) -> Any:
-        """Trainer applicant l'injection puis le gel, aux bons moments."""
+        """Trainer applying the injection then the freeze, at the right moments."""
         report: dict[str, Any] = {}
         ctx.extra["lora_report"] = report
         return make_patched_trainer(
             pose_trainer_class(), patch=self._apply_lora, freeze=self._freeze, report=report,
-            # Le checkpoint contient encore les enveloppes LoRA a ce stade : l'evaluation
-            # finale d'Ultralytics le rechargerait et le fusionnerait, ce qui echoue.
+            # The checkpoint still contains the LoRA wrappers at this stage: the final
+            # evaluation of Ultralytics would reload and fuse it, which fails.
             skip_final_eval=True,
         )
 
     def _write_checkpoint(self, best: Path, target: Path) -> None:
-        """Fusionne les adaptateurs puis ecrit un checkpoint YOLO standard.
+        """Merge the adapters then write a standard YOLO checkpoint.
 
-        Effet de bord : ecrit `target`. Le modele sauvegarde ne depend plus de peft.
+        Side effect: writes `target`. The saved model no longer depends on peft.
         """
         import torch
 
@@ -194,15 +193,15 @@ class LoraApproach(YoloPooledApproach):
                 merged += merge_lora_weights(module)
         if merged == 0:
             raise RuntimeError(
-                "Aucune couche LoRA trouvee dans le checkpoint : l'injection n'a pas eu "
-                "lieu, ou le trainer a reconstruit le modele apres le patch."
+                "No LoRA layer found in the checkpoint: the injection did not take "
+                "place, or the trainer rebuilt the model after the patch."
             )
-        log.info("%d couche(s) LoRA fusionnee(s) dans les poids de base.", merged)
+        log.info("%d LoRA layer(s) merged into the base weights.", merged)
         torch.save(checkpoint, target)
 
-    # --- entrainement ------------------------------------------------------
+    # --- training ---------------------------------------------------------------
     def fit(self, data: Any, ctx: RunContext) -> None:
-        """Entraine puis enregistre la part reellement entrainee (§7.2)."""
+        """Train then record the share actually trained (§7.2)."""
         super().fit(data, ctx)
         report = ctx.extra.pop("lora_report", {})
         ctx.extra.update({f"lora_{k}": v for k, v in report.items()})

@@ -1,15 +1,14 @@
-"""Entrées/sorties CSV.
+"""CSV inputs/outputs.
 
-Entrée : le CSV produit par annotation_tools/labelstudio_to_csv.py (une ligne par
-annotation, keypoints en pixels absolus dans les colonnes "<kp>_x/_y/_v").
+Input: the CSV produced by annotation_tools/labelstudio_to_csv.py (one row per
+annotation, keypoints in absolute pixels in the "<kp>_x/_y/_v" columns).
 
-Sortie : un CSV de statuts, une ligne par annotation, une colonne
-"<mesure>_status" par mesure — c'est le seul fichier exploité ensuite
-(modules/meas_classifier/dataset.py). Aucune position de keypoint n'y figure.
+Output: a status CSV, one row per annotation, one "<measurement>_status" column per
+measurement — it is the only file used afterwards
+(modules/meas_classifier/dataset.py). No keypoint position appears in it.
 
-L'état de classement détaillé (statut par arête, images validées) est sauvegardé
-à part, en JSON, uniquement pour pouvoir reprendre le travail là où il s'est
-arrêté.
+The detailed classification state (status per edge, validated images) is saved
+separately, as JSON, only to be able to resume the work where it stopped.
 """
 import csv
 import json
@@ -18,12 +17,12 @@ from pathlib import Path
 from app_logging import logger
 from models import ImageAnnotation, MEASURABLE, NON_MEASURABLE, edge_key
 
-# Le CSV de labelstudio_to_csv.py écrit v=0 pour un keypoint absent.
+# The CSV of labelstudio_to_csv.py writes v=0 for a missing keypoint.
 _MISSING = "0"
 
 
 def _keypoint_names(fieldnames):
-    """Déduit la liste des keypoints des colonnes "<kp>_v" du CSV d'entrée."""
+    """Derive the list of keypoints from the "<kp>_v" columns of the input CSV."""
     names = []
     for col in fieldnames or []:
         if col.endswith("_v"):
@@ -41,17 +40,17 @@ def _to_int(value, default=0):
 
 
 def load_annotations(csv_path):
-    """Charge le CSV d'annotations. Retourne une liste d'ImageAnnotation."""
+    """Load the annotation CSV. Returns a list of ImageAnnotation."""
     csv_path = Path(csv_path)
-    logger.info("load_annotations : lecture de %s", csv_path)
+    logger.info("load_annotations: reading %s", csv_path)
 
     with open(csv_path, "r", newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         kp_names = _keypoint_names(reader.fieldnames)
         if not kp_names:
             raise ValueError(
-                f"{csv_path} ne contient aucune colonne de keypoint (<kp>_x/_y/_v) : "
-                "attendu un CSV produit par labelstudio_to_csv.py"
+                f"{csv_path} contains no keypoint column (<kp>_x/_y/_v): "
+                "expected a CSV produced by labelstudio_to_csv.py"
             )
 
         annotations = []
@@ -79,13 +78,13 @@ def load_annotations(csv_path):
             ))
 
     annotations.sort(key=lambda a: a.image_name)
-    logger.info("load_annotations : %d annotation(s) chargée(s), %d keypoint(s) possibles",
+    logger.info("load_annotations: %d annotation(s) loaded, %d possible keypoint(s)",
                 len(annotations), len(kp_names))
     return annotations
 
 
 def export_status_csv(annotations, config, out_path):
-    """Écrit le fichier final : une ligne par annotation, le statut de chaque mesure."""
+    """Write the final file: one row per annotation, the status of each measurement."""
     measurement_names = config.measurement_names()
     fieldnames = ["image"] + [f"{m}_status" for m in measurement_names]
 
@@ -99,13 +98,13 @@ def export_status_csv(annotations, config, out_path):
             for m_name in measurement_names:
                 row[f"{m_name}_status"] = ann.measurement_status(config.measurement_edges[m_name])
             writer.writerow(row)
-    logger.info("export_status_csv : %d ligne(s) écrite(s) dans %s", len(annotations), out_path)
+    logger.info("export_status_csv: %d row(s) written to %s", len(annotations), out_path)
 
 
 def save_state(annotations, out_path):
-    """Sauvegarde le statut par arête et les images validées, pour pouvoir reprendre
-    le classement exactement là où il s'est arrêté (le CSV exporté, lui, ne retient
-    que le statut par mesure : il ne permettrait pas de le restaurer fidèlement)."""
+    """Save the status per edge and the validated images, to be able to resume the
+    classification exactly where it stopped (the exported CSV only keeps the status
+    per measurement: it would not allow a faithful restoration)."""
     data = {}
     for ann in annotations:
         if not ann.edge_overrides and not ann.done:
@@ -123,14 +122,14 @@ def save_state(annotations, out_path):
 
 
 def load_state(state_path, annotations):
-    """Restaure sur `annotations` (en place) l'état sauvegardé par save_state."""
+    """Restore on `annotations` (in place) the state saved by save_state."""
     state_path = Path(state_path)
     if not state_path.exists():
         return
     try:
         data = json.loads(state_path.read_text(encoding="utf-8"))
     except Exception:
-        logger.exception("Impossible de lire l'état de classement : %s", state_path)
+        logger.exception("Cannot read the classification state: %s", state_path)
         return
 
     by_key = {a.key(): a for a in annotations}
@@ -146,4 +145,4 @@ def load_state(state_path, annotations):
             )
         ann.done = bool(entry.get("done"))
         restored += 1
-    logger.info("load_state : état restauré pour %d/%d annotation(s)", restored, len(annotations))
+    logger.info("load_state: state restored for %d/%d annotation(s)", restored, len(annotations))

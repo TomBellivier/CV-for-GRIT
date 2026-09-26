@@ -1,1 +1,1 @@
-"""Optimisation d'hyperparametres. Objectif = metrique primaire de l'evaluateur (§6.3)."""
+"""Hyperparameter optimisation. Objective = primary metric of the evaluator (§6.3)."""

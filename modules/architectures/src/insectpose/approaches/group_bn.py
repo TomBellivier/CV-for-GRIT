@@ -1,13 +1,13 @@
-"""Approche E : BatchNorm conditionnee par groupe d'insecte (ADR-0026).
+"""Approach E: BatchNorm conditioned on the insect group (ADR-0026).
 
-Entrainement complet depuis les poids COCO, mais chaque BatchNorm est dupliquee en N
-copies — une par dataset, statistiques ET parametres affines. Les poids convolutifs
-restent partages : l'hypothese testee est que la difference entre ordres d'insectes
-tient largement a des statistiques d'activation, pas a des filtres differents.
+Full training from the COCO weights, but each BatchNorm is duplicated into N copies —
+one per dataset, statistics AND affine parameters. The convolution weights stay shared:
+the hypothesis tested is that the difference between insect orders largely lies in
+activation statistics, not in different filters.
 
-Les lots sont mixtes ; le groupe de chaque image est deduit du nom de fichier exporte
-(`<dataset>__<stem>`). A l'inference, le dataset est toujours connu (ADR-0014) et un
-groupe inconnu leve une erreur explicite plutot qu'un repli devine.
+Batches are mixed; the group of each image is derived from the exported file name
+(`<dataset>__<stem>`). At inference, the dataset is always known (ADR-0014) and an
+unknown group raises an explicit error rather than a guessed fallback.
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ log = get_logger("group_bn")
 
 @register_approach("group_bn")
 class GroupBatchNormApproach(YoloPooledApproach):
-    """YOLO-pose poule dont les normalisations sont conditionnees par dataset."""
+    """Pooled YOLO-pose whose normalisations are conditioned by dataset."""
 
     REQUIRED_APPROACH_KEYS = (
         "weights", "max_det", "conf", "iou", "inference_precision", "predict_chunk_size",
@@ -50,52 +50,52 @@ class GroupBatchNormApproach(YoloPooledApproach):
         super().__init__(cfg, namespace)
         self.datasets = default_datasets(cfg)
 
-    # --- patch du modele ---------------------------------------------------
+    # --- patch of the model -----------------------------------------------------
     def _patch(self, model: Any) -> None:
-        """Remplace les BatchNorm2d. Effet de bord : modifie `model`."""
+        """Replace the BatchNorm2d. Side effect: modifies `model`."""
         replaced = replace_batchnorm(model, len(self.datasets))
         if replaced == 0:
             raise RuntimeError(
-                "Aucune BatchNorm2d trouvee : l'approche serait sans effet. Verifier "
-                "l'architecture du modele de depart."
+                "No BatchNorm2d found: the approach would have no effect. Check the "
+                "architecture of the starting model."
             )
         self._n_replaced = replaced
 
     def _on_batch(self, trainer: Any, batch: Any) -> None:  # noqa: ARG002
-        """Renseigne le groupe de chaque image du lot avant le forward."""
+        """Fill the group of each image of the batch before the forward pass."""
         files = batch.get("im_file") if isinstance(batch, dict) else None
         if not files:
             raise RuntimeError(
-                "Le lot ne porte pas 'im_file' : impossible de determiner le dataset de "
-                "chaque image. La normalisation par groupe ne peut pas fonctionner."
+                "The batch carries no 'im_file': impossible to determine the dataset of "
+                "each image. The per-group normalisation cannot work."
             )
         CONTEXT.set(dataset_indices_from_paths(list(files), self.datasets))
 
     def _trainer_class(self, ctx: RunContext) -> Any:  # noqa: ARG002
         return make_patched_trainer(
             pose_trainer_class(), patch=self._patch, on_batch=self._on_batch,
-            # L'evaluation finale recharge et fusionne le modele : impossible avec une
-            # normalisation conditionnelle, et sans contexte de groupe de toute facon.
+            # The final evaluation reloads and fuses the model: impossible with a
+            # conditional normalisation, and without a group context anyway.
             skip_final_eval=True,
         )
 
     def _prepare_inference_model(self, model: Any) -> None:
-        """Neutralise la fusion conv+BN, incompatible avec N jeux de statistiques."""
+        """Neutralise the conv+BN fusion, incompatible with N sets of statistics."""
         disable_fuse(model)
 
-    # --- entrainement ------------------------------------------------------
+    # --- training ---------------------------------------------------------------
     def fit(self, data: Any, ctx: RunContext) -> None:
         super().fit(data, ctx)
         ctx.extra["group_norm_groups"] = self.datasets
         ctx.extra["group_norm_layers"] = int(getattr(self, "_n_replaced", 0))
         CONTEXT.clear()
 
-    # --- inference ---------------------------------------------------------
+    # --- inference --------------------------------------------------------------
     def predict_instances(self, images: ImageSet, ctx: RunContext) -> pd.DataFrame:
-        """Predit dataset par dataset, chaque groupe fixant sa normalisation.
+        """Predict dataset by dataset, each group setting its normalisation.
 
-        Le regroupement n'est pas une optimisation : c'est la seule facon de declarer
-        le groupe actif, puisque l'information n'existe pas au niveau des couches.
+        The grouping is not an optimisation: it is the only way to declare the active
+        group, since the information does not exist at the layer level.
         """
         frames: list[pd.DataFrame] = []
         for index, dataset in enumerate(self.datasets):

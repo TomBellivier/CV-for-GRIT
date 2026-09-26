@@ -16,6 +16,7 @@ The scale confidence is computed by the dedicated functions in confidence.py:
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 
 import cv2
@@ -24,8 +25,15 @@ from ultralytics import YOLO
 
 from . import config
 from . import confidence
-from .ruler_detection import detect_ruler_from_rgb
-from .scale_bar_detection_utils import detect_scale_bar
+
+# The detectors themselves live in modules/ (single copy of the code), where they
+# are also evaluated: see config.RULER_DETECTION_DIR / SCALE_BAR_DETECTION_DIR.
+for _module_dir in (config.RULER_DETECTION_DIR, config.SCALE_BAR_DETECTION_DIR):
+    if str(_module_dir) not in sys.path:
+        sys.path.insert(0, str(_module_dir))
+
+from ruler_detection import detect_ruler_from_rgb  # noqa: E402
+from scale_bar_detection_utils import detect_scale_bar  # noqa: E402
 
 
 @dataclass
@@ -56,7 +64,8 @@ def load_scale_bar_model(model_path=None) -> YOLO:
     return model
 
 
-def detect_scale(img_bgr: np.ndarray, scale_bar_model: YOLO | None) -> ScaleResult:
+def detect_scale(img_bgr: np.ndarray, scale_bar_model: YOLO | None,
+                 device: str | None = None) -> ScaleResult:
     """Resolve the scale for a single in-memory image (BGR array).
 
     Taking the decoded array (instead of a path) lets the exact same code run
@@ -79,6 +88,7 @@ def detect_scale(img_bgr: np.ndarray, scale_bar_model: YOLO | None) -> ScaleResu
             bar_class_id=config.SCALE_BAR_BAR_CLASS_ID,
             text_class_id=config.SCALE_BAR_TEXT_CLASS_ID,
             missing_box_conf=config.SCALE_BAR_MISSING_BOX_CONF,
+            device=device,
         )
         scale_bar_conf = confidence.scale_bar_confidence(
             bar_box_conf=det.bar_box_conf if det.bar_box_conf is not None else 0.0,

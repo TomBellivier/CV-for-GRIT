@@ -1,15 +1,15 @@
-"""Couverture des keypoints et des mesures par dataset (ADR-0016).
+"""Coverage of the keypoints and measurements per dataset (ADR-0016).
 
-Le schema est commun aux 4 ordres d'insectes, mais certains points n'existent pas
-chez tous : ailes absentes, antennes non annotees, etc. Ces points ont `vis = 0`.
+The schema is common to the 4 insect orders, but some points do not exist in all of
+them: missing wings, antennae not annotated, etc. These points have `vis = 0`.
 
-Consequences, toutes assumees explicitement plutot que subies :
-- ils sont exclus de l'OKS et du PCK (jamais comptes comme erreur nulle) ;
-- ils sont masques dans la loss des modeles poules, jamais remplaces par zero ;
-- les mesures qui en dependent sont ininterpretables pour ce dataset ;
-- leur PCK par keypoint est vide ou calcule sur trop peu d'instances pour etre lu.
+Consequences, all taken on explicitly rather than suffered:
+- they are excluded from the OKS and the PCK (never counted as a zero error);
+- they are masked in the loss of the pooled models, never replaced by zero;
+- the measurements depending on them cannot be interpreted for that dataset;
+- their per-keypoint PCK is empty or computed on too few instances to be read.
 
-Ce module produit l'artefact qui rend tout cela visible AVANT l'entrainement.
+This module produces the artefact that makes all this visible BEFORE training.
 """
 
 from __future__ import annotations
@@ -34,10 +34,10 @@ PRESENT = "present"
 
 def keypoint_coverage(annotations: pd.DataFrame, schemas: dict[str, KeypointSchema],
                       absent_max: float = 0.01, rare_max: float = 0.5) -> pd.DataFrame:
-    """Taux d'annotation de chaque keypoint, par dataset. Aucun effet de bord.
+    """Annotation rate of each keypoint, per dataset. No side effect.
 
-    `rate` = part des instances ou le point est annote (vis > 0).
-    `rate_visible` = part ou il est annote ET non occulte (vis == 2).
+    `rate` = share of the instances where the point is annotated (vis > 0).
+    `rate_visible` = share where it is annotated AND not occluded (vis == 2).
     """
     rows: list[dict[str, Any]] = []
     for (dataset, schema_name), group in annotations.groupby(["dataset", "keypoint_schema"]):
@@ -58,7 +58,7 @@ def keypoint_coverage(annotations: pd.DataFrame, schemas: dict[str, KeypointSche
 
 def measurement_coverage(annotations: pd.DataFrame, schemas: dict[str, KeypointSchema],
                          spec: MeasurementSet, min_rate: float = 0.5) -> pd.DataFrame:
-    """Part des instances ou une mesure est calculable (tous ses points annotes)."""
+    """Share of the instances where a measurement can be computed (all its points annotated)."""
     rows: list[dict[str, Any]] = []
     for (dataset, schema_name), group in annotations.groupby(["dataset", "keypoint_schema"]):
         schema = schemas[str(schema_name)]
@@ -74,7 +74,7 @@ def measurement_coverage(annotations: pd.DataFrame, schemas: dict[str, KeypointS
 
 
 def summarize(kpt_cov: pd.DataFrame, meas_cov: pd.DataFrame | None = None) -> dict[str, Any]:
-    """Synthese lisible : quels points et quelles mesures sont inexploitables et ou."""
+    """Readable summary: which points and which measurements are unusable, and where."""
     absent = kpt_cov[kpt_cov["status"] == ABSENT]
     rare = kpt_cov[kpt_cov["status"] == RARE]
     summary: dict[str, Any] = {
@@ -86,11 +86,11 @@ def summarize(kpt_cov: pd.DataFrame, meas_cov: pd.DataFrame | None = None) -> di
             d: {row.keypoint: round(row.rate, 3) for row in g.itertuples(index=False)}
             for d, g in rare.groupby("dataset")
         },
-        # Points annotes dans AUCUN dataset : le modele les predirait sans supervision.
+        # Points annotated in NO dataset: the model would predict them without supervision.
         "absent_everywhere": sorted(
             set(kpt_cov["keypoint"]) - set(kpt_cov.loc[kpt_cov["status"] != ABSENT, "keypoint"])
         ),
-        # Points presents partout : socle comparable entre datasets.
+        # Points present everywhere: the base comparable across datasets.
         "present_everywhere": sorted(
             set(kpt_cov.loc[kpt_cov["status"] == PRESENT].groupby("keypoint")["dataset"].nunique()
                 .pipe(lambda s: s[s == kpt_cov["dataset"].nunique()]).index)
@@ -109,10 +109,10 @@ def write_coverage(annotations: pd.DataFrame, schemas: dict[str, KeypointSchema]
                    out_dir: Path, spec: MeasurementSet | None = None,
                    absent_max: float = 0.01, rare_max: float = 0.5,
                    measurement_min_rate: float = 0.5) -> Path:
-    """Ecrit le rapport de couverture et journalise ce qui est inexploitable.
+    """Write the coverage report and log what is unusable.
 
-    Effet de bord : ecrit <out_dir>/coverage_keypoints.parquet,
-    coverage_measurements.parquet et coverage_summary.json.
+    Side effect: writes <out_dir>/coverage_keypoints.parquet,
+    coverage_measurements.parquet and coverage_summary.json.
     """
     kpt_cov = keypoint_coverage(annotations, schemas, absent_max, rare_max)
     out = write_parquet(out_dir / "coverage_keypoints.parquet", kpt_cov)
@@ -126,17 +126,17 @@ def write_coverage(annotations: pd.DataFrame, schemas: dict[str, KeypointSchema]
 
     for dataset, points in summary["absent_by_dataset"].items():
         if points:
-            log.warning("[%s] %d keypoint(s) jamais annote(s) : %s", dataset, len(points),
+            log.warning("[%s] %d keypoint(s) never annotated: %s", dataset, len(points),
                         ", ".join(points[:8]) + (" ..." if len(points) > 8 else ""))
     for dataset, points in summary["rare_by_dataset"].items():
         if points:
-            log.warning("[%s] %d keypoint(s) rarement annote(s) : leur PCK par point sera "
-                        "peu informatif : %s", dataset, len(points), list(points)[:6])
+            log.warning("[%s] %d keypoint(s) rarely annotated: their per-point PCK will "
+                        "not be very informative: %s", dataset, len(points), list(points)[:6])
     if summary["absent_everywhere"]:
-        log.warning("%d keypoint(s) absent(s) de TOUS les datasets : le modele les predirait "
-                    "sans supervision. Envisager de les retirer du schema (nouvelle version) : %s",
+        log.warning("%d keypoint(s) absent from ALL the datasets: the model would predict them "
+                    "without supervision. Consider removing them from the schema (new version): %s",
                     len(summary["absent_everywhere"]), summary["absent_everywhere"])
     for dataset, measures in summary.get("unusable_measurements_by_dataset", {}).items():
-        log.warning("[%s] %d mesure(s) non calculable(s) faute de points annotes : %s",
+        log.warning("[%s] %d measurement(s) not computable for lack of annotated points: %s",
                     dataset, len(measures), measures[:6])
     return out

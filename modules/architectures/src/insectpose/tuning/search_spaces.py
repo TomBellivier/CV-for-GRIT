@@ -1,8 +1,8 @@
-"""Declaration des espaces de recherche Optuna.
+"""Declaration of the Optuna search spaces.
 
-Un espace se declare en YAML (`approach.search_space`) et se traduit ici. Cela evite
-qu'un espace soit enterre dans du code d'entrainement et permet de verifier d'un coup
-d'oeil que les budgets sont comparables entre approches (§6.3).
+A space is declared in YAML (`approach.search_space`) and translated here. It keeps a
+space from being buried in training code and lets one check at a glance that the
+budgets are comparable across approaches (§6.3).
 """
 
 from __future__ import annotations
@@ -11,13 +11,13 @@ from typing import Any
 
 
 def suggest_from_spec(trial: Any, spec: Any, prefix: str = "") -> dict[str, Any]:
-    """Traduit une declaration YAML en suggestions Optuna.
+    """Translate a YAML declaration into Optuna suggestions.
 
-    Formats supportes :
+    Supported formats:
       {type: float, low: .., high: .., log: bool}
       {type: int, low: .., high: .., step: ..}
       {type: categorical, choices: [...]}
-    Retourne un dict de surcharges Hydra {chemin.cle: valeur}.
+    Returns a dict of Hydra overrides {path.key: value}.
     """
     overrides: dict[str, Any] = {}
     if not spec:
@@ -39,13 +39,13 @@ def suggest_from_spec(trial: Any, spec: Any, prefix: str = "") -> dict[str, Any]
             value = trial.suggest_categorical(name, list(definition["choices"]))
         else:
             raise ValueError(
-                f"Type d'espace de recherche inconnu : '{kind}' (cle '{key}'). "
-                "Attendu : float | int | categorical."
+                f"Unknown search space type: '{kind}' (key '{key}'). "
+                "Expected: float | int | categorical."
             )
         overrides[name] = value
     return overrides
 
 
 def to_hydra_overrides(values: dict[str, Any]) -> list[str]:
-    """Convertit {cle: valeur} en surcharges Hydra 'cle=valeur'."""
+    """Convert {key: value} into Hydra overrides 'key=value'."""
     return [f"{k}={v}" for k, v in values.items()]

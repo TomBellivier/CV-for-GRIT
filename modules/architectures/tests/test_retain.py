@@ -1,4 +1,4 @@
-"""Export vers retained_models/pose/ : un ensemble par commande, jamais un melange."""
+"""Export to retained_models/pose/: one ensemble per command, never a mix."""
 
 from __future__ import annotations
 
@@ -26,10 +26,10 @@ def _paths(tmp_path: Path) -> ProjectPaths:
 
 def _ctx(paths: ProjectPaths, run_id: str, approach: str = "yolo_pooled",
          mode: str = "full", extra: dict | None = None) -> SimpleNamespace:
-    """Run complet minimal : un manifeste et un best.pt."""
+    """Minimal complete run: a manifest and a best.pt."""
     run_dir = paths.run_dir(run_id)
     (run_dir / "weights").mkdir(parents=True)
-    (run_dir / "weights" / "best.pt").write_bytes(b"poids")
+    (run_dir / "weights" / "best.pt").write_bytes(b"weights")
     write_json(paths.manifest(run_id), {"approach": approach, "mode": mode, "config": {}})
     cfg = OmegaConf.create({
         "mode": mode, "approach": {"name": approach},
@@ -53,7 +53,7 @@ def test_train_replaces_the_ensemble(tmp_path) -> None:
 
 def test_tune_folds_accumulate(tmp_path) -> None:
     paths = _paths(tmp_path)
-    retain_context(_ctx(paths, "ancien"))
+    retain_context(_ctx(paths, "old"))
     for fold in range(3):
         retain_context(_ctx(paths, f"fold{fold}"), replace=fold == 0)
     assert _members(paths) == ["fold0", "fold1", "fold2"]
@@ -62,33 +62,33 @@ def test_tune_folds_accumulate(tmp_path) -> None:
 
 
 def test_excluded_runs_leave_the_ensemble_intact(tmp_path) -> None:
-    """Un run non exportable ne doit pas vider l'ensemble en place."""
+    """A non-exportable run must not empty the ensemble in place."""
     paths = _paths(tmp_path)
-    retain_context(_ctx(paths, "livre"))
+    retain_context(_ctx(paths, "shipped"))
     assert retain_context(_ctx(paths, "lora_run", approach="lora")) is None
     assert retain_context(_ctx(paths, "smoke_run", mode="smoke")) is None
     assert retain_context(_ctx(paths, "trial", extra={"role_in_protocol": "hpo_trial"})) is None
-    assert _members(paths) == ["livre"]
+    assert _members(paths) == ["shipped"]
 
 
 def test_evaluate_replaces_the_ensemble_with_the_same_guards(tmp_path) -> None:
-    """`evaluate run_id=...` lit l'approche et le mode dans le manifeste du run."""
+    """`evaluate run_id=...` reads the approach and the mode from the manifest of the run."""
     paths = _paths(tmp_path)
-    retain_context(_ctx(paths, "livre"))
-    cfg = _ctx(paths, "yolo_ancien").cfg
-    _ctx(paths, "lora_ancien", approach="lora")
-    _ctx(paths, "smoke_ancien", mode="smoke")
-    assert retain_existing_run("lora_ancien", paths, cfg) is None
-    assert retain_existing_run("smoke_ancien", paths, cfg) is None
-    assert _members(paths) == ["livre"]
-    assert retain_existing_run("yolo_ancien", paths, cfg) is not None
-    assert _members(paths) == ["yolo_ancien"]
+    retain_context(_ctx(paths, "shipped"))
+    cfg = _ctx(paths, "yolo_old").cfg
+    _ctx(paths, "lora_old", approach="lora")
+    _ctx(paths, "smoke_old", mode="smoke")
+    assert retain_existing_run("lora_old", paths, cfg) is None
+    assert retain_existing_run("smoke_old", paths, cfg) is None
+    assert _members(paths) == ["shipped"]
+    assert retain_existing_run("yolo_old", paths, cfg) is not None
+    assert _members(paths) == ["yolo_old"]
 
 
 def test_clear_keeps_hidden_files(tmp_path) -> None:
     paths = _paths(tmp_path)
     pose = paths.retained / "pose"
-    (pose / "vieux").mkdir(parents=True)
+    (pose / "stale").mkdir(parents=True)
     (pose / ".gitkeep").write_text("")
     clear_retained(paths)
     assert [p.name for p in pose.iterdir()] == [".gitkeep"]

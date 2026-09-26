@@ -46,20 +46,20 @@ Only if the matching OPTIONAL column was enabled in config before the run:
                                              correct-classification rate over
                                              the annotated images only
 
-Ground-truth error analysis (only if the YOLO label files are found under the
-datasets root; labels are datasets/<dataset>/labels/<split>/<stem>.txt):
+Ground-truth error analysis (images of the CSV that are annotated in
+annotation_data/annotation_data.csv; optimistic, since the pose models were
+trained on those annotations -- see ensemble.json for the cross-validated score):
     error_vs_confidence_correlation.png      Spearman(error, confidence) per measurement
     error_vs_confidence_scatter.png          pooled confidence vs error + calibration line
     mean_error_vs_needs_review.png           mean error, flagged vs not
     rel_error_boxplot_per_measurement.png    error distribution per measurement
-    mean_error_by_split.png                  error per train/val/test split
 Keypoint-level (only if the raw keypoints were exported, EXPORT_KEYPOINTS=True):
     oks_vs_overall_confidence.png            OKS vs overall confidence (+corr)
     kp_error_vs_confidence_correlation.png   per-keypoint Spearman(conf, error)
     kp_error_vs_confidence_heatmap.png       error vs confidence heatmap per kp
     oks_histogram.png                        OKS distribution
     kp_mean_error.png                        mean error per keypoint (worst first)
-Use --no-gt to skip it, --datasets-root to point elsewhere, --gt-splits to choose splits.
+Use --no-gt to skip it, --annotation-data to read another annotation table.
 
 Annotated image copies (only with --print, needs --images-dir and Pillow):
     annotated_images/<image name>            copy of every image of the CSV with
@@ -98,12 +98,12 @@ import numpy as np               # noqa: E402
 import pandas as pd              # noqa: E402
 
 # Project definitions are needed to rebuild ground-truth measurements from the
-# YOLO label files. If the script is run outside the project, GT analysis is
+# annotation table. If the script is run outside the project, GT analysis is
 # simply skipped (the rest of the figures still work).
 try:
     from processing.definitions import (
         MEASUREMENT_INDICES, MEASUREMENT_NAMES as DEF_MEASUREMENT_NAMES,
-        NUM_KEYPOINTS, KEYPOINT_NAMES,
+        KEYPOINT_NAMES,
     )
     from processing import config as proj_config
     HAVE_PROJECT = True
@@ -594,15 +594,21 @@ def fig_cumulative(df, conf_cols, output_dir):
 
 
 # --------------------------------------------------------------------------- #
-# Ground-truth error analysis (needs the YOLO label files)
+# Ground-truth error analysis (needs annotation_data/annotation_data.csv)
 # --------------------------------------------------------------------------- #
-# The labels live next to the images in the dataset:
-#     datasets/<dataset>/labels/<split>/<stem>.txt   (same stem as the image)
-# Each line is a YOLO-pose instance:
-#     class  cx cy w h  x1 y1 [v1]  x2 y2 [v2] ...    (all NORMALISED to [0,1])
-# We rebuild the GT measurements in PIXELS (so they compare with the '[px]'
-# columns) by de-normalising with the image width/height, then take the SUM of
-# segment lengths, exactly like the pipeline.
+# The ground truth is the repository's single annotation table
+# (annotation_tools/build_annotation_data.py): one row per image, keypoints in
+# PIXELS of the annotated image, in '<keypoint>_x' / '_y' / '_v' columns
+# (v = 0: not annotated). The GT measurements are rebuilt from them as the SUM of
+# segment lengths, exactly like the pipeline, so they compare with the '[px]'
+# columns. Conventions follow the pose module's `annotation_csv` adapter: the
+# object box is the table's bbox, else the keypoint envelope + a 10 px margin.
+#
+# /!\ The retained pose models were trained on these same annotations (each image
+# is in the training folds of most models of the ensemble): the errors measured
+# here are optimistic. The honest estimate is `cv_estimate` in
+# retained_models/pose/ensemble.json.
+GT_BOX_MARGIN = 10.0
 
 
 def _num(x) -> float:
@@ -627,89 +633,56 @@ def _spearman(a, b) -> float:
     return float(np.corrcoef(ra, rb)[0, 1])
 
 
-def build_gt_index(datasets_root: Path, splits):
-    """Map stem -> label file, stem -> image file, stem -> split (all splits)."""
-    labels, images, split_of = {}, {}, {}
-    if not datasets_root.is_dir():
-        return labels, images, split_of
-    for dataset_dir in datasets_root.iterdir():
-        if not dataset_dir.is_dir():
-            continue
-        for split in splits:
-            ldir = dataset_dir / "labels" / split
-            if ldir.is_dir():
-                for f in ldir.glob("*.txt"):
-                    labels.setdefault(f.stem, f)
-                    split_of.setdefault(f.stem, split)
-            idir = dataset_dir / "images" / split
-            if idir.is_dir():
-                for f in idir.iterdir():
-                    if f.is_file() and f.suffix.lower() in IMG_EXTS:
-                        images.setdefault(f.stem, f)
-    return labels, images, split_of
+def build_gt_index(annotation_csv: Path) -> dict:
+    """stem -> {'xy': (K,2) px, 'vis': (K,), 'area': px^2, 'size': (w, h)}.
 
-
-def parse_label_file(path: Path, num_kp: int):
-    """Return the largest-box instance as {'xy':(N,2) normalised, 'vis':(N,) or None}.
-
-    When several insects are annotated we keep the biggest box, which mirrors a
-    'largest_box' selection. This can disagree with the instance the pipeline
-    actually measured on multi-insect images (a known limitation for those).
+    Rows without any annotated keypoint (scale-only annotations) are skipped.
+    Returns {} when the table is missing.
     """
-    best, best_area = None, -1.0
-    try:
-        text = path.read_text().splitlines()
-    except OSError:
-        return None
-    for line in text:
-        t = line.split()
-        if len(t) < 5:
+    if not Path(annotation_csv).is_file():
+        return {}
+    table = pd.read_csv(annotation_csv, low_memory=False)
+    x_cols = [f"{kp}_x" for kp in KEYPOINT_NAMES]
+    if "image_name" not in table.columns or not all(c in table.columns for c in x_cols):
+        return {}
+
+    index = {}
+    for _, row in table.iterrows():
+        xy = np.array([[_num(row.get(f"{kp}_x")), _num(row.get(f"{kp}_y"))]
+                       for kp in KEYPOINT_NAMES], dtype=float)
+        vis = np.array([_num(row.get(f"{kp}_v")) for kp in KEYPOINT_NAMES], dtype=float)
+        vis = np.nan_to_num(vis, nan=0.0)
+        vis[~np.isfinite(xy).all(axis=1)] = 0
+        if not (vis > 0).any():
             continue
-        try:
-            vals = list(map(float, t[1:]))
-        except ValueError:
-            continue
-        w, h = vals[2], vals[3]
-        kp = vals[4:]
-        if len(kp) == num_kp * 3:
-            step = 3
-        elif len(kp) == num_kp * 2:
-            step = 2
-        else:
-            continue
-        xs, ys = kp[0::step][:num_kp], kp[1::step][:num_kp]
-        vis = kp[2::step][:num_kp] if step == 3 else None
-        area = w * h
-        if area > best_area:
-            best_area = area
-            best = {"xy": np.column_stack([xs, ys]).astype(float),
-                    "vis": (np.array(vis, dtype=float) if vis is not None else None),
-                    "area": float(area)}          # normalised bbox area (w*h)
-    return best
+        width, height = _num(row.get("width")), _num(row.get("height"))
+        box_w, box_h = _num(row.get("bbox_w")), _num(row.get("bbox_h"))
+        if not (box_w > 0 and box_h > 0):
+            seen = xy[vis > 0]
+            box_w = seen[:, 0].max() - seen[:, 0].min() + 2 * GT_BOX_MARGIN
+            box_h = seen[:, 1].max() - seen[:, 1].min() + 2 * GT_BOX_MARGIN
+        index.setdefault(Path(str(row["image_name"])).stem, {
+            "xy": xy, "vis": vis, "area": float(box_w * box_h),
+            "size": (width, height),
+        })
+    return index
 
 
-_DIMS_CACHE: dict = {}
+def _gt_in_csv_frame(inst: dict, row) -> tuple[np.ndarray, float]:
+    """GT keypoints and area in the pixel frame of the processed image.
 
-
-def get_dims(stem: str, row, images_map) -> tuple[int, int] | None:
-    """Image (width, height): from the CSV columns if present, else from disk."""
-    if "image_width" in row and "image_height" in row:
-        w, h = _num(row["image_width"]), _num(row["image_height"])
-        if w > 0 and h > 0:
-            return int(w), int(h)
-    p = images_map.get(stem)
-    if p is None:
-        return None
-    if p in _DIMS_CACHE:
-        return _DIMS_CACHE[p]
-    try:
-        from PIL import Image
-        with Image.open(p) as im:
-            wh = im.size                       # (width, height), header only
-        _DIMS_CACHE[p] = wh
-        return wh
-    except Exception:                          # noqa: BLE001
-        return None
+    The pipeline may have measured a resized copy of the annotated image: when the
+    CSV carries image_width/image_height and they differ, the GT is rescaled.
+    """
+    xy, area = inst["xy"].copy(), inst["area"]
+    width, height = inst["size"]
+    csv_w, csv_h = _num(row.get("image_width")), _num(row.get("image_height"))
+    if csv_w > 0 and csv_h > 0 and width > 0 and height > 0 and (csv_w, csv_h) != (width, height):
+        sx, sy = csv_w / width, csv_h / height
+        xy[:, 0] *= sx
+        xy[:, 1] *= sy
+        area *= sx * sy
+    return xy, area
 
 
 def gt_measurements_px(xy_px, vis, meas_indices) -> dict:
@@ -726,27 +699,27 @@ def gt_measurements_px(xy_px, vis, meas_indices) -> dict:
     return out
 
 
-def compute_errors(df, datasets_root: Path, splits, review_threshold,
+def compute_errors(df, annotation_csv: Path, review_threshold,
                    oks_kappa: float = 0.05, pck_alpha: float = 0.10):
-    """Match each CSV row to its GT label and accumulate the errors.
+    """Match each CSV row to its annotation and accumulate the errors.
 
-    Returns None if no labels were found. Otherwise a dict with, per measurement:
+    Returns None if no annotation was found. Otherwise a dict with, per measurement:
         per_measure[m] = {'rel':[], 'abs':[], 'conf':[]}
-    and, when the raw keypoints were exported to the CSV, per keypoint:
+    and, when the keypoints were exported to the CSV, per keypoint:
         per_kp[kp]     = {'err':[], 'nerr':[], 'conf':[]}   (px, px/scale, conf)
-    plus per-image aligned lists (img_mean_rel, img_needs_review, img_split,
-    img_oks, img_pck, img_overall_conf) and n_gt.
+    plus per-image aligned lists (img_mean_rel, img_needs_review, img_oks,
+    img_pck, img_overall_conf) and n_gt.
     """
-    labels_map, images_map, split_of = build_gt_index(datasets_root, splits)
-    if not labels_map:
+    gt_index = build_gt_index(annotation_csv)
+    if not gt_index:
         return None
 
     meas_names = [m for m in DEF_MEASUREMENT_NAMES
                   if m in MEASUREMENT_INDICES and (px_col(m) in df.columns)]
     per = {m: {"rel": [], "abs": [], "conf": [], "minconf": []} for m in meas_names}
-    img_mean_rel, img_nr, img_split = [], [], []
+    img_mean_rel, img_nr = [], []
 
-    # Keypoint-level setup (only if the raw kp columns are present).
+    # Keypoint-level setup (only if the kp columns are present).
     kp_names = keypoint_names_in(df)
     kp_index = {name: i for i, name in enumerate(KEYPOINT_NAMES)}
     per_kp = {kp: {"err": [], "nerr": [], "conf": []} for kp in kp_names}
@@ -755,19 +728,10 @@ def compute_errors(df, datasets_root: Path, splits, review_threshold,
 
     for _, row in df.iterrows():
         stem = Path(str(row.get("image_name", ""))).stem
-        lp = labels_map.get(stem)
-        if lp is None:
-            continue
-        inst = parse_label_file(lp, NUM_KEYPOINTS)
+        inst = gt_index.get(stem)
         if inst is None:
             continue
-        dims = get_dims(stem, row, images_map)
-        if dims is None:
-            continue
-        W, H = dims
-        xy = inst["xy"].copy()
-        xy[:, 0] *= W
-        xy[:, 1] *= H
+        xy, area_px = _gt_in_csv_frame(inst, row)
         vis = inst["vis"]
         gt = gt_measurements_px(xy, vis, {m: MEASUREMENT_INDICES[m] for m in meas_names})
         n_gt += 1
@@ -787,13 +751,12 @@ def compute_errors(df, datasets_root: Path, splits, review_threshold,
             rels.append(abs(pred - g) / g)
 
         # ---- keypoint-level errors + OKS + PCK ------------------------------
-        area_px = inst["area"] * W * H            # GT object scale s^2
         if kp_names and area_px > 0:
-            s = math.sqrt(area_px)
+            s = math.sqrt(area_px)                 # GT object scale
             oks_terms, pck_hits, pck_total = [], 0, 0
             for kp in kp_names:
                 idx = kp_index[kp]
-                if vis is not None and vis[idx] == 0:      # GT keypoint absent
+                if vis[idx] == 0:                           # GT keypoint absent
                     continue
                 px = _num(row.get(kp + KP_X_SUFFIX))
                 py = _num(row.get(kp + KP_Y_SUFFIX))
@@ -819,12 +782,10 @@ def compute_errors(df, datasets_root: Path, splits, review_threshold,
         if rels:
             img_mean_rel.append(float(np.mean(rels)))
             img_nr.append(bool(needs_review))
-            img_split.append(split_of.get(stem, "?"))
 
     return {"per_measure": per, "meas_names": meas_names,
             "img_mean_rel": np.array(img_mean_rel),
             "img_needs_review": np.array(img_nr, dtype=bool),
-            "img_split": np.array(img_split, dtype=object),
             "kp_names": kp_names, "per_kp": per_kp,
             "img_oks": np.array(img_oks),
             "img_pck": np.array(img_pck),
@@ -931,25 +892,6 @@ def fig_rel_error_boxplot(err, output_dir):
     ax.set_title("Relative error per measurement (outliers hidden)")
     ax.grid(axis="y", alpha=0.3)
     save(fig, output_dir, "rel_error_boxplot_per_measurement.png")
-
-
-def fig_error_by_split(err, output_dir):
-    """Mean relative error per split (train / val / test) to check generalisation."""
-    rel, split = err["img_mean_rel"], err["img_split"]
-    order = [s for s in ["train", "val", "test"] if s in set(split)]
-    if not order:
-        return
-    means = [rel[split == s].mean() for s in order]
-    sems = [rel[split == s].std() / math.sqrt(max(1, (split == s).sum())) for s in order]
-    counts = [(split == s).sum() for s in order]
-    fig, ax = plt.subplots(figsize=(6, 5))
-    ax.bar(range(len(order)), means, yerr=sems, capsize=5, color="#8172B3", alpha=0.85)
-    ax.set_xticks(range(len(order)))
-    ax.set_xticklabels([f"{s}\n(n={c})" for s, c in zip(order, counts)])
-    ax.set_ylabel("mean relative error (per image)")
-    ax.set_title("Mean error by split")
-    ax.grid(axis="y", alpha=0.3)
-    save(fig, output_dir, "mean_error_by_split.png")
 
 
 # ----- keypoint-level figures (need EXPORT_KEYPOINTS in the CSV) ------------ #
@@ -1109,10 +1051,10 @@ def fig_ensemble_spread(df, output_dir):
 
 
 def _min_kp_conf(row, m) -> float:
-    """Confiance agrégée d'une mesure = min des confiances de ses keypoints.
+    """Aggregated confidence of a measurement = min of the confidences of its keypoints.
 
-    NaN si aucune colonne '[kp_conf]' n'est présente (EXPORT_KEYPOINTS=False)
-    ou si aucun des keypoints de la mesure n'a de confiance exportée.
+    NaN if no '[kp_conf]' column is present (EXPORT_KEYPOINTS=False) or if none of
+    the keypoints of the measurement has an exported confidence.
     """
     cs = [_num(row.get(KEYPOINT_NAMES[i] + KP_CONF_SUFFIX))
           for i in MEASUREMENT_INDICES[m]]
@@ -1121,11 +1063,11 @@ def _min_kp_conf(row, m) -> float:
 
 
 def _auc(scores, labels) -> tuple[float, int, int]:
-    """AUC ROC par la statistique de Mann-Whitney (rangs, ties moyennés).
+    """ROC AUC through the Mann-Whitney statistic (ranks, averaged ties).
 
-    labels = True pour un vrai positif (mesure acceptable). Un score plus
-    élevé doit indiquer une mesure meilleure. Renvoie (auc, n_pos, n_neg) ;
-    auc = NaN si une des deux classes est vide.
+    labels = True for a true positive (acceptable measurement). A higher score must
+    indicate a better measurement. Returns (auc, n_pos, n_neg); auc = NaN if one of
+    the two classes is empty.
     """
     s = pd.Series(list(scores), dtype=float)
     y = pd.Series(list(labels), dtype=bool)
@@ -1134,16 +1076,16 @@ def _auc(scores, labels) -> tuple[float, int, int]:
     n_pos, n_neg = int(y.sum()), int((~y).sum())
     if n_pos == 0 or n_neg == 0:
         return float("nan"), n_pos, n_neg
-    r = s.rank()                                  # rangs croissants, ties moyennés
+    r = s.rank()                                  # increasing ranks, averaged ties
     auc = (r[y].sum() - n_pos * (n_pos + 1) / 2.0) / (n_pos * n_neg)
     return float(auc), n_pos, n_neg
 
 def _roc_curve(scores, labels):
-    """Courbe ROC sans sklearn.
+    """ROC curve without sklearn.
 
-    Renvoie (fpr, tpr, n_pos, n_neg) avec les seuils par ordre décroissant de
-    score, ou None si une des deux classes est vide. Les ex-aequo sont
-    regroupés sur un seul point (un seuil ne peut pas les séparer).
+    Returns (fpr, tpr, n_pos, n_neg) with the thresholds in decreasing score order,
+    or None if one of the two classes is empty. Ties are grouped on a single point
+    (a threshold cannot separate them).
     """
     s = pd.Series(list(scores), dtype=float)
     y = pd.Series(list(labels), dtype=bool)
@@ -1154,23 +1096,23 @@ def _roc_curve(scores, labels):
         return None
     order = np.argsort(-s, kind="mergesort")
     s, y = s[order], y[order]
-    keep = np.r_[np.diff(s) != 0, True]          # dernier index de chaque score
+    keep = np.r_[np.diff(s) != 0, True]          # last index of each score
     tp = np.cumsum(y)[keep]
     fp = np.cumsum(~y)[keep]
     return (np.r_[0.0, fp / n_neg], np.r_[0.0, tp / n_pos], n_pos, n_neg)
 
 def fig_auc_min_aggregation(err, output_dir, tol=0.05):
-    """AUC par mesure du baseline 'min des confiances kp' contre le label
-    'erreur relative < tol'.
+    """AUC per measurement of the 'min of the kp confidences' baseline against the
+    'relative error < tol' label.
 
-    C'est le test de faisabilité à faire avant d'investir dans une agrégation
-    apprise : si le min des confiances kp sépare mal les mesures bonnes des
-    mauvaises (AUC ~ 0.5-0.6), aucune pondération de ces mêmes confiances ne
-    fera beaucoup mieux, et il faut d'autres features. La confiance déjà
-    stockée dans le CSV est tracée à côté comme point de comparaison.
+    It is the feasibility test to run before investing in a learned aggregation: if
+    the min of the kp confidences separates the good measurements from the bad ones
+    poorly (AUC ~ 0.5-0.6), no weighting of these same confidences will do much
+    better, and other features are needed. The confidence already stored in the CSV
+    is plotted next to it as a comparison point.
 
-    La ligne pointillée à 0.5 est le hasard. La classe positive est la mesure
-    ACCEPTABLE, donc une AUC > 0.5 signifie que la confiance est informative.
+    The dashed line at 0.5 is chance. The positive class is the ACCEPTABLE
+    measurement, so an AUC > 0.5 means that the confidence is informative.
     """
     names, auc_min, auc_csv, rates, ns = [], [], [], [], []
     for m in err["meas_names"]:
@@ -1178,7 +1120,7 @@ def fig_auc_min_aggregation(err, output_dir, tol=0.05):
         rel = np.asarray(d["rel"], dtype=float)
         if rel.size == 0:
             continue
-        good = rel < tol                              # label: vrai positif
+        good = rel < tol                              # label: true positive
         a_min, n_pos, n_neg = _auc(d.get("minconf", []), good)
         a_csv, _, _ = _auc(d["conf"], good)
         names.append(m)
@@ -1188,13 +1130,13 @@ def fig_auc_min_aggregation(err, output_dir, tol=0.05):
         ns.append(n_pos + n_neg)
 
     if not names:
-        print("[auc] aucune mesure avec des erreurs GT -> figure sautee.")
+        print("[auc] no measurement with GT errors -> figure skipped.")
         return None
     if all(math.isnan(a) for a in auc_min):
-        print("[auc] pas de colonnes '[kp_conf]' dans le CSV -> agregation min "
-              "indisponible (mettre EXPORT_KEYPOINTS=True et relancer).")
+        print("[auc] no '[kp_conf]' columns in the CSV -> min aggregation "
+              "unavailable (set EXPORT_KEYPOINTS=True and rerun).")
 
-    # AUC poolee, toutes mesures confondues
+    # pooled AUC, all measurements together
     pooled_s = np.concatenate([np.asarray(err["per_measure"][m].get("minconf", []),
                                           dtype=float) for m in names]) \
         if names else np.array([])
@@ -1207,17 +1149,17 @@ def fig_auc_min_aggregation(err, output_dir, tol=0.05):
     w = 0.4
     fig, ax = plt.subplots(figsize=(max(8, len(names) * 0.55), 6))
     ax.bar(x - w / 2, auc_min, w, color="#4C72B0", alpha=0.85,
-           label="min des confiances kp")
+           label="min of the kp confidences")
     ax.bar(x + w / 2, auc_csv, w, color="#DD8452", alpha=0.85,
-           label="confiance mesure (CSV)")
+           label="measurement confidence (CSV)")
     ax.axhline(0.5, color="k", ls="--", lw=1)
     ax.set_xticks(x)
     ax.set_xticklabels([f"{m}\n(n={n}, {r:.0f}% ok)" for m, n, r in zip(names, ns, rates)],
                        rotation=90, fontsize=6)
-    ax.set_ylabel(f"AUC (positif = erreur relative < {tol:.0%})")
+    ax.set_ylabel(f"AUC (positive = relative error < {tol:.0%})")
     ax.set_ylim(0, 1)
-    ax.set_title(f"Pouvoir discriminant de la confiance par mesure "
-                 f"(AUC poolee min-kp = {pooled_auc:.3f})")
+    ax.set_title(f"Discriminating power of the confidence per measurement "
+                 f"(pooled min-kp AUC = {pooled_auc:.3f})")
     ax.grid(axis="y", alpha=0.3)
     ax.legend(fontsize=8)
     save(fig, output_dir, "auc_min_aggregation_per_measurement.png")
@@ -1229,16 +1171,16 @@ def fig_auc_min_aggregation(err, output_dir, tol=0.05):
 def fig_roc_grid(err, output_dir, tol=0.05, score_key="minconf",
                  targets=(0.001, 0.005, 0.01), n_rows=3, n_cols=3, per_axes=3,
                  min_neg_factor=5.0, order="csv"):
-    """Grille de mini-ROC en axe x logarithmique, 3 mesures par sous-figure.
+    """Grid of mini-ROCs on a logarithmic x axis, 3 measurements per subplot.
 
-    Positif = mesure acceptable (erreur relative < tol). L'axe x est en log
-    pour lire le régime qui vous intéresse (FPR de 0.1 a 1%) : en échelle
-    linéaire toute cette zone est écrasée contre l'axe et illisible.
+    Positive = acceptable measurement (relative error < tol). The x axis is
+    logarithmic to read the regime of interest (FPR from 0.1 to 1%): on a linear
+    scale this whole zone is crushed against the axis and unreadable.
 
-    Résolution : une mesure ayant n_neg négatifs ne peut pas estimer un FPR
-    plus fin que 1/n_neg. La portion de courbe sous min_neg_factor/n_neg est
-    tracée en pointillé fin -- elle est définie par une poignée d'échantillons
-    et ne doit pas être lue comme une performance atteignable.
+    Resolution: a measurement with n_neg negatives cannot estimate an FPR finer than
+    1/n_neg. The part of the curve below min_neg_factor/n_neg is drawn as a thin
+    dotted line -- it is defined by a handful of samples and must not be read as an
+    achievable performance.
     """
     score_of = lambda d: d.get(score_key) if d.get(score_key) else d["conf"]
 
@@ -1250,24 +1192,24 @@ def fig_roc_grid(err, output_dir, tol=0.05, score_key="minconf",
             continue
         roc = _roc_curve(score_of(d), rel < tol)
         if roc is None:
-            print(f"[roc] {m}: une seule classe presente -> ignoree.")
+            print(f"[roc] {m}: a single class present -> skipped.")
             continue
         fpr, tpr, n_pos, n_neg = roc
         curves.append({"name": m, "fpr": fpr, "tpr": tpr, "n_pos": n_pos,
                        "n_neg": n_neg, "auc": float(np.trapezoid(tpr, fpr))})
 
     if not curves:
-        print("[roc] aucune mesure exploitable -> figure sautee.")
+        print("[roc] no usable measurement -> figure skipped.")
         return None
     if order == "auc":
-        curves.sort(key=lambda c: c["auc"])       # les pires en premier
+        curves.sort(key=lambda c: c["auc"])       # the worst first
     cap = n_rows * n_cols * per_axes
     if len(curves) > cap:
-        print(f"[roc] {len(curves)} mesures pour {cap} emplacements -> "
-              f"{len(curves) - cap} non tracee(s).")
+        print(f"[roc] {len(curves)} measurements for {cap} slots -> "
+              f"{len(curves) - cap} not plotted.")
         curves = curves[:cap]
 
-    # borne gauche commune : la resolution de la mesure la mieux fournie
+    # shared left bound: the resolution of the best-supplied measurement
     best_res = min(1.0 / c["n_neg"] for c in curves)
     xmin = max(1e-4, best_res * 0.5)
     palette = ["#4C72B0", "#C44E52", "#55A868"]
@@ -1284,7 +1226,7 @@ def fig_roc_grid(err, output_dir, tol=0.05, score_key="minconf",
         for c, col in zip(group, palette):
             floor = min_neg_factor / c["n_neg"]
             f = np.clip(c["fpr"], xmin, 1.0)
-            # courbe complete en pointillé fin, puis zone fiable en trait plein
+            # full curve as a thin dotted line, then the reliable zone as a solid line
             ax.plot(f, c["tpr"], drawstyle="steps-post", color=col, lw=0.8,
                     ls=":", alpha=0.7)
             solid = c["fpr"] >= floor
@@ -1294,10 +1236,10 @@ def fig_roc_grid(err, output_dir, tol=0.05, score_key="minconf",
                         label=f"{c['name']}  AUC={c['auc']:.2f}  n-={c['n_neg']}")
             else:
                 ax.plot([], [], color=col, lw=1.6,
-                        label=f"{c['name']}  (n-={c['n_neg']}, trop peu)")
+                        label=f"{c['name']}  (n-={c['n_neg']}, too few)")
         for t in targets:
             ax.axvline(t, color="grey", lw=0.6, ls="--", alpha=0.6)
-        ax.plot([xmin, 1], [xmin, 1], color="k", lw=0.6, alpha=0.4)  # hasard
+        ax.plot([xmin, 1], [xmin, 1], color="k", lw=0.6, alpha=0.4)  # chance
         ax.set_xscale("log")
         ax.set_xlim(xmin, 1.0)
         ax.set_ylim(0, 1.02)
@@ -1305,16 +1247,16 @@ def fig_roc_grid(err, output_dir, tol=0.05, score_key="minconf",
         ax.legend(fontsize=6, loc="upper left", framealpha=0.9)
         ax.tick_params(labelsize=7)
 
-    fig.suptitle(f"ROC par mesure, score = {score_key} "
-                 f"(positif : erreur relative < {tol:.0%}) -- "
-                 f"pointillé = sous la résolution de l'échantillon")
-    fig.supxlabel("FPR (log) -- traits verticaux : " +
+    fig.suptitle(f"ROC per measurement, score = {score_key} "
+                 f"(positive: relative error < {tol:.0%}) -- "
+                 f"dotted = below the sample resolution")
+    fig.supxlabel("FPR (log) -- vertical lines: " +
                   ", ".join(f"{t:.1%}" for t in targets), fontsize=9)
-    fig.supylabel("rappel (TPR)", fontsize=9)
+    fig.supylabel("recall (TPR)", fontsize=9)
     fig.tight_layout(rect=[0.01, 0.01, 1, 0.96])
     save(fig, output_dir, "roc_grid_per_measurement.png")
 
-    # rappel atteignable a chaque FPR cible, pour le summary
+    # achievable recall at each target FPR, for the summary
     out = {}
     for c in curves:
         rec = {}
@@ -1348,12 +1290,6 @@ def write_summary(df, conf_cols, output_dir, review_threshold,
                  f"({100.0 * (n - n_no_pose) / n:.1f}%)" if n else "n/a")
     lines.append(f"images without a pose          : {n_no_pose} "
                  f"({100.0 * n_no_pose / n:.1f}%)" if n else "n/a")
-    if "in_train" in df.columns:
-        lines.append(f"in_train = 1                   : "
-                     f"{int(pd.to_numeric(df['in_train'], errors='coerce').fillna(0).sum())}")
-    if "in_val" in df.columns:
-        lines.append(f"in_val = 1                     : "
-                     f"{int(pd.to_numeric(df['in_val'], errors='coerce').fillna(0).sum())}")
     lines.append("")
 
     lines.append("-" * 64)
@@ -2049,11 +1985,9 @@ def main():
     p.add_argument("--annotations", default="annotations.json",
                    help="JSON of manual scale-bar annotations (from annotate_gui.py). "
                         "Used for the scale_method confusion matrix.")
-    p.add_argument("--datasets-root", default=None,
-                   help="Root of the YOLO datasets (default: the project's "
-                        "config.DATASETS_ROOT). Used to find the GT label files.")
-    p.add_argument("--gt-splits", nargs="*", default=["train", "val", "test"],
-                   help="Splits to read GT labels from (default: train val test).")
+    p.add_argument("--annotation-data", default=None,
+                   help="Annotation table holding the ground-truth keypoints "
+                        "(default: the project's config.ANNOTATION_DATA_CSV).")
     p.add_argument("--oks-kappa", type=float, default=0.05,
                    help="OKS falloff constant (uncalibrated; default 0.05).")
     p.add_argument("--pck-alpha", type=float, default=0.10,
@@ -2128,17 +2062,18 @@ def main():
     elif not HAVE_PROJECT:
         print("[gt] skipped: could not import the project (run from the project root).")
     else:
-        datasets_root = Path(args.datasets_root) if args.datasets_root else proj_config.DATASETS_ROOT
-        print(f"[gt] reading labels under {datasets_root} (splits: {args.gt_splits})")
-        err = compute_errors(df, datasets_root, args.gt_splits, args.review_threshold,
+        annotation_csv = (Path(args.annotation_data) if args.annotation_data
+                          else proj_config.ANNOTATION_DATA_CSV)
+        print(f"[gt] reading the ground-truth keypoints of {annotation_csv}")
+        err = compute_errors(df, annotation_csv, args.review_threshold,
                              oks_kappa=args.oks_kappa, pck_alpha=args.pck_alpha)
         if err is None:
-            print("[gt] no label files found -> GT figures skipped.")
+            print("[gt] no annotated keypoints found -> GT figures skipped.")
         elif err["n_gt"] == 0:
-            print("[gt] labels found but no CSV image matched them -> GT figures skipped.")
+            print("[gt] annotations found but no CSV image matched them -> GT figures skipped.")
             err = None
         else:
-            print(f"[gt] matched {err['n_gt']} images to a GT label.")
+            print(f"[gt] matched {err['n_gt']} images to their annotation.")
             err_corr = fig_error_vs_conf_correlation(err, args.output_dir)
             auc_stats = fig_auc_min_aggregation(err, args.output_dir, tol=0.1)
             roc_stats = fig_roc_grid(err, args.output_dir, tol=0.1,
@@ -2146,7 +2081,6 @@ def main():
             fig_error_vs_conf_scatter(err, args.output_dir)
             fig_mean_error_vs_needs_review(err, args.output_dir)
             fig_rel_error_boxplot(err, args.output_dir)
-            fig_error_by_split(err, args.output_dir)
             # keypoint-level figures (only if the raw kp columns are present)
             if err["kp_names"] and err["img_oks"].size:
                 oks_corr = fig_oks_vs_overall_conf(err, args.output_dir)

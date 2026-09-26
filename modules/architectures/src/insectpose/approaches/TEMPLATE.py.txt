@@ -1,18 +1,18 @@
-"""GABARIT D'APPROCHE - copier en <nom>.py et retirer l'extension .txt.
+"""APPROACH TEMPLATE - copy to <name>.py and remove the .txt extension.
 
-Extension .txt volontaire : ce fichier ne doit PAS etre importe par load_plugins,
-sinon il apparaitrait dans le registre et dans le smoke test.
+Deliberate .txt extension: this file must NOT be imported by load_plugins, otherwise it
+would appear in the registry and in the smoke test.
 
-Procedure complete : CONVENTIONS.md §11 (6 artefacts, pas un de plus) :
-  1. src/insectpose/approaches/<nom>.py          <- ce fichier
-  2. configs/approach/<nom>.yaml
-  3. search_space (ici ou dans tuning/search_spaces.py)
-  4. tests/approaches/test_<nom>.py
-  5. configs/experiment/exp_<lettre>_<nom>.yaml
-  6. une entree dans DECISIONS.md
+Full procedure: CONVENTIONS.md §11 (6 artefacts, not one more):
+  1. src/insectpose/approaches/<name>.py          <- this file
+  2. configs/approach/<name>.yaml
+  3. search_space (here or in tuning/search_spaces.py)
+  4. tests/approaches/test_<name>.py
+  5. configs/experiment/exp_<letter>_<name>.yaml
+  6. an entry in DECISIONS.md
 
-Si vous devez modifier un 7e fichier existant (evaluation/, training/, tuning/,
-reporting/), ARRETEZ-VOUS : c'est un defaut de conception a remonter, pas a contourner.
+If you have to modify a 7th existing file (evaluation/, training/, tuning/,
+reporting/), STOP: it is a design defect to report, not to work around.
 """
 
 from __future__ import annotations
@@ -28,36 +28,36 @@ from insectpose.data.datamodule import FoldData, ImageSet
 from insectpose.registry import register_approach
 
 
-@register_approach("NOM_DE_L_APPROCHE")  # doit etre identique au nom du YAML
+@register_approach("APPROACH_NAME")  # must be identical to the name of the YAML
 class TemplateApproach(BaseApproach):
-    """Une phrase : ce que cette approche teste et ce qu'elle suppose."""
+    """One sentence: what this approach tests and what it assumes."""
 
     def fit(self, data: FoldData, ctx: RunContext) -> None:
-        """Entraine sur data.train, valide sur data.val.
+        """Train on data.train, validate on data.val.
 
-        REGLES :
-        - ne jamais lire data.test (un test unitaire le verifie) ;
-        - ecrire uniquement dans ctx.subdir(...) ;
-        - seeds via ctx.seed('...') ;
-        - les metriques du framework servent au monitoring, jamais a la comparaison ;
-        - renseigner les couts dans ctx.extra (model_params, train_time_s, peak_vram_mb).
+        RULES:
+        - never read data.test (a unit test checks it);
+        - write only into ctx.subdir(...);
+        - seeds through ctx.seed('...');
+        - the framework metrics are for monitoring, never for comparison;
+        - fill the costs in ctx.extra (model_params, train_time_s, peak_vram_mb).
         """
         raise NotImplementedError
 
     def predict_instances(self, images: ImageSet, ctx: RunContext) -> pd.DataFrame:
-        """Retourne les predictions DANS LE REPERE DE L'IMAGE D'ORIGINE.
+        """Return the predictions IN THE FRAME OF THE ORIGINAL IMAGE.
 
-        Colonnes : image_id, bbox_xywh, bbox_score, kpts_xy, kpts_score,
-        keypoint_schema, bbox_source, inference_ms (optionnel).
+        Columns: image_id, bbox_xywh, bbox_score, kpts_xy, kpts_score,
+        keypoint_schema, bbox_source, inference_ms (optional).
 
-        PIEGES :
-        - travail sur crop -> retro-projeter avec invert_affine (§9.3) ;
-        - modele multi-datasets -> reprojeter de l'espace union vers le schema LOCAL ;
-        - ne PAS seuiller les scores ici : le seuillage est une operation d'evaluation.
+        PITFALLS:
+        - work on a crop -> back-project with invert_affine (§9.3);
+        - multi-dataset model -> reproject from the union space to the LOCAL schema;
+        - do NOT threshold the scores here: thresholding is an evaluation operation.
         """
         raise NotImplementedError
 
     @classmethod
     def load(cls, run_dir: Path, cfg: Any) -> TemplateApproach:
-        """Recharge le modele depuis run_dir/weights sans reentrainement."""
+        """Reload the model from run_dir/weights without retraining."""
         raise NotImplementedError

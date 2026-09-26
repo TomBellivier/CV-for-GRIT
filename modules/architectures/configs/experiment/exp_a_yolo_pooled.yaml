@@ -1,6 +1,6 @@
 # @package _global_
-# Experience A : YOLO-pose entraine sur l'ensemble des datasets, une classe "insecte".
-# Reference a laquelle les approches par dataset, LoRA et BatchNorm-par-groupe se comparent.
+# Experiment A: YOLO-pose trained on all the datasets, one "insect" class.
+# Reference the per-dataset, LoRA and BatchNorm-per-group approaches compare with.
 defaults:
   - override /data: pooled
   - override /approach: yolo_pooled

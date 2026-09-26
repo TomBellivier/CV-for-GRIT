@@ -1,113 +1,113 @@
-# CONVENTIONS.md — Règles d'architecture et de génération de code
+# CONVENTIONS.md — Architecture and code-generation rules
 
-**Projet :** estimation de pose sur 4 datasets d'insectes (Coleoptera, Diptera, Hymenoptera, Lepidoptera)
-**Statut :** contrat normatif. Ce fichier fait autorité sur tout autre document du dépôt.
-**Version du contrat :** 2.0 — décisions de protocole tranchées (ADR-0006 à 0015)
-
----
-
-## 0. Comment utiliser ce fichier
-
-Ce document est destiné à être fourni **en entier et en contexte** à toute IA générative (ou tout contributeur humain) chargée d'écrire du code dans ce dépôt.
-
-Règle zéro : **toute génération de code doit citer, en commentaire d'en-tête du fichier produit, les sections de ce document qu'elle applique.** Si une instruction utilisateur contredit ce fichier, l'IA doit s'arrêter et signaler le conflit au lieu de trancher seule.
-
-Vocabulaire normatif : **DOIT** / **NE DOIT PAS** = contrainte dure, non négociable. **DEVRAIT** = recommandation forte, dérogation possible si documentée dans `DECISIONS.md`. **PEUT** = libre.
+**Project:** pose estimation on 4 insect datasets (Coleoptera, Diptera, Hymenoptera, Lepidoptera)
+**Status:** normative contract. This file takes precedence over any other document of the repository.
+**Contract version:** 2.2 — protocol decisions settled (ADR-0006 to 0039); keypoint schema and measurements in `kp_infos.yaml`, analyses in `<repo>/results/pose/`; everything written in English (§8.3)
 
 ---
 
-## 1. Principes directeurs
+## 0. How to use this file
 
-1. **L'approche est un plugin, pas une branche de `if`.** Ajouter une 6ᵉ approche NE DOIT PAS modifier le code d'entraînement générique, d'évaluation, d'optimisation ou de reporting. Si vous devez modifier `evaluation/` pour ajouter une approche, l'abstraction est mauvaise : signalez-le.
-2. **Les contrats de données sont l'API du projet.** Les approches ne communiquent jamais entre elles ni avec l'évaluateur par des objets Python : elles communiquent par des **fichiers au format figé** (§3). Cela permet d'entraîner avec Ultralytics, PyTorch pur, HuggingFace/PEFT, ou un modèle externe, sans que l'évaluateur ne le sache jamais.
-3. **Une seule implémentation des métriques.** Aucune métrique NE DOIT être lue depuis les logs d'un framework tiers. Les métriques internes d'Ultralytics, de PyTorch Lightning ou d'un autre entraîneur servent **uniquement au monitoring**, jamais à la comparaison entre approches (§7.1).
-4. **Séparation stricte : `fit` ≠ `predict` ≠ `evaluate` ≠ `aggregate`.** Quatre étapes, quatre artefacts, quatre points de reprise. On DOIT pouvoir ré-évaluer une expérience vieille de trois mois sans réentraîner.
-5. **Tout est configuration ; rien n'est en dur.** Aucun chemin, hyperparamètre, seuil, taille d'image, nom de classe ou de keypoint NE DOIT apparaître littéralement dans un `.py`. Tout vient d'un YAML ou du `RunContext`.
-6. **Reproductibilité par construction.** `run_id` déterministe, seeds explicites, config résolue sérialisée dans le dossier de run, versions de dépendances figées (§6.4).
-7. **Coût de l'ignorance.** Toute approche DOIT être exécutable en mode `smoke` (2 epochs, 8 images, 1 fold) pour valider le branchement de bout en bout en < 2 minutes, avant tout entraînement réel.
+This document is meant to be given **in full and in context** to any generative AI (or human contributor) asked to write code in this repository.
+
+Rule zero: **every code generation must cite, in the header comment of the file it produces, the sections of this document it applies.** If a user instruction contradicts this file, the AI must stop and report the conflict instead of deciding alone.
+
+Normative vocabulary: **MUST** / **MUST NOT** = hard, non-negotiable constraint. **SHOULD** = strong recommendation, a deviation is possible if documented in `DECISIONS.md`. **MAY** = free.
 
 ---
 
-## 2. Arborescence du dépôt
+## 1. Guiding principles
+
+1. **An approach is a plugin, not an `if` branch.** Adding a 6th approach MUST NOT modify the generic training, evaluation, optimisation or reporting code. If you have to modify `evaluation/` to add an approach, the abstraction is wrong: report it.
+2. **The data contracts are the API of the project.** Approaches never talk to each other or to the evaluator through Python objects: they communicate through **files with a frozen format** (§3). This makes it possible to train with Ultralytics, plain PyTorch, HuggingFace/PEFT or an external model without the evaluator ever knowing.
+3. **A single implementation of the metrics.** No metric MUST be read from the logs of a third-party framework. The internal metrics of Ultralytics, PyTorch Lightning or any other trainer are **for monitoring only**, never for comparing approaches (§7.1).
+4. **Strict separation: `fit` ≠ `predict` ≠ `evaluate` ≠ `aggregate`.** Four steps, four artefacts, four resume points. It MUST be possible to re-evaluate a three-month-old experiment without retraining.
+5. **Everything is configuration; nothing is hard-coded.** No path, hyperparameter, threshold, image size, class or keypoint name MUST appear literally in a `.py`. Everything comes from a YAML file or from the `RunContext`.
+6. **Reproducibility by construction.** Deterministic `run_id`, explicit seeds, resolved config serialised in the run folder, pinned dependency versions (§6.4).
+7. **Cost of ignorance.** Every approach MUST run in `smoke` mode (2 epochs, 8 images, 1 fold) to validate the end-to-end wiring in < 2 minutes, before any real training.
+
+---
+
+## 2. Repository layout
 
 ```
 insectpose/
-├── CONVENTIONS.md              # ce fichier — fait autorité
-├── DECISIONS.md                # journal des choix méthodologiques (ADR, append-only)
-├── README.md                   # démarrage rapide uniquement, pas de doctrine
-├── pyproject.toml              # dépendances figées, config ruff/mypy/pytest
-├── Makefile                    # raccourcis: make smoke / make tune / make eval / make report
+├── CONVENTIONS.md              # this file — authoritative
+├── DECISIONS.md                # log of methodological choices (ADR, append-only)
+├── README.md                   # quick start only, no doctrine
+├── pyproject.toml              # pinned dependencies, ruff/mypy/pytest config
+├── Makefile                    # shortcuts: make smoke / make tune / make eval / make report
 │
-├── configs/                    # composition Hydra — SEULE source de paramètres
-│   ├── config.yaml             # config racine + defaults list
-│   ├── paths.yaml              # racines de chemins (surchargées par machine)
+├── configs/                    # Hydra composition — the ONLY source of parameters
+│   ├── config.yaml             # root config + defaults list
+│   ├── paths.yaml              # path roots (overridden per machine)
 │   ├── data/                   # coleoptera.yaml diptera.yaml ... pooled.yaml
-│   ├── keypoints/              # schémas de keypoints par dataset + union (§3.1)
+│   ├── keypoints/              # study schemas; the project's one is <repo>/kp_infos.yaml (§3.1)
 │   ├── approach/               # yolo_pooled.yaml yolo_per_dataset.yaml
 │   │                           # detect_then_pose.yaml lora.yaml group_bn.yaml
 │   ├── cv/                     # kfold5.yaml kfold5_grouped.yaml holdout.yaml
-│   ├── eval/                   # default.yaml (métriques, seuils, sigmas OKS)
-│   ├── tuning/                 # optuna_default.yaml + budgets par approche
-│   └── experiment/             # compositions nommées et figées (§5.3)
+│   ├── eval/                   # default.yaml (metrics, thresholds, OKS sigmas)
+│   ├── tuning/                 # optuna_default.yaml + per-approach budgets
+│   └── experiment/             # named, frozen compositions (§5.3)
 │
 ├── data/
-│   ├── raw/                    # IMMUABLE, jamais écrit par le code, jamais commité
-│   ├── interim/                # sorties d'adaptateurs, régénérable
-│   ├── processed/              # format canonique (§3.2), régénérable
-│   └── splits/                 # assignations de folds versionnées et hashées (§3.3)
+│   ├── raw/                    # IMMUTABLE, never written by the code, never committed
+│   ├── interim/                # adapter outputs, rebuildable
+│   ├── processed/              # canonical format (§3.2), rebuildable
+│   └── splits/                 # versioned and hashed fold assignments (§3.3)
 │
 ├── src/insectpose/
-│   ├── contracts.py            # dataclasses/TypedDict des 5 contrats — INTOUCHABLE sans bump
-│   ├── registry.py             # registre par nom (approches, métriques, adaptateurs)
-│   ├── paths.py                # unique endroit qui construit des chemins
-│   ├── context.py              # RunContext (run_id, seed, fold, dossiers, logger)
+│   ├── contracts.py            # dataclasses/TypedDict of the 5 contracts — UNTOUCHABLE without a bump
+│   ├── registry.py             # registry by name (approaches, metrics, adapters)
+│   ├── paths.py                # the only place that builds paths
+│   ├── context.py              # RunContext (run_id, seed, fold, folders, logger)
 │   │
 │   ├── data/
-│   │   ├── schema.py           # validation du format canonique
-│   │   ├── adapters/           # raw -> canonique, un module par source
-│   │   ├── keypoints.py        # mapping par-dataset <-> espace union
-│   │   ├── datamodule.py       # canonique -> batches (superset de champs, §4.3)
-│   │   └── splits.py           # génération et lecture des folds
+│   │   ├── schema.py           # validation of the canonical format
+│   │   ├── adapters/           # raw -> canonical, one module per source
+│   │   ├── keypoints.py        # per-dataset <-> union space mapping
+│   │   ├── datamodule.py       # canonical -> batches (superset of fields, §4.3)
+│   │   └── splits.py           # fold generation and reading
 │   │
 │   ├── approaches/
-│   │   ├── base.py             # Protocol Approach + BaseApproach
+│   │   ├── base.py             # Approach protocol + BaseApproach
 │   │   ├── yolo_pooled.py
 │   │   ├── yolo_per_dataset.py
 │   │   ├── detect_then_pose.py
 │   │   ├── lora.py
 │   │   └── group_bn.py
 │   │
-│   ├── models/                 # briques réutilisables (backbones, têtes, adaptateurs LoRA, GroupBN)
-│   ├── training/               # boucles génériques, callbacks, early stopping
+│   ├── models/                 # reusable building blocks (backbones, heads, LoRA adapters, GroupBN)
+│   ├── training/               # generic loops, callbacks, early stopping
 │   ├── evaluation/
-│   │   ├── metrics/            # une métrique = un module enregistré
-│   │   ├── matching.py         # appariement pred<->gt (OKS/IoU), partagé
+│   │   ├── metrics/            # one metric = one registered module
+│   │   ├── matching.py         # pred<->gt matching (OKS/IoU), shared
 │   │   ├── evaluator.py        # predictions.parquet -> metrics.parquet
-│   │   └── aggregate.py        # tous les runs -> results/master.parquet
+│   │   └── aggregate.py        # every run -> results/master.parquet
 │   ├── tuning/
-│   │   ├── search_spaces.py    # espaces Optuna, un par approche
-│   │   └── objective.py        # objectif générique (§6.3)
-│   ├── reporting/              # tableaux, figures, tests statistiques
-│   ├── cli.py                  # points d'entrée (§5.4)
+│   │   ├── search_spaces.py    # Optuna spaces, one per approach
+│   │   └── objective.py        # generic objective (§6.3)
+│   ├── reporting/              # tables, figures, statistical tests
+│   ├── cli.py                  # entry points (§5.4)
 │   └── utils/                  # seed, io, hashing, geometry, logging
 │
-├── runs/                       # artefacts d'exécution, non commités (§8)
-├── results/                    # agrégats consolidés, parquet + figures
-├── reports/                    # livrables (notebooks exportés, PDF, slides)
-└── tests/                      # unitaires + contrat + smoke (§10)
+├── runs/                       # run artefacts, not committed (§8)
+└── tests/                      # unit + contract + smoke (§10)
 ```
 
-**Règle d'or de l'arborescence :** un fichier `.py` NE DOIT PAS écrire hors de `runs/<run_id>/`, `data/interim/`, `data/processed/`, `data/splits/` et `results/`. Toute autre écriture est un bug.
+The analyses (`paths.results`: aggregates, figures, reports) are not in the module: they go to `<repo>/results/pose/`, with those of the other modules (see `results/README.md`).
+
+**Golden rule of the layout:** a `.py` file MUST NOT write outside `runs/<run_id>/`, `data/interim/`, `data/processed/`, `data/splits/`, `paths.results` (`<repo>/results/pose/`) and `paths.retained` (`<repo>/retained_models/pose/`, export of the retained models, ADR-0037). Any other write is a bug.
 
 ---
 
-## 3. Les cinq contrats
+## 3. The five contracts
 
-Ce sont les cinq formats figés qui rendent le projet modulaire. Chacun porte un champ `schema_version`. **Modifier un contrat DOIT se faire par incrément de version + lecteur rétrocompatible**, jamais par modification en place.
+These are the five frozen formats that make the project modular. Each one carries a `schema_version` field. **Changing a contract MUST be done by a version increment + a backward-compatible reader**, never by an in-place change.
 
-### 3.1 Contrat 0 — Schéma de keypoints (`kp_infos.yaml`, racine du depot)
+### 3.1 Contract 0 — Keypoint schema (`kp_infos.yaml`, repository root)
 
-Les quatre datasets partagent **un seul schéma de 42 points** (ADR-0006). L'espace union est ce schéma lui-même : le mapping est l'identité, et le mécanisme d'union reste en place pour absorber une divergence future sans refonte.
+The four datasets share **a single 42-point schema** (ADR-0006). The union space is that schema itself: the mapping is the identity, and the union mechanism stays in place to absorb a future divergence without a redesign.
 
 ```yaml
 schema_version: 1
@@ -116,2202 +116,487 @@ status: VALIDATED
 union_space: insect42_v1
 sigma_from_difficulty: {scale: 0.0025}   # sigma = difficulty * scale (ADR-0007)
 keypoints:
-  - {name: thorax-left,  union: thorax-left,  difficulty: 30, flip: thorax-right}
-  - {name: thorax-right, union: thorax-right, difficulty: 30, flip: thorax-left}
-skeleton: [[0, 5], [0, 12], ...]         # 51 arêtes anatomiques
+  - {name: thorax-left,  difficulty: 30, flip: thorax-right}
+  - {name: thorax-right, difficulty: 30, flip: thorax-left}
+skeleton: [[0, 5], [0, 12], ...]         # 51 anatomical edges
 ```
 
-Règles :
+Rules:
 
-- **L'ordre des 42 points est figé à vie** : il est encodé dans tous les artefacts produits. Ajouter un point = l'ajouter *en fin de liste* et bumper `schema_version`.
-- Les tolérances OKS ne sont **pas** écrites en dur : `sigma = difficulty × scale`, où `difficulty` (10 à 40) est la difficulté de positionnement précis fournie par l'expert. Un point difficile à annoter est jugé avec plus d'indulgence, ce qui évite que la métrique soit dominée par le bruit d'annotation. Modifier `scale` change la définition de l'OKS : bumper `eval.version` et rejouer les runs.
-- `flip` définit les paires de symétrie ; toute augmentation par miroir sans cette table est interdite. Les points de l'axe médian sont leur propre miroir.
-- Un schéma marqué `status: PLACEHOLDER` est refusé quand `strict.require_validated_keypoints` est vrai (valeur par défaut).
-- **Mesures morphométriques** (`kp_infos.yaml` (racine du depot), ADR-0008) : 27 mesures définies comme des polylignes de keypoints, plus 9 paires gauche/droite. C'est la grandeur réellement consommée en aval, donc une métrique de premier plan — pas une annexe.
+- **The order of the 42 points is frozen for life**: it is encoded in every artefact produced. Adding a point = appending it *at the end of the list* and bumping `schema_version`.
+- OKS tolerances are **not** hard-coded: `sigma = difficulty × scale`, where `difficulty` (10 to 40) is the difficulty of placing the point precisely, given by the expert. A point that is hard to annotate is judged more leniently, which keeps the metric from being dominated by annotation noise. Changing `scale` changes the definition of the OKS: bump `eval.version` and replay the runs.
+- `flip` defines the symmetry pairs; any mirror augmentation without this table is forbidden. Points of the midline are their own mirror.
+- A schema marked `status: PLACEHOLDER` is refused when `strict.require_validated_keypoints` is true (the default).
+- **Morphometric measurements** (`kp_infos.yaml`, repository root, ADR-0008): 27 measurements defined as keypoint polylines, plus 9 left/right pairs. They are the quantity actually consumed downstream, hence a first-class metric — not an appendix.
 
-### 3.2 Contrat 1 — Annotations canoniques (`data/processed/<dataset>/annotations.parquet`)
+### 3.2 Contract 1 — Canonical annotations (`data/processed/<dataset>/annotations.parquet`)
 
-Une ligne = une **instance annotée**. Format unique quelle que soit la source d'origine (COCO, CVAT, CSV…).
+One row = one **annotated instance**. A single format whatever the original source (COCO, CVAT, CSV…).
 
-| colonne                           | type             | description                                                                    |
+| column                            | type             | description                                                                    |
 | --------------------------------- | ---------------- | ------------------------------------------------------------------------------ |
 | `schema_version`                | int              | 1                                                                              |
 | `dataset`                       | str              | `coleoptera` \| `diptera` \| `hymenoptera` \| `lepidoptera`            |
-| `image_id`                      | str              | identifiant**globalement unique** : `<dataset>/<nom_fichier_sans_ext>` |
-| `image_path`                    | str              | chemin**relatif à `paths.data_root`**, jamais absolu                  |
-| `image_width`, `image_height` | int              | pixels, image d'origine                                                        |
+| `image_id`                      | str              | **globally unique** identifier: `<dataset>/<file_name_without_ext>`    |
+| `image_path`                    | str              | path **relative to `paths.data_root`**, never absolute                |
+| `image_width`, `image_height` | int              | pixels, original image                                                         |
 | `instance_id`                   | str              | `<image_id>#<n>`                                                             |
-| `group_id`                      | str              | clé anti-fuite : spécimen, planche, session de capture (§6.1)               |
-| `bbox_xywh`                     | list[float] (4)  | coordonnées**image d'origine**, pixels absolus                          |
-| `kpts_xy`                       | list[float] (2K) | ordre du schéma local, pixels absolus, image d'origine                        |
-| `kpts_vis`                      | list[int] (K)    | 0 absent / 1 occulté / 2 visible                                              |
-| `area`                          | float            | aire du segment ou de la bbox                                                  |
-| `keypoint_schema`               | str              | nom du schéma de §3.1                                                        |
-| `split_source`                  | str              | `train` \| `test_officiel` \| `unknown` si un découpage amont existe    |
+| `group_id`                      | str              | anti-leakage key: specimen, plate, capture session (§6.1)                    |
+| `bbox_xywh`                     | list[float] (4)  | **original image** coordinates, absolute pixels                          |
+| `kpts_xy`                       | list[float] (2K) | order of the local schema, absolute pixels, original image                    |
+| `kpts_vis`                      | list[int] (K)    | 0 absent / 1 occluded / 2 visible                                             |
+| `area`                          | float            | area of the segment or of the bbox                                             |
+| `keypoint_schema`               | str              | name of the §3.1 schema                                                      |
+| `split_source`                  | str              | `train` \| `official_test` \| `unknown` if an upstream split exists     |
 
-Règles :
+Rules:
 
-- **Toutes les coordonnées, partout, dans tous les fichiers, sont exprimées dans le repère de l'image d'origine, en pixels absolus.** Aucun format normalisé, aucun `xyxy` relatif, aucune coordonnée dans un repère de crop ne doit jamais quitter un module.
-- Les adaptateurs (`data/adapters/`) sont les **seuls** modules autorisés à connaître les formats sources. Un adaptateur ne fait que : lire → convertir → valider (`schema.py`) → écrire. Aucun filtrage, aucune augmentation, aucune décision méthodologique.
-- Les instances invalides (keypoints hors image, bbox nulle) sont **conservées** avec un flag `qc_flags`, pas supprimées ; le filtrage est une décision de config, pas d'adaptateur.
+- **All coordinates, everywhere, in every file, are expressed in the frame of the original image, in absolute pixels.** No normalised format, no relative `xyxy`, no coordinate in a crop frame must ever leave a module.
+- The adapters (`data/adapters/`) are the **only** modules allowed to know the source formats. An adapter only does: read → convert → validate (`schema.py`) → write. No filtering, no augmentation, no methodological decision.
+- Invalid instances (keypoints outside the image, empty bbox) are **kept** with a `qc_flags` flag, not deleted; filtering is a config decision, not an adapter one.
 
-### 3.3 Contrat 2 — Splits (`data/splits/<split_id>.parquet` + `.json`)
+### 3.3 Contract 2 — Splits (`data/splits/<split_id>.parquet` + `.json`)
 
-| colonne      | type                              |
+| column       | type                              |
 | ------------ | --------------------------------- |
-| `split_id` | str, ex.`kfold5_grouped_seed42` |
+| `split_id` | str, e.g.`kfold5_grouped_seed42` |
 | `image_id` | str                               |
 | `fold`     | int                               |
 | `role`     | `train` \| `val` \| `test`  |
 
-Règles :
+Rules:
 
-- Les folds sont **générés une seule fois** et **partagés par toutes les approches**. Une approche NE DOIT JAMAIS créer ses propres splits.
-- L'unité de découpage est `group_id`, pas `image_id` (§6.1).
-- Le `.json` compagnon contient : seed, stratégie, stratification, comptages par dataset/fold, et un `content_hash` des annotations utilisées. **Si le hash des annotations change, les splits sont invalidés** et le pipeline DOIT refuser de tourner.
+- The folds are **generated once** and **shared by every approach**. An approach MUST NEVER create its own splits.
+- The unit of the split is `group_id`, not `image_id` (§6.1).
+- The companion `.json` holds: seed, strategy, stratification, counts per dataset/fold, and a `content_hash` of the annotations used. **If the hash of the annotations changes, the splits are invalidated** and the pipeline MUST refuse to run.
 
-### 3.4 Contrat 3 — Prédictions (`runs/<run_id>/predictions/<split>_fold<k>.parquet`)
+### 3.4 Contract 3 — Predictions (`runs/<run_id>/predictions/<split>_fold<k>.parquet`)
 
-C'est **le** contrat qui rend les approches interchangeables. Une ligne = une instance prédite.
+This is **the** contract that makes approaches interchangeable. One row = one predicted instance.
 
-| colonne                                      | type             | description                                                                                                                                          |
+| column                                       | type             | description                                                                                                                                          |
 | -------------------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `schema_version`                           | int              | 1                                                                                                                                                    |
 | `run_id`, `fold`, `split`, `dataset` | str/int          |                                                                                                                                                      |
 | `image_id`                                 | str              |                                                                                                                                                      |
 | `pred_id`                                  | str              | unique                                                                                                                                               |
-| `bbox_xywh`                                | list[float] (4)  | repère image d'origine ; obligatoire même pour une approche pose-only (alors = bbox GT ou bbox englobante des kpts, et`bbox_source` le précise) |
-| `bbox_score`                               | float            | 1.0 si non applicable                                                                                                                                |
-| `kpts_xy`                                  | list[float] (2K) | **repère image d'origine**, schéma local du dataset                                                                                          |
+| `bbox_xywh`                                | list[float] (4)  | original image frame; mandatory even for a pose-only approach (then = GT bbox or bounding box of the kpts, and `bbox_source` says so)          |
+| `bbox_score`                               | float            | 1.0 if not applicable                                                                                                                                |
+| `kpts_xy`                                  | list[float] (2K) | **original image frame**, local schema of the dataset                                                                                         |
 | `kpts_score`                               | list[float] (K)  |                                                                                                                                                      |
-| `keypoint_schema`                          | str              | doit correspondre au schéma du dataset de l'image                                                                                                   |
+| `keypoint_schema`                          | str              | must match the schema of the image's dataset                                                                                                        |
 | `bbox_source`                              | str              | `predicted` \| `gt` \| `derived`                                                                                                               |
-| `inference_ms`                             | float            | temps par instance, pour la comparaison coût/perf                                                                                                   |
+| `inference_ms`                             | float            | time per instance, for the cost/performance comparison                                                                                              |
 
-Règles :
+Rules:
 
-- **Aucun seuil de score n'est appliqué à l'écriture.** On écrit toutes les prédictions au-dessus d'un seuil très bas (ex. 0.001) ; le seuillage est une opération d'évaluation, paramétrée en config. Sinon les courbes P/R sont tronquées et les approches deviennent incomparables.
-- Toute approche opérant sur **crop** (pipeline détection→pose, §9.3) DOIT conserver la transformation affine crop→image et **rétro-projeter** avant écriture. Écrire des coordonnées dans le repère du crop est une erreur bloquante.
-- Un modèle entraîné dans l'espace union DOIT projeter vers le schéma local avant écriture (§3.1).
-- Les prédictions sur `test` d'un fold ne DOIVENT contenir que les images de ce fold.
+- **No score threshold is applied when writing.** Every prediction above a very low threshold (e.g. 0.001) is written; thresholding is an evaluation operation, set in the config. Otherwise the P/R curves are truncated and the approaches become incomparable.
+- Any approach working on a **crop** (detection→pose pipeline, §9.3) MUST keep the crop→image affine transform and **back-project** before writing. Writing coordinates in the crop frame is a blocking error.
+- A model trained in the union space MUST project to the local schema before writing (§3.1).
+- The `test` predictions of a fold MUST only contain the images of that fold.
 
-### 3.5 Contrat 4 — Métriques (`runs/<run_id>/metrics.parquet`) et 5 — Manifeste (`runs/<run_id>/manifest.json`)
+### 3.5 Contract 4 — Metrics (`runs/<run_id>/metrics.parquet`) and 5 — Manifest (`runs/<run_id>/manifest.json`)
 
-`metrics.parquet` — format long, jamais large :
+`metrics.parquet` — long format, never wide:
 
-| colonne                                       | description                                            |
+| column                                        | description                                            |
 | --------------------------------------------- | ------------------------------------------------------ |
 | `run_id`, `approach`, `fold`, `split` |                                                        |
-| `scope`                                     | `overall` \| `dataset:<nom>` \| `keypoint:<nom>` |
-| `metric`                                    | nom canonique, ex.`pck@0.05_bboxdiag`                |
+| `scope`                                     | `overall` \| `dataset:<name>` \| `keypoint:<name>` |
+| `metric`                                    | canonical name, e.g.`pck@0.05_bboxdiag`              |
 | `value`                                     | float                                                  |
-| `n`                                         | taille de l'échantillon sous-jacent                   |
+| `n`                                         | size of the underlying sample                          |
 
-`manifest.json` : `run_id`, timestamp, `approach`, `split_id`, config Hydra **résolue** (pas les surcharges CLI), `content_hash` des données, commit git + état propre/sale du dépôt, versions des dépendances clés, seeds, chemins des artefacts produits, durées, ressources GPU, et `optuna_study`/`trial_number` si applicable. **Un run sans manifeste complet est exclu de l'agrégation.**
+`manifest.json`: `run_id`, timestamp, `approach`, `split_id`, **resolved** Hydra config (not the CLI overrides), `content_hash` of the data, git commit + clean/dirty state of the repository, versions of the key dependencies, seeds, paths of the produced artefacts, durations, GPU resources, and `optuna_study`/`trial_number` when applicable. **A run without a complete manifest is excluded from the aggregation.**
 
 ---
 
-## 4. Interfaces et registre
+## 4. Interfaces and registry
 
-### 4.1 Registre
+### 4.1 Registry
 
-Un décorateur unique, un espace de noms par famille :
+A single decorator, one namespace per family:
 
 ```python
-@register_approach("lora")            # approches
-@register_metric("pck")               # métriques
-@register_adapter("coleoptera_cvat")  # adaptateurs de données
+@register_approach("lora")            # approaches
+@register_metric("pck")               # metrics
+@register_adapter("coleoptera_cvat")  # data adapters
 ```
 
-Le nom enregistré DOIT être identique au nom du fichier YAML de config correspondant. Aucun `import` conditionnel, aucun `if approach == ...` ailleurs que dans le registre.
+The registered name MUST be identical to the name of the matching YAML config file. No conditional `import`, no `if approach == ...` anywhere but in the registry.
 
-### 4.2 Protocole `Approach`
+### 4.2 `Approach` protocol
 
-Toute approche DOIT implémenter exactement cette interface, ni plus ni moins côté pipeline :
+Every approach MUST implement exactly this interface, no more and no less on the pipeline side:
 
 ```python
 class Approach(Protocol):
     name: str
 
     def fit(self, data: FoldData, ctx: RunContext) -> None: ...
-        # entraîne sur data.train, valide sur data.val ; écrit ses poids dans ctx.run_dir/weights/
-        # NE DOIT PAS toucher à data.test
+        # trains on data.train, validates on data.val; writes its weights to ctx.run_dir/weights/
+        # MUST NOT touch data.test
 
     def predict(self, images: ImageSet, ctx: RunContext) -> Path: ...
-        # retourne le chemin d'un predictions parquet conforme au Contrat 3
+        # returns the path of a predictions parquet that complies with Contract 3
 
     @classmethod
     def load(cls, run_dir: Path, cfg: DictConfig) -> "Approach": ...
-        # reconstruit un modèle prédictif depuis les artefacts, sans réentraînement
+        # rebuilds a predictive model from the artefacts, without retraining
 
     @classmethod
     def search_space(cls, trial: optuna.Trial) -> dict: ...
-        # surcharges de config proposées à Optuna ; aucune logique d'entraînement ici
+        # config overrides proposed to Optuna; no training logic here
 ```
 
-Règles :
+Rules:
 
-- `fit` NE DOIT JAMAIS accéder à `data.test`. Un test unitaire vérifie cette propriété (§10).
-- `predict` NE DOIT JAMAIS calculer de métrique.
-- Une approche PEUT s'appuyer sur plusieurs sous-modèles (cf. détection+pose) : c'est son affaire interne, invisible du pipeline.
-- Une approche « par dataset » (§9.2) reste **une seule** approche : elle encapsule N modèles et route selon `dataset`. Le pipeline ne doit pas voir la différence.
+- `fit` MUST NEVER access `data.test`. A unit test checks this property (§10).
+- `predict` MUST NEVER compute a metric.
+- An approach MAY rely on several sub-models (e.g. detection+pose): that is its internal business, invisible to the pipeline.
+- A "per dataset" approach (§9.2) remains **a single** approach: it wraps N models and routes by `dataset`. The pipeline must not see the difference.
 
-### 4.3 DataModule : superset de champs
+### 4.3 DataModule: superset of fields
 
-Le batch produit par le datamodule DOIT toujours contenir le **superset** des champs utiles à toutes les approches, même si une approche donnée les ignore :
+The batch produced by the datamodule MUST always contain the **superset** of the fields useful to every approach, even if a given approach ignores them:
 
 ```
 images, bboxes, keypoints, visibility, meta{image_id, instance_id, dataset,
 dataset_index, group_id, orig_size, transform_matrix}
 ```
 
-`dataset_index` est indispensable à l'approche BatchNorm par groupe (§9.5) ; `transform_matrix` à la rétro-projection. Les ajouter au coup par coup casse la modularité : ils sont là dès le départ.
+`dataset_index` is required by the per-group BatchNorm approach (§9.5); `transform_matrix` by the back-projection. Adding them one at a time breaks modularity: they are there from the start.
 
 ---
 
 ## 5. Configuration
 
-### 5.1 Outil
+### 5.1 Tool
 
-Hydra + OmegaConf. Composition par `defaults`, surcharge CLI par `clé=valeur`. Pas de `argparse` manuel, pas de dictionnaires de config codés en Python.
+Hydra + OmegaConf. Composition through `defaults`, CLI override through `key=value`. No hand-written `argparse`, no config dictionaries coded in Python.
 
-### 5.2 Règles
+### 5.2 Rules
 
-- Un fichier YAML par entité nommée ; le nom du fichier est l'identifiant.
-- Toute clé DOIT avoir une valeur par défaut explicite ; interdiction du `cfg.get("x", 3)` disséminé dans le code.
-- Les configs d'approche contiennent **uniquement** ce qui est spécifique à l'approche. Les paramètres communs (taille d'image, batch, epochs, seuils d'éval) vivent dans `config.yaml` et sont surchargeables.
-- Interdiction d'interpolations Hydra qui traversent plus d'un niveau (`${a.b.c.d}` illisible) : préférer un champ explicite.
-- La config **résolue** est écrite dans `runs/<run_id>/config.yaml` **avant** tout entraînement.
+- One YAML file per named entity; the file name is the identifier.
+- Every key MUST have an explicit default value; `cfg.get("x", 3)` scattered through the code is forbidden.
+- Approach configs contain **only** what is specific to the approach. Common parameters (image size, batch, epochs, evaluation thresholds) live in `config.yaml` and can be overridden.
+- Hydra interpolations crossing more than one level (`${a.b.c.d}`, unreadable) are forbidden: prefer an explicit field.
+- The **resolved** config is written to `runs/<run_id>/config.yaml` **before** any training.
 
-### 5.3 Expériences nommées
+### 5.3 Named experiments
 
-Toute exécution destinée au rapport final DOIT passer par un fichier `configs/experiment/*.yaml` figé et commité (ex. `exp_A_yolo_pooled_kfold5.yaml`). Les surcharges CLI ad hoc sont réservées à l'exploration et NE DOIVENT PAS produire de résultats cités dans le rapport.
+Every run meant for the final report MUST go through a frozen, committed `configs/experiment/*.yaml` file (e.g. `exp_A_yolo_pooled_kfold5.yaml`). Ad hoc CLI overrides are reserved for exploration and MUST NOT produce results quoted in the report.
 
 ### 5.4 CLI
 
-Cinq verbes, pas plus :
+Five verbs, no more:
 
 ```
 python -m insectpose.cli prepare   data=coleoptera
 python -m insectpose.cli split     cv=kfold5_grouped
 python -m insectpose.cli train     experiment=exp_A cv.fold=0
+python -m insectpose.cli train     experiment=exp_A folds=[0,1,2]      # several folds, one ensemble (ADR-0039)
 python -m insectpose.cli predict   run_id=<...> split=test
 python -m insectpose.cli evaluate  run_id=<...>
 python -m insectpose.cli tune      experiment=exp_A tuning=optuna_default
 python -m insectpose.cli report
 ```
 
-`train` PEUT enchaîner `predict` + `evaluate` par commodité, mais chacun DOIT rester appelable indépendamment.
+`train` MAY chain `predict` + `evaluate` for convenience, but each one MUST remain callable on its own.
 
 ---
 
-## 6. Protocole expérimental
+## 6. Experimental protocol
 
-### 6.1 Anti-fuite
+### 6.1 Anti-leakage
 
-- Le découpage se fait par `group_id`. Si un spécimen apparaît sur plusieurs images, toutes ses images sont dans le même fold. **Si le `group_id` n'est pas connu pour un dataset, la valeur par défaut est `image_id` et cette limitation DOIT être écrite dans `DECISIONS.md`.**
-- Stratification par `dataset` (et par nombre d'instances par image si déséquilibré) obligatoire pour les folds poolés.
-- Aucune statistique (moyenne/écart-type de normalisation, taille d'ancres, clustering de keypoints) NE DOIT être calculée sur autre chose que le `train` du fold courant.
+- The split is done by `group_id`. If a specimen appears on several images, all its images are in the same fold. **If the `group_id` of a dataset is unknown, the default is `image_id`, and this limitation MUST be written in `DECISIONS.md`.**
+- Stratification by `dataset` (and by number of instances per image if unbalanced) is mandatory for the pooled folds.
+- No statistic (normalisation mean/std, anchor sizes, keypoint clustering) MUST be computed on anything but the `train` of the current fold.
 
 ### 6.2 Cross-validation
 
-- Schéma par défaut : **K=5 folds groupés stratifiés**, seed fixe, `split_id` unique partagé par toutes les approches. Les mêmes folds pour tout le monde, sinon aucune comparaison n'est valide.
-- Les approches « par dataset » (§9.2) utilisent **les mêmes folds**, simplement restreints à leur dataset. Ne jamais régénérer un découpage local.
-- Une approche est comparée sur la **moyenne ± écart-type inter-folds**, et les résultats par fold sont conservés pour les tests appariés (§8.3).
+- Default scheme: **K=5 stratified grouped folds**, fixed seed, a single `split_id` shared by every approach. The same folds for everyone, otherwise no comparison is valid.
+- The "per dataset" approaches (§9.2) use **the same folds**, simply restricted to their dataset. Never regenerate a local split.
+- An approach is compared on the **mean ± standard deviation across folds**, and the per-fold results are kept for the paired tests (§8.4).
 
-### 6.3 Optimisation Optuna
+### 6.3 Optuna optimisation
 
-- **Nichée par défaut** (ADR-0012). Pour chaque fold externe, la recherche tourne sur des folds **internes** construits à partir du seul train externe. Ces découpages internes (`<split_id>__outer<k>`) sont générés par `cli split` et versionnés exactement comme les folds externes. Les meilleurs hyperparamètres sont ensuite appliqués au fold externe entier. **Le test externe n'a jamais servi à choisir un hyperparamètre.** Un test automatique vérifie cette propriété.
-- Mode dégradé `tune_once` : la recherche n'a lieu que sur les folds internes d'un seul fold externe, et le résultat est réutilisé pour tous les autres. Acceptable si documenté ; le budget de trials doit alors être identique entre approches.
-- **Coût** : `n_folds × n_trials × inner_folds` entraînements par approche. À calibrer avant de lancer une approche lourde ; le budget effectif est enregistré dans chaque manifeste.
-- L'objectif est **toujours la métrique primaire calculée par l'évaluateur partagé**, lue depuis `metrics.parquet` — jamais une loss de validation ni une métrique interne de framework.
-- Un trial = un run complet avec son propre `run_id` et son manifeste ; les trials sont donc évaluables et auditables comme n'importe quel run. Ils n'exportent pas de figures qualitatives (bruit inutile).
-- Stockage SQLite sous `runs/optuna/`, une étude par (approche, découpage, objectif, fold externe), reprise activée.
-- Pruning `MedianPruner` par défaut ; une approche qui ne peut pas rapporter d'intermédiaire déclare `prunable: false`.
-- **Budget équitable** : comparer 100 trials contre 10 invalide la conclusion.
+- **Nested by default** (ADR-0012). For each outer fold, the search runs on **inner** folds built from the outer train only. These inner splits (`<split_id>__outer<k>`) are generated by `cli split` and versioned exactly like the outer folds. The best hyperparameters are then applied to the whole outer fold. **The outer test has never been used to choose a hyperparameter.** An automatic test checks this property.
+- Degraded `tune_once` mode: the search only runs on the inner folds of one outer fold, and the result is reused for all the others. Acceptable if documented; the trial budget must then be identical across approaches.
+- **Cost**: `n_folds × n_trials × inner_folds` trainings per approach. To be calibrated before launching a heavy approach; the actual budget is recorded in every manifest.
+- The objective is **always the primary metric computed by the shared evaluator**, read from `metrics.parquet` — never a validation loss nor an internal framework metric.
+- A trial = a complete run with its own `run_id` and manifest; trials can therefore be evaluated and audited like any run. They export no qualitative figures (useless noise).
+- SQLite storage under `runs/optuna/`, one study per (approach, split, objective, outer fold), resume enabled.
+- `MedianPruner` pruning by default; an approach that cannot report intermediate values declares `prunable: false`.
+- **Fair budget**: comparing 100 trials against 10 invalidates the conclusion.
 
-### 6.4 Déterminisme
+### 6.4 Determinism
 
-- Seed unique dans la config, dérivée par `seed_for(run_id, fold, purpose)` pour numpy / torch / python / dataloader workers.
-- `torch.use_deterministic_algorithms(True)` en mode `debug` ; en mode `full` on autorise cudnn benchmark mais on l'enregistre dans le manifeste.
-- Le non-déterminisme résiduel est absorbé par la répétition : toute conclusion finale DEVRAIT reposer sur ≥ 2 seeds pour l'approche gagnante.
+- A single seed in the config, derived by `seed_for(run_id, fold, purpose)` for numpy / torch / python / dataloader workers.
+- `torch.use_deterministic_algorithms(True)` in `debug` mode; in `full` mode cudnn benchmark is allowed but recorded in the manifest.
+- The remaining non-determinism is absorbed by repetition: any final conclusion SHOULD rest on ≥ 2 seeds for the winning approach.
 
 ---
 
-## 7. Évaluation
+## 7. Evaluation
 
-### 7.1 Règle absolue
+### 7.1 Absolute rule
 
-L'évaluateur prend **uniquement** : un `predictions.parquet` (Contrat 3), les annotations canoniques (Contrat 1), et `configs/eval/*.yaml`. Il ne charge aucun modèle, n'importe aucun module d'approche, et ignore totalement comment les prédictions ont été produites. **Si l'évaluateur doit savoir quelle approche l'a alimenté, le design est cassé.**
+The evaluator takes **only**: a `predictions.parquet` (Contract 3), the canonical annotations (Contract 1), and `configs/eval/*.yaml`. It loads no model, imports no approach module, and knows nothing about how the predictions were produced. **If the evaluator needs to know which approach fed it, the design is broken.**
 
-### 7.2 Jeu de métriques figé
+### 7.2 Frozen set of metrics
 
-Identique pour toutes les approches, calculé en `overall`, par `dataset:*`, par `keypoint:*` et par `measurement:*` :
+Identical for every approach, computed `overall`, per `dataset:*`, per `keypoint:*` and per `measurement:*`:
 
-- **Détection** (si `bbox_source == predicted`) : `det_ap@0.5`, `det_ap@[.5:.95]`.
-- **Pose** : `oks_ap`, `oks_ap@0.5`, `oks_ar` (sigmas dérivés de la difficulté, ADR-0007) ; `pck@{0.125, 0.25, 0.5}_thorax_width` — un point est correct si son erreur est inférieure à `alpha × largeur du thorax` (ADR-0009), `alpha = 0.25` étant la référence du projet ; `nme_matched_only`, `kpt_coverage`, PCK par keypoint.
-- **Échelle de référence** : `pck_normalizer_fallback_rate`. Quand les points de thorax ne sont pas annotés, la normalisation retombe sur la diagonale de bbox — et ce taux de repli est **publié**, jamais silencieux.
-- **Mesures morphométriques** (ADR-0008) : `measurement_mape_median`, `measurement_mape_worst`, détail par mesure, et `symmetry_gap_median` / `symmetry_gap_p90` — l'écart gauche/droite des mesures prédites, calculable **sans vérité terrain**, donc utilisable comme contrôle qualité en production.
-- **Bout-en-bout** : la métrique primaire pénalise les échecs de détection. Une pipeline qui ne détecte pas l'insecte n'a pas « 0 keypoint évalué », elle a un échec compté.
-- **Coût** : latence par instance et p95, nombre de paramètres, VRAM, temps d'entraînement — métriques de premier ordre, pas des annexes.
+- **Detection** (if `bbox_source == predicted`): `det_ap@0.5`, `det_ap@[.5:.95]`.
+- **Pose**: `oks_ap`, `oks_ap@0.5`, `oks_ar` (sigmas derived from the difficulty, ADR-0007); `pck@{0.125, 0.25, 0.5}_thorax_width` — a point is correct if its error is below `alpha × thorax width` (ADR-0009), `alpha = 0.25` being the project's reference; `nme_matched_only`, `kpt_coverage`, PCK per keypoint.
+- **Reference scale**: `pck_normalizer_fallback_rate`. When the thorax points are not annotated, the normalisation falls back to the bbox diagonal — and this fallback rate is **published**, never silent.
+- **Morphometric measurements** (ADR-0008): `measurement_mape_median`, `measurement_mape_worst`, per-measurement detail, and `symmetry_gap_median` / `symmetry_gap_p90` — the left/right gap of the predicted measurements, computable **without ground truth**, hence usable as a quality check in production.
+- **End to end**: the primary metric penalises detection failures. A pipeline that does not detect the insect does not have "0 keypoint evaluated", it has a counted failure.
+- **Cost**: latency per instance and p95, number of parameters, VRAM, training time — first-order metrics, not appendices.
 
-**Métrique primaire du projet** : `oks_ap` (ADR-0010). C'est la **seule clé d'évaluation librement surchargeable** — elle ne modifie aucun calcul, seulement l'objectif d'Optuna et le classement des approches. Toutes les métriques étant calculées à chaque run, changer d'objectif n'oblige jamais à réévaluer :
+**Primary metric of the project**: `oks_ap` (ADR-0010). It is the **only freely overridable evaluation key** — it changes no computation, only the Optuna objective and the ranking of the approaches. Since every metric is computed at every run, changing the objective never requires a re-evaluation:
 
 ```
 python -m insectpose.cli train ... eval.primary_metric=measurement_mape_median \
                                    eval.primary_direction=minimize
 ```
 
-### 7.3 Appariement
+### 7.3 Matching
 
-L'appariement prédiction↔GT (par OKS ou IoU, greedy par score décroissant) est implémenté **une seule fois** dans `evaluation/matching.py`. Aucune métrique ne réimplémente son propre appariement.
+Prediction↔GT matching (by OKS or IoU, greedy by decreasing score) is implemented **once** in `evaluation/matching.py`. No metric reimplements its own matching.
 
-### 7.4 Comparaison des approches sur périmètre commun
+### 7.4 Comparing approaches on a common scope
 
-Les approches n'ont pas le même périmètre naturel (une approche par dataset ne prédit rien hors de son dataset). Règle : **toute comparaison se fait sur l'union des images de test de tous les folds**, une approche restreinte étant évaluée comme la concaténation de ses N modèles. Un tableau de résultats DOIT indiquer le `n` sous-jacent de chaque cellule (§3.5) ; deux valeurs avec des `n` différents ne sont pas comparables et le rapport DOIT le signaler.
+Approaches do not share the same natural scope (a per-dataset approach predicts nothing outside its dataset). Rule: **every comparison is made on the union of the test images of all folds**, a restricted approach being evaluated as the concatenation of its N models. A results table MUST show the underlying `n` of every cell (§3.5); two values with different `n` are not comparable and the report MUST say so.
 
 ---
 
-## 8. Runs, artefacts et résultats
+## 8. Runs, artefacts and results
 
 ### 8.1 `run_id`
 
 ```
 <approach>__<data_scope>__<split_id>__fold<k>__<tag>__<hash8>
-ex. lora__pooled__kfold5grouped_seed42__fold2__baseline__a3f91c07
+e.g. lora__pooled__kfold5grouped_seed42__fold2__baseline__a3f91c07
 ```
 
-`hash8` = 8 premiers caractères du hash de la config résolue + du `content_hash` des données. Deux runs identiques ont le même `run_id` : le pipeline DOIT alors sauter le run (idempotence) sauf `force=true`.
+`hash8` = first 8 characters of the hash of the resolved config + the `content_hash` of the data. Two identical runs have the same `run_id`: the pipeline MUST then skip the run (idempotence) unless `force=true`.
 
-### 8.2 Contenu d'un dossier de run
+### 8.2 Content of a run folder
 
 ```
 runs/<run_id>/
-├── manifest.json          # Contrat 5, écrit en dernier -> sa présence signale un run complet
-├── config.yaml            # config résolue
-├── weights/               # poids, checkpoints, adaptateurs LoRA
-├── predictions/           # Contrat 3
-├── metrics.parquet        # Contrat 4
-├── logs/                  # stdout, courbes, tensorboard/mlflow
-└── figures/               # visualisations qualitatives (§8.4)
+├── manifest.json          # Contract 5, written last -> its presence marks a complete run
+├── config.yaml            # resolved config
+├── weights/               # weights, checkpoints, LoRA adapters
+├── predictions/           # Contract 3
+├── metrics.parquet        # Contract 4
+├── logs/                  # stdout, curves, tensorboard/mlflow
+└── figures/               # qualitative visualisations (§8.5)
 ```
 
-`manifest.json` est écrit **en dernier**. Un dossier sans manifeste = run interrompu, ignoré par l'agrégation, supprimable sans discussion.
+`manifest.json` is written **last**. A folder without a manifest = an interrupted run, ignored by the aggregation, deletable without discussion.
 
-### 8.3 Langue des livrables
+### 8.3 Language
 
-**Tout ce qui est écrit dans un fichier produit est en anglais** : titres, axes, légendes et annotations de figures, en-têtes et valeurs textuelles de tableaux, champs de manifestes et de rapports JSON, noms de fichiers. Les livrables circulent hors de l'équipe et finissent dans des publications ; une figure en français y est inutilisable.
+**Everything is written in English**: the code, its comments and docstrings, log and error messages, the internal documentation (`CONVENTIONS.md`, `DECISIONS.md`, `README.md`), and everything written to a produced file — titles, axes, legends and annotations of figures, headers and text values of tables, fields of manifests and JSON reports, file names. The deliverables circulate outside the team and end up in publications.
 
-Le code, les commentaires, les docstrings, les messages de log et la documentation interne (`CONVENTIONS.md`, `DECISIONS.md`, `README.md`) restent en français. La frontière est nette : ce qui sort dans `results/`, `runs/` ou `reports/` est en anglais, le reste non.
+Corollary: a metric, scope or column name is an identifier, never a sentence to translate. `oks_ap`, `dataset:coleoptera`, `measurement_mape_median` are frozen (§3.5).
 
-Corollaire : un nom de métrique, de scope ou de colonne est un identifiant, jamais une phrase à traduire. `oks_ap`, `dataset:coleoptera`, `measurement_mape_median` sont figés (§3.5) et ne changent pas de langue.
+### 8.4 Aggregation and reporting
 
-### 8.4 Agrégation et reporting
+- `aggregate.py` scans `runs/*/metrics.parquet` + manifests → `results/master.parquet`. **It is the only path to a results table.** No figure, no table of the report MUST be produced from a console copy-paste.
+- Comparisons between approaches SHOULD use paired per-fold tests (signed Wilcoxon or paired t) with a correction for multiple comparisons, and report confidence intervals rather than raw ranks.
+- `reporting/` produces: main table (approach × dataset × metric), PCK curves, cost vs performance scatter, per-keypoint error matrix, qualitative failures.
 
-- `aggregate.py` scanne `runs/*/metrics.parquet` + manifestes → `results/master.parquet`. **C'est le seul chemin vers un tableau de résultats.** Aucune figure, aucun tableau du rapport ne DOIT être produit à partir d'un copier-coller de console.
-- Les comparaisons entre approches DEVRAIENT utiliser des tests appariés par fold (Wilcoxon signé ou t apparié) avec correction pour comparaisons multiples, et rapporter des intervalles de confiance plutôt que des rangs bruts.
-- `reporting/` produit : tableau principal (approche × dataset × métrique), courbes PCK, scatter coût vs performance, matrice d'erreurs par keypoint, échecs qualitatifs.
+### 8.5 Mandatory qualitative output
 
-### 8.5 Qualitatif obligatoire
-
-Chaque run DOIT exporter au moins 12 images de test annotées pred vs GT, réparties en trois catégories qui répondent à trois questions distinctes : les **pires cas** (où le modèle échoue), le **meilleur cas de chaque dataset** (de quoi il est capable au mieux — sans quoi on ignore si les échecs sont un plafond ou un accident), et un **tirage aléatoire** (le seul échantillon non biaisé). Un modèle n'est jamais validé sur des chiffres seuls.
+Every run MUST export at least 12 annotated test images pred vs GT, in three categories answering three distinct questions: the **worst cases** (where the model fails), the **best case of each dataset** (what it can do at best — without it one cannot tell whether the failures are a ceiling or an accident), and a **random draw** (the only unbiased sample). A model is never validated on numbers alone.
 
 ---
 
-## 9. Contraintes spécifiques par approche
+## 9. Approach-specific constraints
 
-Ces notes fixent les pièges connus de chaque famille. Elles n'ajoutent aucune interface : tout passe par §4.2.
+These notes pin down the known pitfalls of each family. They add no interface: everything goes through §4.2.
 
-### 9.1 YOLO poolé (une classe « insecte », tous datasets) — IMPLÉMENTÉ
+### 9.1 Pooled YOLO (one "insect" class, all datasets) — IMPLEMENTED
 
-Le schéma de keypoints étant commun aux 4 ordres (ADR-0006), le modèle prédit directement dans le schéma attendu : aucune reprojection union → local n'est nécessaire. Les points absents d'un dataset (ADR-0016) sortent en `vis = 0` dans les labels et sont masqués dans la loss, jamais appris comme des zéros.
+The keypoint schema being common to the 4 orders (ADR-0006), the model predicts directly in the expected schema: no union → local reprojection is needed. Points absent from a dataset (ADR-0016) are written with `vis = 0` in the labels and masked in the loss, never learnt as zeros.
 
-Toute la logique risquée est isolée dans `data/yolo_export.py`, testée par aller-retour sans GPU :
+All the risky logic is isolated in `data/yolo_export.py`, tested by a round trip without a GPU:
 
-- la bbox YOLO est **centrée**, le contrat 1 est en coin haut-gauche ;
-- `flip_idx` est obligatoire dans `data.yaml` dès que `fliplr > 0`, sinon le miroir échange gauche et droite sans permuter les labels ;
-- les noms de fichiers sont aplatis (`coleoptera__img000`), sinon deux datasets ayant un `img000.png` se recouvrent silencieusement.
+- the YOLO bbox is **centred**, contract 1 uses the top-left corner;
+- `flip_idx` is mandatory in `data.yaml` as soon as `fliplr > 0`, otherwise the mirror swaps left and right without permuting the labels;
+- file names are flattened (`coleoptera__img000`), otherwise two datasets that both have an `img000.png` silently overwrite each other.
 
-Les fichiers YOLO sont un artefact **dérivé**, régénéré par fold sous `runs/<run_id>/yolo_dataset/`, jamais écrit dans `data/processed/`. `conf = 0.001` à l'inférence : le seuillage est une opération d'évaluation.
+The YOLO files are a **derived** artefact, regenerated per fold under `runs/<run_id>/yolo_dataset/`, never written to `data/processed/`. `conf = 0.001` at inference: thresholding is an evaluation operation.
 
-Matériel (ADR-0019) : `train.device: auto` prend le GPU 0 si CUDA est disponible ; AMP activée par défaut mais désactivée en `mode: debug` ; FP16 à l'inférence sur GPU. VRAM maximale, temps d'entraînement et nombre de paramètres entrent dans le manifeste — ce sont des métriques de coût de premier ordre, et l'agrégation alerte si des runs comparés viennent de matériels différents.
+Hardware (ADR-0019): `train.device: auto` takes GPU 0 if CUDA is available, else the Apple GPU, else the CPU; AMP enabled by default but disabled on CPU and in `mode: debug`; FP16 at inference on GPU. Peak VRAM, training time and number of parameters go into the manifest — they are first-order cost metrics, and the aggregation warns if compared runs come from different hardware.
 
-### 9.2 YOLO par dataset — IMPLÉMENTÉ
+### 9.2 Per-dataset YOLO — IMPLEMENTED
 
-Une **seule** classe `Approach` encapsulant N modèles, routés par `meta.dataset`. Le pipeline ne voit pas la différence : c'est ce qui garantit que A et B sont évaluées identiquement.
+A **single** `Approach` class wrapping N models, routed by `meta.dataset`. The pipeline does not see the difference: this is what guarantees that A and B are evaluated identically.
 
-Trois choix de protocole (ADR-0023) :
+Three protocol choices (ADR-0023):
 
-- chaque modèle repart des **poids de base**, jamais du modèle poolé — A et B restent indépendantes, et la question posée est bien « un spécialiste vaut-il un généraliste ? » ;
-- les hyperparamètres sont **partagés** par les N modèles, un trial d'Optuna les entraînant tous. Le budget d'HPO reste ainsi strictement égal à celui de A. Une recherche indépendante par dataset le quadruplerait, et B gagnerait par l'optimisation plutôt que par la méthode ;
-- **même nombre d'époques** pour tous les datasets. Conséquence à garder en tête à la lecture : avec 192 images pour Hymenoptera contre 935 pour Coleoptera, le premier voit cinq fois moins de pas d'optimisation. Un écart de performance entre ordres n'est donc pas nécessairement une différence de difficulté.
+- each model starts again from the **base weights**, never from the pooled model — A and B remain independent, and the question asked is indeed "is a specialist worth a generalist?";
+- the hyperparameters are **shared** by the N models, one Optuna trial training them all. The HPO budget thus stays strictly equal to A's. An independent search per dataset would quadruple it, and B would win through the optimisation rather than through the method;
+- **same number of epochs** for every dataset. Consequence to keep in mind when reading the results: with 192 images for Hymenoptera against 935 for Coleoptera, the former sees five times fewer optimisation steps. A performance gap between orders is therefore not necessarily a difference of difficulty.
 
-Les folds sont ceux du découpage partagé, simplement restreints (§6.2). Chaque sous-modèle range ses artefacts sous `weights/<dataset>/`, `yolo_dataset/<dataset>/`, `logs/<dataset>/`, et ses coûts sont préfixés dans le manifeste.
+The folds are those of the shared split, simply restricted (§6.2). Each sub-model stores its artefacts under `weights/<dataset>/`, `yolo_dataset/<dataset>/`, `logs/<dataset>/`, and its costs are prefixed in the manifest.
 
-### 9.3 Détection puis pose sur crop — IMPLÉMENTÉ
+### 9.3 Detection then pose on a crop — IMPLEMENTED
 
-Deux modèles dans un même run : un détecteur **poolé** (une classe, images entières, labels sans keypoints) puis un modèle YOLO-pose entraîné sur des crops normalisés à la résolution du protocole (ADR-0024).
+Two models in one run: a **pooled** detector (one class, whole images, labels without keypoints) then a YOLO-pose model trained on crops normalised to the protocol resolution (ADR-0024).
 
-- Le modèle de pose est entraîné sur des crops issus de bboxes GT **bruitées** (`jitter_scale`, `jitter_shift`), jamais sur des cadrages parfaits : sinon décalage train/test garanti, puisqu'à l'inférence les cadrages viennent d'un détecteur. La validation, elle, utilise des cadrages nets — une métrique de validation bruitée ne servirait à rien.
-- Une marge (`crop.padding`) entoure la bbox. Sans elle, tarses et antennes tombent hors du crop et deviennent irrécupérables quelle que soit la qualité du modèle. Les points hors cadre sont marqués `vis = 0` : ni appris comme des zéros, ni comptés comme des erreurs.
-- La transformation crop → image est conservée et **toute prédiction est rétro-projetée** vers le repère de l'image d'origine avant écriture (contrat 3).
-- L'évaluation bout-en-bout utilise les bboxes **prédites**. Le mode `pose_on_gt_boxes: true` écrit `bbox_source: gt` : diagnostic uniquement, jamais dans le même tableau que les approches bout-en-bout.
+- The pose model is trained on crops taken from **noisy** GT bboxes (`jitter_scale`, `jitter_shift`), never on perfect framings: otherwise a train/test shift is guaranteed, since at inference the framings come from a detector. Validation, for its part, uses clean framings — a noisy validation metric would be useless.
+- A margin (`crop.padding`) surrounds the bbox. Without it, tarsi and antennae fall outside the crop and become unrecoverable whatever the quality of the model. Points outside the frame are marked `vis = 0`: neither learnt as zeros nor counted as errors.
+- The crop → image transform is kept and **every prediction is back-projected** to the frame of the original image before writing (contract 3).
+- The end-to-end evaluation uses the **predicted** bboxes. The `pose_on_gt_boxes: true` mode writes `bbox_source: gt`: diagnostic only, never in the same table as the end-to-end approaches.
 
-### 9.4 LoRA — IMPLÉMENTÉ
+### 9.4 LoRA — IMPLEMENTED
 
-Adaptateurs injectés sur les convolutions du dernier segment du cou, backbone et cou gelés, têtes entraînables (ADR-0025). Les index de blocs sont **calculés depuis la structure du modèle**, jamais écrits en dur : changer de taille de réseau (n/s/m/l) décale tout.
+Adapters injected on the convolutions of the last segment of the neck, backbone and neck frozen, trainable heads (ADR-0025). The block indices are **computed from the structure of the model**, never hard-coded: changing the network size (n/s/m/l) shifts everything.
 
-Le manifeste enregistre le **nombre de paramètres entraînables** et la liste des modules adaptés. Sans cela, « LoRA rang 8 » ne désigne rien : la même étiquette recouvre des configurations très différentes selon ce qui reste dégelé à côté des adaptateurs.
+The manifest records the **number of trainable parameters** and the list of adapted modules. Without it, "LoRA rank 8" means nothing: the same label covers very different configurations depending on what stays unfrozen next to the adapters.
 
-### 9.5 BatchNorm par groupe — IMPLÉMENTÉ
+### 9.5 Per-group BatchNorm — IMPLEMENTED
 
-Toutes les `BatchNorm2d` dupliquées en N copies, statistiques **et** paramètres affines par dataset (ADR-0026). Les poids convolutifs restent partagés : c'est l'hypothèse testée. Chaque branche est initialisée depuis les statistiques du modèle pré-entraîné, jamais aléatoirement.
+Every `BatchNorm2d` duplicated into N copies, statistics **and** affine parameters per dataset (ADR-0026). The convolution weights stay shared: that is the hypothesis being tested. Each branch is initialised from the statistics of the pre-trained model, never randomly.
 
-Les lots sont **mixtes** ; le forward se scinde par groupe puis recompose dans l'ordre. Le groupe vient du nom de fichier exporté (`<dataset>__<stem>`) à l'entraînement, et d'une déclaration explicite à l'inférence. Un dataset inconnu est une **erreur explicite** (ADR-0014), jamais un repli deviné.
+Batches are **mixed**; the forward pass splits by group then recomposes in order. The group comes from the exported file name (`<dataset>__<stem>`) at training time, and from an explicit declaration at inference. An unknown dataset is an **explicit error** (ADR-0014), never a guessed fallback.
 
-### 9.6 Variante à keypoints réduits — IMPLÉMENTÉ
+### 9.6 Reduced-keypoint variant — IMPLEMENTED
 
-Approche A privée de la supervision sur les pattes et les ailes postérieures (ADR-0027) : ces 16 points passent à `vis = 0` dans les labels d'entraînement et de validation, **jamais dans le test**.
+Approach A deprived of the supervision on the legs and hind wings (ADR-0027): these 16 points get `vis = 0` in the training and validation labels, **never in the test**.
 
-Précaution de lecture obligatoire : la vérité terrain conserve ces points et l'évaluation les compte. Les métriques `overall` de cette variante sont donc **mécaniquement moins bonnes** et ne se comparent pas à celles de A. La comparaison valide porte sur les scopes `keypoint:*` des points conservés :
+Mandatory reading precaution: the ground truth keeps these points and the evaluation counts them. The `overall` metrics of this variant are therefore **mechanically worse** and do not compare with A's. The valid comparison is on the `keypoint:*` scopes of the kept points:
 
 ```
 python scripts/compare_models.py --exclude-keypoints leg hindwing
 ```
 
-qui ajoute une ligne `MEAN (retained)` — le chiffre à comparer.
+which adds a `MEAN (retained)` row — the number to compare.
 
-### 9.7 Patch du modèle Ultralytics
+### 9.7 Patching the Ultralytics model
 
-Les approches 9.4 et 9.5 modifient le `nn.Module` construit par Ultralytics, qui ne prévoit ni l'un ni l'autre. Toute cette dépendance aux internes est isolée dans `training/patching.py`, avec deux contraintes vérifiées sur la version installée :
+Approaches 9.4 and 9.5 modify the `nn.Module` built by Ultralytics, which foresees neither. All this dependency on the internals is isolated in `training/patching.py`, with two constraints checked on the installed version:
 
-- **les callbacks ne conviennent pas** : `on_pretrain_routine_start` précède la construction du modèle, `on_pretrain_routine_end` suit l'optimiseur et l'EMA. On passe donc un trainer dérivé (`train(trainer=...)`) et le patch s'applique dans `get_model` ;
-- **Ultralytics dégèle ce qu'on gèle** : sa boucle de `freeze` remet `requires_grad=True` sur tout paramètre gelé hors `args.freeze`. Le gel est donc réappliqué dans `_build_train_pipeline`, juste avant la construction de l'optimiseur.
+- **callbacks do not fit**: `on_pretrain_routine_start` comes before the model is built, `on_pretrain_routine_end` after the optimiser and the EMA. A derived trainer is therefore passed (`train(trainer=...)`) and the patch is applied in `get_model`;
+- **Ultralytics unfreezes what we freeze**: its `freeze` loop sets `requires_grad=True` again on every frozen parameter outside `args.freeze`. The freeze is therefore re-applied in `_build_train_pipeline`, just before the optimiser is built.
 
-Un compte de paramètres entraînables est journalisé et enregistré au manifeste à chaque run. Si une future version d'Ultralytics change cet ordre, ce chiffre le signale immédiatement au lieu de laisser passer un entraînement silencieusement faux.
+A count of trainable parameters is logged and recorded in the manifest at every run. If a future Ultralytics version changes this order, this number reveals it immediately instead of letting a silently wrong training through.
 
-### 9.6 Approches futures
+### 9.8 Future approaches
 
-Toute nouvelle approche (multi-tâches, distillation, pré-entraînement auto-supervisé, ensembles…) s'ajoute par §11 sans dérogation. Si une approche ne rentre pas dans le protocole `Approach`, **on modifie le protocole pour tout le monde, en bumpant sa version** — on ne crée pas de cas particulier.
+Any new approach (multi-task, distillation, self-supervised pre-training, ensembles…) is added through §11 without exception. If an approach does not fit the `Approach` protocol, **the protocol is changed for everyone, with a version bump** — no special case is created.
 
 ---
 
 ## 10. Tests
 
-Trois niveaux, tous obligatoires avant toute exécution longue :
+Three levels, all mandatory before any long run:
 
-1. **Tests de contrat** (`tests/contracts/`) : valident qu'un parquet produit respecte le schéma, les bornes de coordonnées, l'unicité des identifiants, la cohérence keypoint_schema ↔ dimension. Exécutés automatiquement à l'écriture de tout artefact en mode `debug`.
-2. **Tests unitaires** : rétro-projection crop→image (aller-retour = identité à 1e-6 près), mapping local↔union, appariement, chaque métrique sur un cas calculé à la main, non-fuite (`fit` ne lit pas `test`), reproductibilité (deux runs même seed = mêmes prédictions).
-3. **Smoke test** (`make smoke`) : chaque approche enregistrée est exécutée sur un fixture de 8 images et 1 fold, de `train` à `report`. **Une approche qui ne passe pas le smoke test n'est pas considérée comme implémentée.** Le fixture est commité dans `tests/fixtures/`.
+1. **Contract tests** (`tests/contracts/`): check that a produced parquet follows the schema, the coordinate bounds, the uniqueness of identifiers, the keypoint_schema ↔ dimension consistency. Run automatically whenever an artefact is written in `debug` mode.
+2. **Unit tests**: crop→image back-projection (round trip = identity to 1e-6), local↔union mapping, matching, every metric on a hand-computed case, no leakage (`fit` does not read `test`), reproducibility (two runs with the same seed = the same predictions).
+3. **Smoke test** (`make smoke`): every registered approach is run on an 8-image, 1-fold fixture, from `train` to `report`. **An approach that does not pass the smoke test is not considered implemented.** The fixture is committed in `tests/fixtures/`.
 
-CI : ruff + mypy (strict sur `contracts.py`, `registry.py`, `evaluation/`) + pytest + smoke.
-
----
-
-## 11. Procédure : ajouter une approche
-
-Exactement 6 artefacts, ni plus ni moins. Si vous devez toucher un 7ᵉ fichier existant, c'est un signal de conception à remonter.
-
-1. `src/insectpose/approaches/<nom>.py` — classe décorée `@register_approach("<nom>")`, implémentant §4.2.
-2. `configs/approach/<nom>.yaml` — hyperparamètres par défaut, `_target_` vers la classe.
-3. `search_space` dans la classe (ou `tuning/search_spaces.py` si volumineux).
-4. `tests/approaches/test_<nom>.py` — smoke + tests spécifiques (ex. §9.5).
-5. `configs/experiment/exp_<lettre>_<nom>.yaml` — expérience figée pour le rapport.
-6. Une entrée dans `DECISIONS.md` : ce que l'approche teste, ses hypothèses, ses limites connues.
+CI: ruff + mypy (strict on `contracts.py`, `registry.py`, `evaluation/`) + pytest + smoke.
 
 ---
 
-## 12. Règles de génération pour les IA
+## 11. Procedure: adding an approach
 
-À respecter par toute IA produisant du code sur ce dépôt.
+Exactly 6 artefacts, no more, no less. If you have to touch a 7th existing file, it is a design signal to report.
+
+1. `src/insectpose/approaches/<name>.py` — class decorated with `@register_approach("<name>")`, implementing §4.2.
+2. `configs/approach/<name>.yaml` — default hyperparameters, `_target_` pointing to the class.
+3. `search_space` in the class (or in `tuning/search_spaces.py` if large).
+4. `tests/approaches/test_<name>.py` — smoke + specific tests (e.g. §9.5).
+5. `configs/experiment/exp_<letter>_<name>.yaml` — frozen experiment for the report.
+6. An entry in `DECISIONS.md`: what the approach tests, its hypotheses, its known limits.
+
+---
+
+## 12. Generation rules for AIs
+
+To be followed by any AI producing code in this repository.
 
 **Obligations**
 
-- Déclarer les dépendances lourdes via `availability()` : le smoke test ignore proprement une approche indisponible plutôt que d'échouer.
-- Écrire en **anglais** tout texte destiné à un fichier produit (§8.3), en français le code et ses commentaires.
-- Lire ce fichier et annoncer, avant d'écrire, quels contrats sont touchés.
-- Écrire des signatures typées ; `contracts.py` fait foi pour les types de données.
-- Toute fonction publique a une docstring indiquant : entrées, sorties, **effets de bord fichiers** (chemin exact écrit).
-- Valider les entrées aux frontières de module (schéma parquet, présence de clés de config) et échouer tôt, bruyamment, avec un message actionnable.
-- Produire, avec tout nouveau module, son test correspondant. Code sans test = non livré.
-- Toute décision méthodologique non triviale prise en cours de route → ligne dans `DECISIONS.md`, pas un commentaire enterré dans le code.
+- Declare heavy dependencies through `availability()`: the smoke test cleanly skips an unavailable approach instead of failing.
+- Write everything in **English** (§8.3): code, comments, messages, documentation and produced files.
+- Read this file and state, before writing, which contracts are touched.
+- Write typed signatures; `contracts.py` is authoritative for data types.
+- Every public function has a docstring giving: inputs, outputs, **file side effects** (exact path written).
+- Validate inputs at module boundaries (parquet schema, presence of config keys) and fail early, loudly, with an actionable message.
+- Produce, with any new module, its matching test. Code without a test = not delivered.
+- Any non-trivial methodological decision taken along the way → a line in `DECISIONS.md`, not a comment buried in the code.
 
-**Interdictions**
+**Prohibitions**
 
-- Pas de chemin en dur, pas de constante magique, pas de seuil littéral dans un `.py`.
-- Pas de `try/except` silencieux, pas de `except Exception: pass`, pas de valeur de repli qui masque une donnée manquante.
-- Pas de logique d'approche dans `training/`, `evaluation/`, `tuning/`, `reporting/` — aucun `if approach == ...` nulle part.
-- Pas de calcul de métrique hors de `evaluation/metrics/`.
-- Pas de mutation de `data/raw/`. Jamais.
-- Pas de dépendance nouvelle sans justification et ajout à `pyproject.toml`.
-- Pas de notebook comme source de vérité : un notebook appelle le package, il ne contient pas de logique.
-- Pas de fichier « utils.py » fourre-tout : un module = une responsabilité nommable en une phrase.
-- Pas de refactor opportuniste hors du périmètre demandé.
+- No hard-coded path, no magic constant, no literal threshold in a `.py`.
+- No silent `try/except`, no `except Exception: pass`, no fallback value hiding missing data.
+- No approach logic in `training/`, `evaluation/`, `tuning/`, `reporting/` — no `if approach == ...` anywhere.
+- No metric computation outside `evaluation/metrics/`.
+- No mutation of `data/raw/`. Ever.
+- No new dependency without a justification and an addition to `pyproject.toml`.
+- No notebook as a source of truth: a notebook calls the package, it contains no logic.
+- No catch-all "utils.py" file: one module = one responsibility that can be named in one sentence.
+- No opportunistic refactoring outside the requested scope.
 
-**Quand s'arrêter et demander**
-Une IA DOIT interrompre la génération et poser la question si : un contrat devrait changer ; deux approches exigeraient un champ incompatible ; une métrique est ambiguë ; le schéma de keypoints d'un dataset est inconnu ; une décision affecterait la comparabilité entre approches. Inventer une convention pour continuer est la faute la plus coûteuse du projet.
+**When to stop and ask**
+An AI MUST interrupt the generation and ask the question if: a contract would have to change; two approaches would require an incompatible field; a metric is ambiguous; the keypoint schema of a dataset is unknown; a decision would affect the comparability between approaches. Inventing a convention to carry on is the most expensive mistake of the project.
 
-**Gabarit de prompt de tâche recommandé**
+**Recommended task prompt template**
 
 ```
-Contexte : CONVENTIONS.md v1.0 (fourni intégralement).
-Tâche : implémenter <X>.
-Périmètre : fichiers autorisés à créer/modifier = [...]. Tout le reste est en lecture seule.
-Contrats touchés : [aucun | n° ...].
-Livrables : code + tests + entrée DECISIONS.md si décision prise.
-Critère d'acceptation : `make smoke` passe pour l'approche <X>.
-Si une règle de CONVENTIONS.md bloque : arrête-toi et explique.
+Context: CONVENTIONS.md v2.2 (given in full).
+Task: implement <X>.
+Scope: files allowed to be created/modified = [...]. Everything else is read-only.
+Contracts touched: [none | no. ...].
+Deliverables: code + tests + DECISIONS.md entry if a decision is taken.
+Acceptance criterion: `make smoke` passes for approach <X>.
+If a rule of CONVENTIONS.md blocks you: stop and explain.
 ```
 
 ---
 
-## 13. Décisions de protocole (toutes tranchées)
+## 13. Protocol decisions (all settled)
 
-Consignées dans `DECISIONS.md`. Elles sont **fermées** : les modifier invalide les résultats déjà produits.
+Recorded in `DECISIONS.md`. They are **closed**: changing them invalidates the results already produced.
 
-| #                  | Décision                 | Valeur retenue                                                                                    |
-| ------------------ | ------------------------- | ------------------------------------------------------------------------------------------------- |
-| ADR-0006           | Schéma de keypoints      | `insect42_v1`, 42 points, commun aux 4 datasets                                                 |
-| ADR-0007           | Sigmas OKS                | `sigma = difficulty × 0.0025`                                                                  |
-| ADR-0008           | Mesures morphométriques  | 27 mesures + 9 paires symétriques                                                                |
-| ADR-0009           | Normalisation PCK         | `alpha × largeur du thorax`, référence 0.25                                                  |
-| ADR-0010           | Métrique primaire        | `oks_ap`, surchargeable sans réévaluer                                                        |
-| ADR-0011           | Groupement anti-fuite     | une image = un spécimen                                                                          |
-| ADR-0013           | Résolution d'entrée     | 640×640 pour toutes les approches                                                                |
-| ADR-0014           | Dataset à l'inférence   | toujours déclaré ; inconnu = erreur                                                             |
-| ADR-0016           | Keypoints absents         | masqués, jamais imputés                                                                         |
-| ADR-0017           | Instances par image       | une seule ; violation bloquante                                                                   |
-| **ADR-0031** | **Budget d'HPO**    | `tune_once`, 20 trials, 5 startup, 3 folds internes, 100 époques, **4 hyperparamètres** |
-| **ADR-0032** | **Augmentation**    | fixée, jamais cherchée                                                                          |
-| **ADR-0033** | **Modèle de base** | `yolo26n` pour les six approches                                                                |
+| #                  | Decision                 | Value retained                                                                                    |
+| ------------------ | ------------------------ | ------------------------------------------------------------------------------------------------- |
+| ADR-0006           | Keypoint schema          | `insect42_v1`, 42 points, common to the 4 datasets                                              |
+| ADR-0007           | OKS sigmas               | `sigma = difficulty × 0.0025`                                                                  |
+| ADR-0008           | Morphometric measurements | 27 measurements + 9 symmetric pairs                                                              |
+| ADR-0009           | PCK normalisation        | `alpha × thorax width`, reference 0.25                                                        |
+| ADR-0010           | Primary metric           | `oks_ap`, overridable without re-evaluation                                                    |
+| ADR-0011           | Anti-leakage grouping    | one image = one specimen                                                                          |
+| ADR-0013           | Input resolution         | 640×640 for every approach                                                                       |
+| ADR-0014           | Dataset at inference     | always declared; unknown = error                                                                 |
+| ADR-0016           | Absent keypoints         | masked, never imputed                                                                             |
+| ADR-0017           | Instances per image      | a single one; violation is blocking                                                              |
+| **ADR-0031** | **HPO budget**      | `tune_once`, 20 trials, 5 startup, 3 inner folds, 100 epochs, **4 hyperparameters**   |
+| **ADR-0032** | **Augmentation**    | fixed, never searched                                                                            |
+| **ADR-0033** | **Base model**      | `yolo26n` for the six approaches                                                                 |
+| **ADR-0037** | **Retained model**  | an ensemble of `yolo_pooled` models: 1 after `train`, 1 per outer fold after `tune`             |
 
-**Budget d'HPO — la règle qui prime.** Les six approches partagent exactement le même budget et le même nombre de dimensions. Comparer des approches optimisées à budgets différents mesurerait le budget, pas la méthode. Le nom d'étude Optuna intègre un hash de l'espace de recherche et des réglages : toute modification crée automatiquement une nouvelle étude, ce qui rend impossible le mélange de deux protocoles dans une même base.
+**HPO budget — the overriding rule.** The six approaches share exactly the same budget and the same number of dimensions. Comparing approaches optimised with different budgets would measure the budget, not the method. The Optuna study name includes a hash of the search space and of the settings: any change automatically creates a new study, which makes it impossible to mix two protocols in the same database.
 
-Les quatre hyperparamètres par approche :
+The four hyperparameters per approach:
 
-| Approches  | Hyperparamètres                                                                        |
+| Approaches | Hyperparameters                                                                        |
 | ---------- | --------------------------------------------------------------------------------------- |
 | A, B, E, F | `lr0`, `pose`, `kobj`, `weight_decay`                                           |
 | C          | `pose.lr0`, `pose.pose`, `crop.padding`, `crop.jitter_scale`                    |
-| D          | `lr0`, `lora.r`, `lora.neck_blocks`, `pose` (avec `alpha = 2r`, non cherché) |
+| D          | `lr0`, `lora.r`, `lora.neck_blocks`, `pose` (with `alpha = 2r`, not searched) |
 
-Aucune décision ouverte ne subsiste.
-
----
-
-*Fin du contrat. Toute évolution passe par un incrément de version de ce fichier et une entrée dans `DECISIONS.md`*
-
-# CONVENTIONS.md — Règles d'architecture et de génération de code
-
-**Projet :** estimation de pose sur 4 datasets d'insectes (Coleoptera, Diptera, Hymenoptera, Lepidoptera)
-**Statut :** contrat normatif. Ce fichier fait autorité sur tout autre document du dépôt.
-**Version du contrat :** 2.0 — décisions de protocole tranchées (ADR-0006 à 0015)
+No open decision remains.
 
 ---
 
-## 0. Comment utiliser ce fichier
-
-Ce document est destiné à être fourni **en entier et en contexte** à toute IA générative (ou tout contributeur humain) chargée d'écrire du code dans ce dépôt.
-
-Règle zéro : **toute génération de code doit citer, en commentaire d'en-tête du fichier produit, les sections de ce document qu'elle applique.** Si une instruction utilisateur contredit ce fichier, l'IA doit s'arrêter et signaler le conflit au lieu de trancher seule.
-
-Vocabulaire normatif : **DOIT** / **NE DOIT PAS** = contrainte dure, non négociable. **DEVRAIT** = recommandation forte, dérogation possible si documentée dans `DECISIONS.md`. **PEUT** = libre.
-
----
-
-## 1. Principes directeurs
-
-1. **L'approche est un plugin, pas une branche de `if`.** Ajouter une 6ᵉ approche NE DOIT PAS modifier le code d'entraînement générique, d'évaluation, d'optimisation ou de reporting. Si vous devez modifier `evaluation/` pour ajouter une approche, l'abstraction est mauvaise : signalez-le.
-2. **Les contrats de données sont l'API du projet.** Les approches ne communiquent jamais entre elles ni avec l'évaluateur par des objets Python : elles communiquent par des **fichiers au format figé** (§3). Cela permet d'entraîner avec Ultralytics, PyTorch pur, HuggingFace/PEFT, ou un modèle externe, sans que l'évaluateur ne le sache jamais.
-3. **Une seule implémentation des métriques.** Aucune métrique NE DOIT être lue depuis les logs d'un framework tiers. Les métriques internes d'Ultralytics, de PyTorch Lightning ou d'un autre entraîneur servent **uniquement au monitoring**, jamais à la comparaison entre approches (§7.1).
-4. **Séparation stricte : `fit` ≠ `predict` ≠ `evaluate` ≠ `aggregate`.** Quatre étapes, quatre artefacts, quatre points de reprise. On DOIT pouvoir ré-évaluer une expérience vieille de trois mois sans réentraîner.
-5. **Tout est configuration ; rien n'est en dur.** Aucun chemin, hyperparamètre, seuil, taille d'image, nom de classe ou de keypoint NE DOIT apparaître littéralement dans un `.py`. Tout vient d'un YAML ou du `RunContext`.
-6. **Reproductibilité par construction.** `run_id` déterministe, seeds explicites, config résolue sérialisée dans le dossier de run, versions de dépendances figées (§6.4).
-7. **Coût de l'ignorance.** Toute approche DOIT être exécutable en mode `smoke` (2 epochs, 8 images, 1 fold) pour valider le branchement de bout en bout en < 2 minutes, avant tout entraînement réel.
-
----
-
-## 2. Arborescence du dépôt
-
-```
-insectpose/
-├── CONVENTIONS.md              # ce fichier — fait autorité
-├── DECISIONS.md                # journal des choix méthodologiques (ADR, append-only)
-├── README.md                   # démarrage rapide uniquement, pas de doctrine
-├── pyproject.toml              # dépendances figées, config ruff/mypy/pytest
-├── Makefile                    # raccourcis: make smoke / make tune / make eval / make report
-│
-├── configs/                    # composition Hydra — SEULE source de paramètres
-│   ├── config.yaml             # config racine + defaults list
-│   ├── paths.yaml              # racines de chemins (surchargées par machine)
-│   ├── data/                   # coleoptera.yaml diptera.yaml ... pooled.yaml
-│   ├── keypoints/              # schémas de keypoints par dataset + union (§3.1)
-│   ├── approach/               # yolo_pooled.yaml yolo_per_dataset.yaml
-│   │                           # detect_then_pose.yaml lora.yaml group_bn.yaml
-│   ├── cv/                     # kfold5.yaml kfold5_grouped.yaml holdout.yaml
-│   ├── eval/                   # default.yaml (métriques, seuils, sigmas OKS)
-│   ├── tuning/                 # optuna_default.yaml + budgets par approche
-│   └── experiment/             # compositions nommées et figées (§5.3)
-│
-├── data/
-│   ├── raw/                    # IMMUABLE, jamais écrit par le code, jamais commité
-│   ├── interim/                # sorties d'adaptateurs, régénérable
-│   ├── processed/              # format canonique (§3.2), régénérable
-│   └── splits/                 # assignations de folds versionnées et hashées (§3.3)
-│
-├── src/insectpose/
-│   ├── contracts.py            # dataclasses/TypedDict des 5 contrats — INTOUCHABLE sans bump
-│   ├── registry.py             # registre par nom (approches, métriques, adaptateurs)
-│   ├── paths.py                # unique endroit qui construit des chemins
-│   ├── context.py              # RunContext (run_id, seed, fold, dossiers, logger)
-│   │
-│   ├── data/
-│   │   ├── schema.py           # validation du format canonique
-│   │   ├── adapters/           # raw -> canonique, un module par source
-│   │   ├── keypoints.py        # mapping par-dataset <-> espace union
-│   │   ├── datamodule.py       # canonique -> batches (superset de champs, §4.3)
-│   │   └── splits.py           # génération et lecture des folds
-│   │
-│   ├── approaches/
-│   │   ├── base.py             # Protocol Approach + BaseApproach
-│   │   ├── yolo_pooled.py
-│   │   ├── yolo_per_dataset.py
-│   │   ├── detect_then_pose.py
-│   │   ├── lora.py
-│   │   └── group_bn.py
-│   │
-│   ├── models/                 # briques réutilisables (backbones, têtes, adaptateurs LoRA, GroupBN)
-│   ├── training/               # boucles génériques, callbacks, early stopping
-│   ├── evaluation/
-│   │   ├── metrics/            # une métrique = un module enregistré
-│   │   ├── matching.py         # appariement pred<->gt (OKS/IoU), partagé
-│   │   ├── evaluator.py        # predictions.parquet -> metrics.parquet
-│   │   └── aggregate.py        # tous les runs -> results/master.parquet
-│   ├── tuning/
-│   │   ├── search_spaces.py    # espaces Optuna, un par approche
-│   │   └── objective.py        # objectif générique (§6.3)
-│   ├── reporting/              # tableaux, figures, tests statistiques
-│   ├── cli.py                  # points d'entrée (§5.4)
-│   └── utils/                  # seed, io, hashing, geometry, logging
-│
-├── runs/                       # artefacts d'exécution, non commités (§8)
-├── results/                    # agrégats consolidés, parquet + figures
-├── reports/                    # livrables (notebooks exportés, PDF, slides)
-└── tests/                      # unitaires + contrat + smoke (§10)
-```
-
-**Règle d'or de l'arborescence :** un fichier `.py` NE DOIT PAS écrire hors de `runs/<run_id>/`, `data/interim/`, `data/processed/`, `data/splits/` et `results/`. Toute autre écriture est un bug.
-
----
-
-## 3. Les cinq contrats
-
-Ce sont les cinq formats figés qui rendent le projet modulaire. Chacun porte un champ `schema_version`. **Modifier un contrat DOIT se faire par incrément de version + lecteur rétrocompatible**, jamais par modification en place.
-
-### 3.1 Contrat 0 — Schéma de keypoints (`kp_infos.yaml`, racine du depot)
-
-Les quatre datasets partagent **un seul schéma de 42 points** (ADR-0006). L'espace union est ce schéma lui-même : le mapping est l'identité, et le mécanisme d'union reste en place pour absorber une divergence future sans refonte.
-
-```yaml
-schema_version: 1
-name: insect42_v1
-status: VALIDATED
-union_space: insect42_v1
-sigma_from_difficulty: {scale: 0.0025}   # sigma = difficulty * scale (ADR-0007)
-keypoints:
-  - {name: thorax-left,  union: thorax-left,  difficulty: 30, flip: thorax-right}
-  - {name: thorax-right, union: thorax-right, difficulty: 30, flip: thorax-left}
-skeleton: [[0, 5], [0, 12], ...]         # 51 arêtes anatomiques
-```
-
-Règles :
-
-- **L'ordre des 42 points est figé à vie** : il est encodé dans tous les artefacts produits. Ajouter un point = l'ajouter *en fin de liste* et bumper `schema_version`.
-- Les tolérances OKS ne sont **pas** écrites en dur : `sigma = difficulty × scale`, où `difficulty` (10 à 40) est la difficulté de positionnement précis fournie par l'expert. Un point difficile à annoter est jugé avec plus d'indulgence, ce qui évite que la métrique soit dominée par le bruit d'annotation. Modifier `scale` change la définition de l'OKS : bumper `eval.version` et rejouer les runs.
-- `flip` définit les paires de symétrie ; toute augmentation par miroir sans cette table est interdite. Les points de l'axe médian sont leur propre miroir.
-- Un schéma marqué `status: PLACEHOLDER` est refusé quand `strict.require_validated_keypoints` est vrai (valeur par défaut).
-- **Mesures morphométriques** (`kp_infos.yaml` (racine du depot), ADR-0008) : 27 mesures définies comme des polylignes de keypoints, plus 9 paires gauche/droite. C'est la grandeur réellement consommée en aval, donc une métrique de premier plan — pas une annexe.
-
-### 3.2 Contrat 1 — Annotations canoniques (`data/processed/<dataset>/annotations.parquet`)
-
-Une ligne = une **instance annotée**. Format unique quelle que soit la source d'origine (COCO, CVAT, CSV…).
-
-| colonne                           | type             | description                                                                    |
-| --------------------------------- | ---------------- | ------------------------------------------------------------------------------ |
-| `schema_version`                | int              | 1                                                                              |
-| `dataset`                       | str              | `coleoptera` \| `diptera` \| `hymenoptera` \| `lepidoptera`            |
-| `image_id`                      | str              | identifiant**globalement unique** : `<dataset>/<nom_fichier_sans_ext>` |
-| `image_path`                    | str              | chemin**relatif à `paths.data_root`**, jamais absolu                  |
-| `image_width`, `image_height` | int              | pixels, image d'origine                                                        |
-| `instance_id`                   | str              | `<image_id>#<n>`                                                             |
-| `group_id`                      | str              | clé anti-fuite : spécimen, planche, session de capture (§6.1)               |
-| `bbox_xywh`                     | list[float] (4)  | coordonnées**image d'origine**, pixels absolus                          |
-| `kpts_xy`                       | list[float] (2K) | ordre du schéma local, pixels absolus, image d'origine                        |
-| `kpts_vis`                      | list[int] (K)    | 0 absent / 1 occulté / 2 visible                                              |
-| `area`                          | float            | aire du segment ou de la bbox                                                  |
-| `keypoint_schema`               | str              | nom du schéma de §3.1                                                        |
-| `split_source`                  | str              | `train` \| `test_officiel` \| `unknown` si un découpage amont existe    |
-
-Règles :
-
-- **Toutes les coordonnées, partout, dans tous les fichiers, sont exprimées dans le repère de l'image d'origine, en pixels absolus.** Aucun format normalisé, aucun `xyxy` relatif, aucune coordonnée dans un repère de crop ne doit jamais quitter un module.
-- Les adaptateurs (`data/adapters/`) sont les **seuls** modules autorisés à connaître les formats sources. Un adaptateur ne fait que : lire → convertir → valider (`schema.py`) → écrire. Aucun filtrage, aucune augmentation, aucune décision méthodologique.
-- Les instances invalides (keypoints hors image, bbox nulle) sont **conservées** avec un flag `qc_flags`, pas supprimées ; le filtrage est une décision de config, pas d'adaptateur.
-
-### 3.3 Contrat 2 — Splits (`data/splits/<split_id>.parquet` + `.json`)
-
-| colonne      | type                              |
-| ------------ | --------------------------------- |
-| `split_id` | str, ex.`kfold5_grouped_seed42` |
-| `image_id` | str                               |
-| `fold`     | int                               |
-| `role`     | `train` \| `val` \| `test`  |
-
-Règles :
-
-- Les folds sont **générés une seule fois** et **partagés par toutes les approches**. Une approche NE DOIT JAMAIS créer ses propres splits.
-- L'unité de découpage est `group_id`, pas `image_id` (§6.1).
-- Le `.json` compagnon contient : seed, stratégie, stratification, comptages par dataset/fold, et un `content_hash` des annotations utilisées. **Si le hash des annotations change, les splits sont invalidés** et le pipeline DOIT refuser de tourner.
-
-### 3.4 Contrat 3 — Prédictions (`runs/<run_id>/predictions/<split>_fold<k>.parquet`)
-
-C'est **le** contrat qui rend les approches interchangeables. Une ligne = une instance prédite.
-
-| colonne                                      | type             | description                                                                                                                                          |
-| -------------------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schema_version`                           | int              | 1                                                                                                                                                    |
-| `run_id`, `fold`, `split`, `dataset` | str/int          |                                                                                                                                                      |
-| `image_id`                                 | str              |                                                                                                                                                      |
-| `pred_id`                                  | str              | unique                                                                                                                                               |
-| `bbox_xywh`                                | list[float] (4)  | repère image d'origine ; obligatoire même pour une approche pose-only (alors = bbox GT ou bbox englobante des kpts, et`bbox_source` le précise) |
-| `bbox_score`                               | float            | 1.0 si non applicable                                                                                                                                |
-| `kpts_xy`                                  | list[float] (2K) | **repère image d'origine**, schéma local du dataset                                                                                          |
-| `kpts_score`                               | list[float] (K)  |                                                                                                                                                      |
-| `keypoint_schema`                          | str              | doit correspondre au schéma du dataset de l'image                                                                                                   |
-| `bbox_source`                              | str              | `predicted` \| `gt` \| `derived`                                                                                                               |
-| `inference_ms`                             | float            | temps par instance, pour la comparaison coût/perf                                                                                                   |
-
-Règles :
-
-- **Aucun seuil de score n'est appliqué à l'écriture.** On écrit toutes les prédictions au-dessus d'un seuil très bas (ex. 0.001) ; le seuillage est une opération d'évaluation, paramétrée en config. Sinon les courbes P/R sont tronquées et les approches deviennent incomparables.
-- Toute approche opérant sur **crop** (pipeline détection→pose, §9.3) DOIT conserver la transformation affine crop→image et **rétro-projeter** avant écriture. Écrire des coordonnées dans le repère du crop est une erreur bloquante.
-- Un modèle entraîné dans l'espace union DOIT projeter vers le schéma local avant écriture (§3.1).
-- Les prédictions sur `test` d'un fold ne DOIVENT contenir que les images de ce fold.
-
-### 3.5 Contrat 4 — Métriques (`runs/<run_id>/metrics.parquet`) et 5 — Manifeste (`runs/<run_id>/manifest.json`)
-
-`metrics.parquet` — format long, jamais large :
-
-| colonne                                       | description                                            |
-| --------------------------------------------- | ------------------------------------------------------ |
-| `run_id`, `approach`, `fold`, `split` |                                                        |
-| `scope`                                     | `overall` \| `dataset:<nom>` \| `keypoint:<nom>` |
-| `metric`                                    | nom canonique, ex.`pck@0.05_bboxdiag`                |
-| `value`                                     | float                                                  |
-| `n`                                         | taille de l'échantillon sous-jacent                   |
-
-`manifest.json` : `run_id`, timestamp, `approach`, `split_id`, config Hydra **résolue** (pas les surcharges CLI), `content_hash` des données, commit git + état propre/sale du dépôt, versions des dépendances clés, seeds, chemins des artefacts produits, durées, ressources GPU, et `optuna_study`/`trial_number` si applicable. **Un run sans manifeste complet est exclu de l'agrégation.**
-
----
-
-## 4. Interfaces et registre
-
-### 4.1 Registre
-
-Un décorateur unique, un espace de noms par famille :
-
-```python
-@register_approach("lora")            # approches
-@register_metric("pck")               # métriques
-@register_adapter("coleoptera_cvat")  # adaptateurs de données
-```
-
-Le nom enregistré DOIT être identique au nom du fichier YAML de config correspondant. Aucun `import` conditionnel, aucun `if approach == ...` ailleurs que dans le registre.
-
-### 4.2 Protocole `Approach`
-
-Toute approche DOIT implémenter exactement cette interface, ni plus ni moins côté pipeline :
-
-```python
-class Approach(Protocol):
-    name: str
-
-    def fit(self, data: FoldData, ctx: RunContext) -> None: ...
-        # entraîne sur data.train, valide sur data.val ; écrit ses poids dans ctx.run_dir/weights/
-        # NE DOIT PAS toucher à data.test
-
-    def predict(self, images: ImageSet, ctx: RunContext) -> Path: ...
-        # retourne le chemin d'un predictions parquet conforme au Contrat 3
-
-    @classmethod
-    def load(cls, run_dir: Path, cfg: DictConfig) -> "Approach": ...
-        # reconstruit un modèle prédictif depuis les artefacts, sans réentraînement
-
-    @classmethod
-    def search_space(cls, trial: optuna.Trial) -> dict: ...
-        # surcharges de config proposées à Optuna ; aucune logique d'entraînement ici
-```
-
-Règles :
-
-- `fit` NE DOIT JAMAIS accéder à `data.test`. Un test unitaire vérifie cette propriété (§10).
-- `predict` NE DOIT JAMAIS calculer de métrique.
-- Une approche PEUT s'appuyer sur plusieurs sous-modèles (cf. détection+pose) : c'est son affaire interne, invisible du pipeline.
-- Une approche « par dataset » (§9.2) reste **une seule** approche : elle encapsule N modèles et route selon `dataset`. Le pipeline ne doit pas voir la différence.
-
-### 4.3 DataModule : superset de champs
-
-Le batch produit par le datamodule DOIT toujours contenir le **superset** des champs utiles à toutes les approches, même si une approche donnée les ignore :
-
-```
-images, bboxes, keypoints, visibility, meta{image_id, instance_id, dataset,
-dataset_index, group_id, orig_size, transform_matrix}
-```
-
-`dataset_index` est indispensable à l'approche BatchNorm par groupe (§9.5) ; `transform_matrix` à la rétro-projection. Les ajouter au coup par coup casse la modularité : ils sont là dès le départ.
-
----
-
-## 5. Configuration
-
-### 5.1 Outil
-
-Hydra + OmegaConf. Composition par `defaults`, surcharge CLI par `clé=valeur`. Pas de `argparse` manuel, pas de dictionnaires de config codés en Python.
-
-### 5.2 Règles
-
-- Un fichier YAML par entité nommée ; le nom du fichier est l'identifiant.
-- Toute clé DOIT avoir une valeur par défaut explicite ; interdiction du `cfg.get("x", 3)` disséminé dans le code.
-- Les configs d'approche contiennent **uniquement** ce qui est spécifique à l'approche. Les paramètres communs (taille d'image, batch, epochs, seuils d'éval) vivent dans `config.yaml` et sont surchargeables.
-- Interdiction d'interpolations Hydra qui traversent plus d'un niveau (`${a.b.c.d}` illisible) : préférer un champ explicite.
-- La config **résolue** est écrite dans `runs/<run_id>/config.yaml` **avant** tout entraînement.
-
-### 5.3 Expériences nommées
-
-Toute exécution destinée au rapport final DOIT passer par un fichier `configs/experiment/*.yaml` figé et commité (ex. `exp_A_yolo_pooled_kfold5.yaml`). Les surcharges CLI ad hoc sont réservées à l'exploration et NE DOIVENT PAS produire de résultats cités dans le rapport.
-
-### 5.4 CLI
-
-Cinq verbes, pas plus :
-
-```
-python -m insectpose.cli prepare   data=coleoptera
-python -m insectpose.cli split     cv=kfold5_grouped
-python -m insectpose.cli train     experiment=exp_A cv.fold=0
-python -m insectpose.cli predict   run_id=<...> split=test
-python -m insectpose.cli evaluate  run_id=<...>
-python -m insectpose.cli tune      experiment=exp_A tuning=optuna_default
-python -m insectpose.cli report
-```
-
-`train` PEUT enchaîner `predict` + `evaluate` par commodité, mais chacun DOIT rester appelable indépendamment.
-
----
-
-## 6. Protocole expérimental
-
-### 6.1 Anti-fuite
-
-- Le découpage se fait par `group_id`. Si un spécimen apparaît sur plusieurs images, toutes ses images sont dans le même fold. **Si le `group_id` n'est pas connu pour un dataset, la valeur par défaut est `image_id` et cette limitation DOIT être écrite dans `DECISIONS.md`.**
-- Stratification par `dataset` (et par nombre d'instances par image si déséquilibré) obligatoire pour les folds poolés.
-- Aucune statistique (moyenne/écart-type de normalisation, taille d'ancres, clustering de keypoints) NE DOIT être calculée sur autre chose que le `train` du fold courant.
-
-### 6.2 Cross-validation
-
-- Schéma par défaut : **K=5 folds groupés stratifiés**, seed fixe, `split_id` unique partagé par toutes les approches. Les mêmes folds pour tout le monde, sinon aucune comparaison n'est valide.
-- Les approches « par dataset » (§9.2) utilisent **les mêmes folds**, simplement restreints à leur dataset. Ne jamais régénérer un découpage local.
-- Une approche est comparée sur la **moyenne ± écart-type inter-folds**, et les résultats par fold sont conservés pour les tests appariés (§8.3).
-
-### 6.3 Optimisation Optuna
-
-- **Nichée par défaut** (ADR-0012). Pour chaque fold externe, la recherche tourne sur des folds **internes** construits à partir du seul train externe. Ces découpages internes (`<split_id>__outer<k>`) sont générés par `cli split` et versionnés exactement comme les folds externes. Les meilleurs hyperparamètres sont ensuite appliqués au fold externe entier. **Le test externe n'a jamais servi à choisir un hyperparamètre.** Un test automatique vérifie cette propriété.
-- Mode dégradé `tune_once` : la recherche n'a lieu que sur les folds internes d'un seul fold externe, et le résultat est réutilisé pour tous les autres. Acceptable si documenté ; le budget de trials doit alors être identique entre approches.
-- **Coût** : `n_folds × n_trials × inner_folds` entraînements par approche. À calibrer avant de lancer une approche lourde ; le budget effectif est enregistré dans chaque manifeste.
-- L'objectif est **toujours la métrique primaire calculée par l'évaluateur partagé**, lue depuis `metrics.parquet` — jamais une loss de validation ni une métrique interne de framework.
-- Un trial = un run complet avec son propre `run_id` et son manifeste ; les trials sont donc évaluables et auditables comme n'importe quel run. Ils n'exportent pas de figures qualitatives (bruit inutile).
-- Stockage SQLite sous `runs/optuna/`, une étude par (approche, découpage, objectif, fold externe), reprise activée.
-- Pruning `MedianPruner` par défaut ; une approche qui ne peut pas rapporter d'intermédiaire déclare `prunable: false`.
-- **Budget équitable** : comparer 100 trials contre 10 invalide la conclusion.
-
-### 6.4 Déterminisme
-
-- Seed unique dans la config, dérivée par `seed_for(run_id, fold, purpose)` pour numpy / torch / python / dataloader workers.
-- `torch.use_deterministic_algorithms(True)` en mode `debug` ; en mode `full` on autorise cudnn benchmark mais on l'enregistre dans le manifeste.
-- Le non-déterminisme résiduel est absorbé par la répétition : toute conclusion finale DEVRAIT reposer sur ≥ 2 seeds pour l'approche gagnante.
-
----
-
-## 7. Évaluation
-
-### 7.1 Règle absolue
-
-L'évaluateur prend **uniquement** : un `predictions.parquet` (Contrat 3), les annotations canoniques (Contrat 1), et `configs/eval/*.yaml`. Il ne charge aucun modèle, n'importe aucun module d'approche, et ignore totalement comment les prédictions ont été produites. **Si l'évaluateur doit savoir quelle approche l'a alimenté, le design est cassé.**
-
-### 7.2 Jeu de métriques figé
-
-Identique pour toutes les approches, calculé en `overall`, par `dataset:*`, par `keypoint:*` et par `measurement:*` :
-
-- **Détection** (si `bbox_source == predicted`) : `det_ap@0.5`, `det_ap@[.5:.95]`.
-- **Pose** : `oks_ap`, `oks_ap@0.5`, `oks_ar` (sigmas dérivés de la difficulté, ADR-0007) ; `pck@{0.125, 0.25, 0.5}_thorax_width` — un point est correct si son erreur est inférieure à `alpha × largeur du thorax` (ADR-0009), `alpha = 0.25` étant la référence du projet ; `nme_matched_only`, `kpt_coverage`, PCK par keypoint.
-- **Échelle de référence** : `pck_normalizer_fallback_rate`. Quand les points de thorax ne sont pas annotés, la normalisation retombe sur la diagonale de bbox — et ce taux de repli est **publié**, jamais silencieux.
-- **Mesures morphométriques** (ADR-0008) : `measurement_mape_median`, `measurement_mape_worst`, détail par mesure, et `symmetry_gap_median` / `symmetry_gap_p90` — l'écart gauche/droite des mesures prédites, calculable **sans vérité terrain**, donc utilisable comme contrôle qualité en production.
-- **Bout-en-bout** : la métrique primaire pénalise les échecs de détection. Une pipeline qui ne détecte pas l'insecte n'a pas « 0 keypoint évalué », elle a un échec compté.
-- **Coût** : latence par instance et p95, nombre de paramètres, VRAM, temps d'entraînement — métriques de premier ordre, pas des annexes.
-
-**Métrique primaire du projet** : `oks_ap` (ADR-0010). C'est la **seule clé d'évaluation librement surchargeable** — elle ne modifie aucun calcul, seulement l'objectif d'Optuna et le classement des approches. Toutes les métriques étant calculées à chaque run, changer d'objectif n'oblige jamais à réévaluer :
-
-```
-python -m insectpose.cli train ... eval.primary_metric=measurement_mape_median \
-                                   eval.primary_direction=minimize
-```
-
-### 7.3 Appariement
-
-L'appariement prédiction↔GT (par OKS ou IoU, greedy par score décroissant) est implémenté **une seule fois** dans `evaluation/matching.py`. Aucune métrique ne réimplémente son propre appariement.
-
-### 7.4 Comparaison des approches sur périmètre commun
-
-Les approches n'ont pas le même périmètre naturel (une approche par dataset ne prédit rien hors de son dataset). Règle : **toute comparaison se fait sur l'union des images de test de tous les folds**, une approche restreinte étant évaluée comme la concaténation de ses N modèles. Un tableau de résultats DOIT indiquer le `n` sous-jacent de chaque cellule (§3.5) ; deux valeurs avec des `n` différents ne sont pas comparables et le rapport DOIT le signaler.
-
----
-
-## 8. Runs, artefacts et résultats
-
-### 8.1 `run_id`
-
-```
-<approach>__<data_scope>__<split_id>__fold<k>__<tag>__<hash8>
-ex. lora__pooled__kfold5grouped_seed42__fold2__baseline__a3f91c07
-```
-
-`hash8` = 8 premiers caractères du hash de la config résolue + du `content_hash` des données. Deux runs identiques ont le même `run_id` : le pipeline DOIT alors sauter le run (idempotence) sauf `force=true`.
-
-### 8.2 Contenu d'un dossier de run
-
-```
-runs/<run_id>/
-├── manifest.json          # Contrat 5, écrit en dernier -> sa présence signale un run complet
-├── config.yaml            # config résolue
-├── weights/               # poids, checkpoints, adaptateurs LoRA
-├── predictions/           # Contrat 3
-├── metrics.parquet        # Contrat 4
-├── logs/                  # stdout, courbes, tensorboard/mlflow
-└── figures/               # visualisations qualitatives (§8.4)
-```
-
-`manifest.json` est écrit **en dernier**. Un dossier sans manifeste = run interrompu, ignoré par l'agrégation, supprimable sans discussion.
-
-### 8.3 Langue des livrables
-
-**Tout ce qui est écrit dans un fichier produit est en anglais** : titres, axes, légendes et annotations de figures, en-têtes et valeurs textuelles de tableaux, champs de manifestes et de rapports JSON, noms de fichiers. Les livrables circulent hors de l'équipe et finissent dans des publications ; une figure en français y est inutilisable.
-
-Le code, les commentaires, les docstrings, les messages de log et la documentation interne (`CONVENTIONS.md`, `DECISIONS.md`, `README.md`) restent en français. La frontière est nette : ce qui sort dans `results/`, `runs/` ou `reports/` est en anglais, le reste non.
-
-Corollaire : un nom de métrique, de scope ou de colonne est un identifiant, jamais une phrase à traduire. `oks_ap`, `dataset:coleoptera`, `measurement_mape_median` sont figés (§3.5) et ne changent pas de langue.
-
-### 8.4 Agrégation et reporting
-
-- `aggregate.py` scanne `runs/*/metrics.parquet` + manifestes → `results/master.parquet`. **C'est le seul chemin vers un tableau de résultats.** Aucune figure, aucun tableau du rapport ne DOIT être produit à partir d'un copier-coller de console.
-- Les comparaisons entre approches DEVRAIENT utiliser des tests appariés par fold (Wilcoxon signé ou t apparié) avec correction pour comparaisons multiples, et rapporter des intervalles de confiance plutôt que des rangs bruts.
-- `reporting/` produit : tableau principal (approche × dataset × métrique), courbes PCK, scatter coût vs performance, matrice d'erreurs par keypoint, échecs qualitatifs.
-
-### 8.5 Qualitatif obligatoire
-
-Chaque run DOIT exporter au moins 12 images de test annotées pred vs GT, incluant les 6 pires cas selon la métrique primaire. Un modèle n'est jamais validé sur des chiffres seuls.
-
----
-
-## 9. Contraintes spécifiques par approche
-
-Ces notes fixent les pièges connus de chaque famille. Elles n'ajoutent aucune interface : tout passe par §4.2.
-
-### 9.1 YOLO poolé (une classe « insecte », tous datasets) — IMPLÉMENTÉ
-
-Le schéma de keypoints étant commun aux 4 ordres (ADR-0006), le modèle prédit directement dans le schéma attendu : aucune reprojection union → local n'est nécessaire. Les points absents d'un dataset (ADR-0016) sortent en `vis = 0` dans les labels et sont masqués dans la loss, jamais appris comme des zéros.
-
-Toute la logique risquée est isolée dans `data/yolo_export.py`, testée par aller-retour sans GPU :
-
-- la bbox YOLO est **centrée**, le contrat 1 est en coin haut-gauche ;
-- `flip_idx` est obligatoire dans `data.yaml` dès que `fliplr > 0`, sinon le miroir échange gauche et droite sans permuter les labels ;
-- les noms de fichiers sont aplatis (`coleoptera__img000`), sinon deux datasets ayant un `img000.png` se recouvrent silencieusement.
-
-Les fichiers YOLO sont un artefact **dérivé**, régénéré par fold sous `runs/<run_id>/yolo_dataset/`, jamais écrit dans `data/processed/`. `conf = 0.001` à l'inférence : le seuillage est une opération d'évaluation.
-
-Matériel (ADR-0019) : `train.device: auto` prend le GPU 0 si CUDA est disponible ; AMP activée par défaut mais désactivée en `mode: debug` ; FP16 à l'inférence sur GPU. VRAM maximale, temps d'entraînement et nombre de paramètres entrent dans le manifeste — ce sont des métriques de coût de premier ordre, et l'agrégation alerte si des runs comparés viennent de matériels différents.
-
-### 9.2 YOLO par dataset — IMPLÉMENTÉ
-
-Une **seule** classe `Approach` encapsulant N modèles, routés par `meta.dataset`. Le pipeline ne voit pas la différence : c'est ce qui garantit que A et B sont évaluées identiquement.
-
-Trois choix de protocole (ADR-0023) :
-
-- chaque modèle repart des **poids de base**, jamais du modèle poolé — A et B restent indépendantes, et la question posée est bien « un spécialiste vaut-il un généraliste ? » ;
-- les hyperparamètres sont **partagés** par les N modèles, un trial d'Optuna les entraînant tous. Le budget d'HPO reste ainsi strictement égal à celui de A. Une recherche indépendante par dataset le quadruplerait, et B gagnerait par l'optimisation plutôt que par la méthode ;
-- **même nombre d'époques** pour tous les datasets. Conséquence à garder en tête à la lecture : avec 192 images pour Hymenoptera contre 935 pour Coleoptera, le premier voit cinq fois moins de pas d'optimisation. Un écart de performance entre ordres n'est donc pas nécessairement une différence de difficulté.
-
-Les folds sont ceux du découpage partagé, simplement restreints (§6.2). Chaque sous-modèle range ses artefacts sous `weights/<dataset>/`, `yolo_dataset/<dataset>/`, `logs/<dataset>/`, et ses coûts sont préfixés dans le manifeste.
-
-### 9.3 Détection puis pose sur crop — IMPLÉMENTÉ
-
-Deux modèles dans un même run : un détecteur **poolé** (une classe, images entières, labels sans keypoints) puis un modèle YOLO-pose entraîné sur des crops normalisés à la résolution du protocole (ADR-0024).
-
-- Le modèle de pose est entraîné sur des crops issus de bboxes GT **bruitées** (`jitter_scale`, `jitter_shift`), jamais sur des cadrages parfaits : sinon décalage train/test garanti, puisqu'à l'inférence les cadrages viennent d'un détecteur. La validation, elle, utilise des cadrages nets — une métrique de validation bruitée ne servirait à rien.
-- Une marge (`crop.padding`) entoure la bbox. Sans elle, tarses et antennes tombent hors du crop et deviennent irrécupérables quelle que soit la qualité du modèle. Les points hors cadre sont marqués `vis = 0` : ni appris comme des zéros, ni comptés comme des erreurs.
-- La transformation crop → image est conservée et **toute prédiction est rétro-projetée** vers le repère de l'image d'origine avant écriture (contrat 3).
-- L'évaluation bout-en-bout utilise les bboxes **prédites**. Le mode `pose_on_gt_boxes: true` écrit `bbox_source: gt` : diagnostic uniquement, jamais dans le même tableau que les approches bout-en-bout.
-
-### 9.4 LoRA — IMPLÉMENTÉ
-
-Adaptateurs injectés sur les convolutions du dernier segment du cou, backbone et cou gelés, têtes entraînables (ADR-0025). Les index de blocs sont **calculés depuis la structure du modèle**, jamais écrits en dur : changer de taille de réseau (n/s/m/l) décale tout.
-
-Le manifeste enregistre le **nombre de paramètres entraînables** et la liste des modules adaptés. Sans cela, « LoRA rang 8 » ne désigne rien : la même étiquette recouvre des configurations très différentes selon ce qui reste dégelé à côté des adaptateurs.
-
-### 9.5 BatchNorm par groupe — IMPLÉMENTÉ
-
-Toutes les `BatchNorm2d` dupliquées en N copies, statistiques **et** paramètres affines par dataset (ADR-0026). Les poids convolutifs restent partagés : c'est l'hypothèse testée. Chaque branche est initialisée depuis les statistiques du modèle pré-entraîné, jamais aléatoirement.
-
-Les lots sont **mixtes** ; le forward se scinde par groupe puis recompose dans l'ordre. Le groupe vient du nom de fichier exporté (`<dataset>__<stem>`) à l'entraînement, et d'une déclaration explicite à l'inférence. Un dataset inconnu est une **erreur explicite** (ADR-0014), jamais un repli deviné.
-
-### 9.6 Variante à keypoints réduits — IMPLÉMENTÉ
-
-Approche A privée de la supervision sur les pattes et les ailes postérieures (ADR-0027) : ces 16 points passent à `vis = 0` dans les labels d'entraînement et de validation, **jamais dans le test**.
-
-Précaution de lecture obligatoire : la vérité terrain conserve ces points et l'évaluation les compte. Les métriques `overall` de cette variante sont donc **mécaniquement moins bonnes** et ne se comparent pas à celles de A. La comparaison valide porte sur les scopes `keypoint:*` des points conservés :
-
-```
-python scripts/compare_models.py --exclude-keypoints leg hindwing
-```
-
-qui ajoute une ligne `MEAN (retained)` — le chiffre à comparer.
-
-### 9.7 Patch du modèle Ultralytics
-
-Les approches 9.4 et 9.5 modifient le `nn.Module` construit par Ultralytics, qui ne prévoit ni l'un ni l'autre. Toute cette dépendance aux internes est isolée dans `training/patching.py`, avec deux contraintes vérifiées sur la version installée :
-
-- **les callbacks ne conviennent pas** : `on_pretrain_routine_start` précède la construction du modèle, `on_pretrain_routine_end` suit l'optimiseur et l'EMA. On passe donc un trainer dérivé (`train(trainer=...)`) et le patch s'applique dans `get_model` ;
-- **Ultralytics dégèle ce qu'on gèle** : sa boucle de `freeze` remet `requires_grad=True` sur tout paramètre gelé hors `args.freeze`. Le gel est donc réappliqué dans `_build_train_pipeline`, juste avant la construction de l'optimiseur.
-
-Un compte de paramètres entraînables est journalisé et enregistré au manifeste à chaque run. Si une future version d'Ultralytics change cet ordre, ce chiffre le signale immédiatement au lieu de laisser passer un entraînement silencieusement faux.
-
-### 9.6 Approches futures
-
-Toute nouvelle approche (multi-tâches, distillation, pré-entraînement auto-supervisé, ensembles…) s'ajoute par §11 sans dérogation. Si une approche ne rentre pas dans le protocole `Approach`, **on modifie le protocole pour tout le monde, en bumpant sa version** — on ne crée pas de cas particulier.
-
----
-
-## 10. Tests
-
-Trois niveaux, tous obligatoires avant toute exécution longue :
-
-1. **Tests de contrat** (`tests/contracts/`) : valident qu'un parquet produit respecte le schéma, les bornes de coordonnées, l'unicité des identifiants, la cohérence keypoint_schema ↔ dimension. Exécutés automatiquement à l'écriture de tout artefact en mode `debug`.
-2. **Tests unitaires** : rétro-projection crop→image (aller-retour = identité à 1e-6 près), mapping local↔union, appariement, chaque métrique sur un cas calculé à la main, non-fuite (`fit` ne lit pas `test`), reproductibilité (deux runs même seed = mêmes prédictions).
-3. **Smoke test** (`make smoke`) : chaque approche enregistrée est exécutée sur un fixture de 8 images et 1 fold, de `train` à `report`. **Une approche qui ne passe pas le smoke test n'est pas considérée comme implémentée.** Le fixture est commité dans `tests/fixtures/`.
-
-CI : ruff + mypy (strict sur `contracts.py`, `registry.py`, `evaluation/`) + pytest + smoke.
-
----
-
-## 11. Procédure : ajouter une approche
-
-Exactement 6 artefacts, ni plus ni moins. Si vous devez toucher un 7ᵉ fichier existant, c'est un signal de conception à remonter.
-
-1. `src/insectpose/approaches/<nom>.py` — classe décorée `@register_approach("<nom>")`, implémentant §4.2.
-2. `configs/approach/<nom>.yaml` — hyperparamètres par défaut, `_target_` vers la classe.
-3. `search_space` dans la classe (ou `tuning/search_spaces.py` si volumineux).
-4. `tests/approaches/test_<nom>.py` — smoke + tests spécifiques (ex. §9.5).
-5. `configs/experiment/exp_<lettre>_<nom>.yaml` — expérience figée pour le rapport.
-6. Une entrée dans `DECISIONS.md` : ce que l'approche teste, ses hypothèses, ses limites connues.
-
----
-
-## 12. Règles de génération pour les IA
-
-À respecter par toute IA produisant du code sur ce dépôt.
-
-**Obligations**
-
-- Déclarer les dépendances lourdes via `availability()` : le smoke test ignore proprement une approche indisponible plutôt que d'échouer.
-- Écrire en **anglais** tout texte destiné à un fichier produit (§8.3), en français le code et ses commentaires.
-- Lire ce fichier et annoncer, avant d'écrire, quels contrats sont touchés.
-- Écrire des signatures typées ; `contracts.py` fait foi pour les types de données.
-- Toute fonction publique a une docstring indiquant : entrées, sorties, **effets de bord fichiers** (chemin exact écrit).
-- Valider les entrées aux frontières de module (schéma parquet, présence de clés de config) et échouer tôt, bruyamment, avec un message actionnable.
-- Produire, avec tout nouveau module, son test correspondant. Code sans test = non livré.
-- Toute décision méthodologique non triviale prise en cours de route → ligne dans `DECISIONS.md`, pas un commentaire enterré dans le code.
-
-**Interdictions**
-
-- Pas de chemin en dur, pas de constante magique, pas de seuil littéral dans un `.py`.
-- Pas de `try/except` silencieux, pas de `except Exception: pass`, pas de valeur de repli qui masque une donnée manquante.
-- Pas de logique d'approche dans `training/`, `evaluation/`, `tuning/`, `reporting/` — aucun `if approach == ...` nulle part.
-- Pas de calcul de métrique hors de `evaluation/metrics/`.
-- Pas de mutation de `data/raw/`. Jamais.
-- Pas de dépendance nouvelle sans justification et ajout à `pyproject.toml`.
-- Pas de notebook comme source de vérité : un notebook appelle le package, il ne contient pas de logique.
-- Pas de fichier « utils.py » fourre-tout : un module = une responsabilité nommable en une phrase.
-- Pas de refactor opportuniste hors du périmètre demandé.
-
-**Quand s'arrêter et demander**
-Une IA DOIT interrompre la génération et poser la question si : un contrat devrait changer ; deux approches exigeraient un champ incompatible ; une métrique est ambiguë ; le schéma de keypoints d'un dataset est inconnu ; une décision affecterait la comparabilité entre approches. Inventer une convention pour continuer est la faute la plus coûteuse du projet.
-
-**Gabarit de prompt de tâche recommandé**
-
-```
-Contexte : CONVENTIONS.md v1.0 (fourni intégralement).
-Tâche : implémenter <X>.
-Périmètre : fichiers autorisés à créer/modifier = [...]. Tout le reste est en lecture seule.
-Contrats touchés : [aucun | n° ...].
-Livrables : code + tests + entrée DECISIONS.md si décision prise.
-Critère d'acceptation : `make smoke` passe pour l'approche <X>.
-Si une règle de CONVENTIONS.md bloque : arrête-toi et explique.
-```
-
----
-
-## 13. Décisions de protocole (toutes tranchées)
-
-Consignées dans `DECISIONS.md`. Elles sont **fermées** : les modifier invalide les résultats déjà produits.
-
-| #        | Décision                | Valeur retenue                                                                      |
-| -------- | ------------------------ | ----------------------------------------------------------------------------------- |
-| ADR-0006 | Schéma de keypoints     | `insect42_v1`, 42 points, commun aux 4 datasets, union = identité                |
-| ADR-0007 | Sigmas OKS               | `sigma = difficulty × 0.0025` (10→0.025 … 40→0.100)                           |
-| ADR-0008 | Mesures morphométriques | 27 mesures + 9 paires symétriques, métriques de premier plan                      |
-| ADR-0009 | Normalisation PCK        | `alpha × largeur du thorax`, référence `alpha = 0.25`, taux de repli publié |
-| ADR-0010 | Métrique primaire       | `oks_ap`, seule clé d'évaluation librement surchargeable                        |
-| ADR-0011 | Groupement anti-fuite    | une image = un specimen,`group_id = image_id`                                     |
-| ADR-0012 | HPO                      | nichée : recherche sur folds internes, test externe jamais vu                      |
-| ADR-0013 | Résolution d'entrée    | 640×640 pour toutes les approches, garde-fou strict                                |
-| ADR-0014 | Dataset à l'inférence  | toujours déclaré ; un dataset inconnu est une erreur explicite                    |
-| ADR-0015 | Suivi d'expériences     | manifestes +`master.parquet` uniquement                                           |
-
-Restent ouverts sans bloquer : le budget d'HPO réellement soutenable (OPEN-09) et le traitement des keypoints systématiquement absents dans un dataset donné (OPEN-10).
-
----
-
-*Fin du contrat. Toute évolution passe par un incrément de version de ce fichier et une entrée dans `DECISIONS.md`*
-
-# CONVENTIONS.md — Règles d'architecture et de génération de code
-
-**Projet :** estimation de pose sur 4 datasets d'insectes (Coleoptera, Diptera, Hymenoptera, Lepidoptera)
-**Statut :** contrat normatif. Ce fichier fait autorité sur tout autre document du dépôt.
-**Version du contrat :** 2.0 — décisions de protocole tranchées (ADR-0006 à 0015)
-
----
-
-## 0. Comment utiliser ce fichier
-
-Ce document est destiné à être fourni **en entier et en contexte** à toute IA générative (ou tout contributeur humain) chargée d'écrire du code dans ce dépôt.
-
-Règle zéro : **toute génération de code doit citer, en commentaire d'en-tête du fichier produit, les sections de ce document qu'elle applique.** Si une instruction utilisateur contredit ce fichier, l'IA doit s'arrêter et signaler le conflit au lieu de trancher seule.
-
-Vocabulaire normatif : **DOIT** / **NE DOIT PAS** = contrainte dure, non négociable. **DEVRAIT** = recommandation forte, dérogation possible si documentée dans `DECISIONS.md`. **PEUT** = libre.
-
----
-
-## 1. Principes directeurs
-
-1. **L'approche est un plugin, pas une branche de `if`.** Ajouter une 6ᵉ approche NE DOIT PAS modifier le code d'entraînement générique, d'évaluation, d'optimisation ou de reporting. Si vous devez modifier `evaluation/` pour ajouter une approche, l'abstraction est mauvaise : signalez-le.
-2. **Les contrats de données sont l'API du projet.** Les approches ne communiquent jamais entre elles ni avec l'évaluateur par des objets Python : elles communiquent par des **fichiers au format figé** (§3). Cela permet d'entraîner avec Ultralytics, PyTorch pur, HuggingFace/PEFT, ou un modèle externe, sans que l'évaluateur ne le sache jamais.
-3. **Une seule implémentation des métriques.** Aucune métrique NE DOIT être lue depuis les logs d'un framework tiers. Les métriques internes d'Ultralytics, de PyTorch Lightning ou d'un autre entraîneur servent **uniquement au monitoring**, jamais à la comparaison entre approches (§7.1).
-4. **Séparation stricte : `fit` ≠ `predict` ≠ `evaluate` ≠ `aggregate`.** Quatre étapes, quatre artefacts, quatre points de reprise. On DOIT pouvoir ré-évaluer une expérience vieille de trois mois sans réentraîner.
-5. **Tout est configuration ; rien n'est en dur.** Aucun chemin, hyperparamètre, seuil, taille d'image, nom de classe ou de keypoint NE DOIT apparaître littéralement dans un `.py`. Tout vient d'un YAML ou du `RunContext`.
-6. **Reproductibilité par construction.** `run_id` déterministe, seeds explicites, config résolue sérialisée dans le dossier de run, versions de dépendances figées (§6.4).
-7. **Coût de l'ignorance.** Toute approche DOIT être exécutable en mode `smoke` (2 epochs, 8 images, 1 fold) pour valider le branchement de bout en bout en < 2 minutes, avant tout entraînement réel.
-
----
-
-## 2. Arborescence du dépôt
-
-```
-insectpose/
-├── CONVENTIONS.md              # ce fichier — fait autorité
-├── DECISIONS.md                # journal des choix méthodologiques (ADR, append-only)
-├── README.md                   # démarrage rapide uniquement, pas de doctrine
-├── pyproject.toml              # dépendances figées, config ruff/mypy/pytest
-├── Makefile                    # raccourcis: make smoke / make tune / make eval / make report
-│
-├── configs/                    # composition Hydra — SEULE source de paramètres
-│   ├── config.yaml             # config racine + defaults list
-│   ├── paths.yaml              # racines de chemins (surchargées par machine)
-│   ├── data/                   # coleoptera.yaml diptera.yaml ... pooled.yaml
-│   ├── keypoints/              # schémas de keypoints par dataset + union (§3.1)
-│   ├── approach/               # yolo_pooled.yaml yolo_per_dataset.yaml
-│   │                           # detect_then_pose.yaml lora.yaml group_bn.yaml
-│   ├── cv/                     # kfold5.yaml kfold5_grouped.yaml holdout.yaml
-│   ├── eval/                   # default.yaml (métriques, seuils, sigmas OKS)
-│   ├── tuning/                 # optuna_default.yaml + budgets par approche
-│   └── experiment/             # compositions nommées et figées (§5.3)
-│
-├── data/
-│   ├── raw/                    # IMMUABLE, jamais écrit par le code, jamais commité
-│   ├── interim/                # sorties d'adaptateurs, régénérable
-│   ├── processed/              # format canonique (§3.2), régénérable
-│   └── splits/                 # assignations de folds versionnées et hashées (§3.3)
-│
-├── src/insectpose/
-│   ├── contracts.py            # dataclasses/TypedDict des 5 contrats — INTOUCHABLE sans bump
-│   ├── registry.py             # registre par nom (approches, métriques, adaptateurs)
-│   ├── paths.py                # unique endroit qui construit des chemins
-│   ├── context.py              # RunContext (run_id, seed, fold, dossiers, logger)
-│   │
-│   ├── data/
-│   │   ├── schema.py           # validation du format canonique
-│   │   ├── adapters/           # raw -> canonique, un module par source
-│   │   ├── keypoints.py        # mapping par-dataset <-> espace union
-│   │   ├── datamodule.py       # canonique -> batches (superset de champs, §4.3)
-│   │   └── splits.py           # génération et lecture des folds
-│   │
-│   ├── approaches/
-│   │   ├── base.py             # Protocol Approach + BaseApproach
-│   │   ├── yolo_pooled.py
-│   │   ├── yolo_per_dataset.py
-│   │   ├── detect_then_pose.py
-│   │   ├── lora.py
-│   │   └── group_bn.py
-│   │
-│   ├── models/                 # briques réutilisables (backbones, têtes, adaptateurs LoRA, GroupBN)
-│   ├── training/               # boucles génériques, callbacks, early stopping
-│   ├── evaluation/
-│   │   ├── metrics/            # une métrique = un module enregistré
-│   │   ├── matching.py         # appariement pred<->gt (OKS/IoU), partagé
-│   │   ├── evaluator.py        # predictions.parquet -> metrics.parquet
-│   │   └── aggregate.py        # tous les runs -> results/master.parquet
-│   ├── tuning/
-│   │   ├── search_spaces.py    # espaces Optuna, un par approche
-│   │   └── objective.py        # objectif générique (§6.3)
-│   ├── reporting/              # tableaux, figures, tests statistiques
-│   ├── cli.py                  # points d'entrée (§5.4)
-│   └── utils/                  # seed, io, hashing, geometry, logging
-│
-├── runs/                       # artefacts d'exécution, non commités (§8)
-├── results/                    # agrégats consolidés, parquet + figures
-├── reports/                    # livrables (notebooks exportés, PDF, slides)
-└── tests/                      # unitaires + contrat + smoke (§10)
-```
-
-**Règle d'or de l'arborescence :** un fichier `.py` NE DOIT PAS écrire hors de `runs/<run_id>/`, `data/interim/`, `data/processed/`, `data/splits/` et `results/`. Toute autre écriture est un bug.
-
----
-
-## 3. Les cinq contrats
-
-Ce sont les cinq formats figés qui rendent le projet modulaire. Chacun porte un champ `schema_version`. **Modifier un contrat DOIT se faire par incrément de version + lecteur rétrocompatible**, jamais par modification en place.
-
-### 3.1 Contrat 0 — Schéma de keypoints (`kp_infos.yaml`, racine du depot)
-
-Les quatre datasets partagent **un seul schéma de 42 points** (ADR-0006). L'espace union est ce schéma lui-même : le mapping est l'identité, et le mécanisme d'union reste en place pour absorber une divergence future sans refonte.
-
-```yaml
-schema_version: 1
-name: insect42_v1
-status: VALIDATED
-union_space: insect42_v1
-sigma_from_difficulty: {scale: 0.0025}   # sigma = difficulty * scale (ADR-0007)
-keypoints:
-  - {name: thorax-left,  union: thorax-left,  difficulty: 30, flip: thorax-right}
-  - {name: thorax-right, union: thorax-right, difficulty: 30, flip: thorax-left}
-skeleton: [[0, 5], [0, 12], ...]         # 51 arêtes anatomiques
-```
-
-Règles :
-
-- **L'ordre des 42 points est figé à vie** : il est encodé dans tous les artefacts produits. Ajouter un point = l'ajouter *en fin de liste* et bumper `schema_version`.
-- Les tolérances OKS ne sont **pas** écrites en dur : `sigma = difficulty × scale`, où `difficulty` (10 à 40) est la difficulté de positionnement précis fournie par l'expert. Un point difficile à annoter est jugé avec plus d'indulgence, ce qui évite que la métrique soit dominée par le bruit d'annotation. Modifier `scale` change la définition de l'OKS : bumper `eval.version` et rejouer les runs.
-- `flip` définit les paires de symétrie ; toute augmentation par miroir sans cette table est interdite. Les points de l'axe médian sont leur propre miroir.
-- Un schéma marqué `status: PLACEHOLDER` est refusé quand `strict.require_validated_keypoints` est vrai (valeur par défaut).
-- **Mesures morphométriques** (`kp_infos.yaml` (racine du depot), ADR-0008) : 27 mesures définies comme des polylignes de keypoints, plus 9 paires gauche/droite. C'est la grandeur réellement consommée en aval, donc une métrique de premier plan — pas une annexe.
-
-### 3.2 Contrat 1 — Annotations canoniques (`data/processed/<dataset>/annotations.parquet`)
-
-Une ligne = une **instance annotée**. Format unique quelle que soit la source d'origine (COCO, CVAT, CSV…).
-
-| colonne                           | type             | description                                                                    |
-| --------------------------------- | ---------------- | ------------------------------------------------------------------------------ |
-| `schema_version`                | int              | 1                                                                              |
-| `dataset`                       | str              | `coleoptera` \| `diptera` \| `hymenoptera` \| `lepidoptera`            |
-| `image_id`                      | str              | identifiant**globalement unique** : `<dataset>/<nom_fichier_sans_ext>` |
-| `image_path`                    | str              | chemin**relatif à `paths.data_root`**, jamais absolu                  |
-| `image_width`, `image_height` | int              | pixels, image d'origine                                                        |
-| `instance_id`                   | str              | `<image_id>#<n>`                                                             |
-| `group_id`                      | str              | clé anti-fuite : spécimen, planche, session de capture (§6.1)               |
-| `bbox_xywh`                     | list[float] (4)  | coordonnées**image d'origine**, pixels absolus                          |
-| `kpts_xy`                       | list[float] (2K) | ordre du schéma local, pixels absolus, image d'origine                        |
-| `kpts_vis`                      | list[int] (K)    | 0 absent / 1 occulté / 2 visible                                              |
-| `area`                          | float            | aire du segment ou de la bbox                                                  |
-| `keypoint_schema`               | str              | nom du schéma de §3.1                                                        |
-| `split_source`                  | str              | `train` \| `test_officiel` \| `unknown` si un découpage amont existe    |
-
-Règles :
-
-- **Toutes les coordonnées, partout, dans tous les fichiers, sont exprimées dans le repère de l'image d'origine, en pixels absolus.** Aucun format normalisé, aucun `xyxy` relatif, aucune coordonnée dans un repère de crop ne doit jamais quitter un module.
-- Les adaptateurs (`data/adapters/`) sont les **seuls** modules autorisés à connaître les formats sources. Un adaptateur ne fait que : lire → convertir → valider (`schema.py`) → écrire. Aucun filtrage, aucune augmentation, aucune décision méthodologique.
-- Les instances invalides (keypoints hors image, bbox nulle) sont **conservées** avec un flag `qc_flags`, pas supprimées ; le filtrage est une décision de config, pas d'adaptateur.
-
-### 3.3 Contrat 2 — Splits (`data/splits/<split_id>.parquet` + `.json`)
-
-| colonne      | type                              |
-| ------------ | --------------------------------- |
-| `split_id` | str, ex.`kfold5_grouped_seed42` |
-| `image_id` | str                               |
-| `fold`     | int                               |
-| `role`     | `train` \| `val` \| `test`  |
-
-Règles :
-
-- Les folds sont **générés une seule fois** et **partagés par toutes les approches**. Une approche NE DOIT JAMAIS créer ses propres splits.
-- L'unité de découpage est `group_id`, pas `image_id` (§6.1).
-- Le `.json` compagnon contient : seed, stratégie, stratification, comptages par dataset/fold, et un `content_hash` des annotations utilisées. **Si le hash des annotations change, les splits sont invalidés** et le pipeline DOIT refuser de tourner.
-
-### 3.4 Contrat 3 — Prédictions (`runs/<run_id>/predictions/<split>_fold<k>.parquet`)
-
-C'est **le** contrat qui rend les approches interchangeables. Une ligne = une instance prédite.
-
-| colonne                                      | type             | description                                                                                                                                          |
-| -------------------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schema_version`                           | int              | 1                                                                                                                                                    |
-| `run_id`, `fold`, `split`, `dataset` | str/int          |                                                                                                                                                      |
-| `image_id`                                 | str              |                                                                                                                                                      |
-| `pred_id`                                  | str              | unique                                                                                                                                               |
-| `bbox_xywh`                                | list[float] (4)  | repère image d'origine ; obligatoire même pour une approche pose-only (alors = bbox GT ou bbox englobante des kpts, et`bbox_source` le précise) |
-| `bbox_score`                               | float            | 1.0 si non applicable                                                                                                                                |
-| `kpts_xy`                                  | list[float] (2K) | **repère image d'origine**, schéma local du dataset                                                                                          |
-| `kpts_score`                               | list[float] (K)  |                                                                                                                                                      |
-| `keypoint_schema`                          | str              | doit correspondre au schéma du dataset de l'image                                                                                                   |
-| `bbox_source`                              | str              | `predicted` \| `gt` \| `derived`                                                                                                               |
-| `inference_ms`                             | float            | temps par instance, pour la comparaison coût/perf                                                                                                   |
-
-Règles :
-
-- **Aucun seuil de score n'est appliqué à l'écriture.** On écrit toutes les prédictions au-dessus d'un seuil très bas (ex. 0.001) ; le seuillage est une opération d'évaluation, paramétrée en config. Sinon les courbes P/R sont tronquées et les approches deviennent incomparables.
-- Toute approche opérant sur **crop** (pipeline détection→pose, §9.3) DOIT conserver la transformation affine crop→image et **rétro-projeter** avant écriture. Écrire des coordonnées dans le repère du crop est une erreur bloquante.
-- Un modèle entraîné dans l'espace union DOIT projeter vers le schéma local avant écriture (§3.1).
-- Les prédictions sur `test` d'un fold ne DOIVENT contenir que les images de ce fold.
-
-### 3.5 Contrat 4 — Métriques (`runs/<run_id>/metrics.parquet`) et 5 — Manifeste (`runs/<run_id>/manifest.json`)
-
-`metrics.parquet` — format long, jamais large :
-
-| colonne                                       | description                                            |
-| --------------------------------------------- | ------------------------------------------------------ |
-| `run_id`, `approach`, `fold`, `split` |                                                        |
-| `scope`                                     | `overall` \| `dataset:<nom>` \| `keypoint:<nom>` |
-| `metric`                                    | nom canonique, ex.`pck@0.05_bboxdiag`                |
-| `value`                                     | float                                                  |
-| `n`                                         | taille de l'échantillon sous-jacent                   |
-
-`manifest.json` : `run_id`, timestamp, `approach`, `split_id`, config Hydra **résolue** (pas les surcharges CLI), `content_hash` des données, commit git + état propre/sale du dépôt, versions des dépendances clés, seeds, chemins des artefacts produits, durées, ressources GPU, et `optuna_study`/`trial_number` si applicable. **Un run sans manifeste complet est exclu de l'agrégation.**
-
----
-
-## 4. Interfaces et registre
-
-### 4.1 Registre
-
-Un décorateur unique, un espace de noms par famille :
-
-```python
-@register_approach("lora")            # approches
-@register_metric("pck")               # métriques
-@register_adapter("coleoptera_cvat")  # adaptateurs de données
-```
-
-Le nom enregistré DOIT être identique au nom du fichier YAML de config correspondant. Aucun `import` conditionnel, aucun `if approach == ...` ailleurs que dans le registre.
-
-### 4.2 Protocole `Approach`
-
-Toute approche DOIT implémenter exactement cette interface, ni plus ni moins côté pipeline :
-
-```python
-class Approach(Protocol):
-    name: str
-
-    def fit(self, data: FoldData, ctx: RunContext) -> None: ...
-        # entraîne sur data.train, valide sur data.val ; écrit ses poids dans ctx.run_dir/weights/
-        # NE DOIT PAS toucher à data.test
-
-    def predict(self, images: ImageSet, ctx: RunContext) -> Path: ...
-        # retourne le chemin d'un predictions parquet conforme au Contrat 3
-
-    @classmethod
-    def load(cls, run_dir: Path, cfg: DictConfig) -> "Approach": ...
-        # reconstruit un modèle prédictif depuis les artefacts, sans réentraînement
-
-    @classmethod
-    def search_space(cls, trial: optuna.Trial) -> dict: ...
-        # surcharges de config proposées à Optuna ; aucune logique d'entraînement ici
-```
-
-Règles :
-
-- `fit` NE DOIT JAMAIS accéder à `data.test`. Un test unitaire vérifie cette propriété (§10).
-- `predict` NE DOIT JAMAIS calculer de métrique.
-- Une approche PEUT s'appuyer sur plusieurs sous-modèles (cf. détection+pose) : c'est son affaire interne, invisible du pipeline.
-- Une approche « par dataset » (§9.2) reste **une seule** approche : elle encapsule N modèles et route selon `dataset`. Le pipeline ne doit pas voir la différence.
-
-### 4.3 DataModule : superset de champs
-
-Le batch produit par le datamodule DOIT toujours contenir le **superset** des champs utiles à toutes les approches, même si une approche donnée les ignore :
-
-```
-images, bboxes, keypoints, visibility, meta{image_id, instance_id, dataset,
-dataset_index, group_id, orig_size, transform_matrix}
-```
-
-`dataset_index` est indispensable à l'approche BatchNorm par groupe (§9.5) ; `transform_matrix` à la rétro-projection. Les ajouter au coup par coup casse la modularité : ils sont là dès le départ.
-
----
-
-## 5. Configuration
-
-### 5.1 Outil
-
-Hydra + OmegaConf. Composition par `defaults`, surcharge CLI par `clé=valeur`. Pas de `argparse` manuel, pas de dictionnaires de config codés en Python.
-
-### 5.2 Règles
-
-- Un fichier YAML par entité nommée ; le nom du fichier est l'identifiant.
-- Toute clé DOIT avoir une valeur par défaut explicite ; interdiction du `cfg.get("x", 3)` disséminé dans le code.
-- Les configs d'approche contiennent **uniquement** ce qui est spécifique à l'approche. Les paramètres communs (taille d'image, batch, epochs, seuils d'éval) vivent dans `config.yaml` et sont surchargeables.
-- Interdiction d'interpolations Hydra qui traversent plus d'un niveau (`${a.b.c.d}` illisible) : préférer un champ explicite.
-- La config **résolue** est écrite dans `runs/<run_id>/config.yaml` **avant** tout entraînement.
-
-### 5.3 Expériences nommées
-
-Toute exécution destinée au rapport final DOIT passer par un fichier `configs/experiment/*.yaml` figé et commité (ex. `exp_A_yolo_pooled_kfold5.yaml`). Les surcharges CLI ad hoc sont réservées à l'exploration et NE DOIVENT PAS produire de résultats cités dans le rapport.
-
-### 5.4 CLI
-
-Cinq verbes, pas plus :
-
-```
-python -m insectpose.cli prepare   data=coleoptera
-python -m insectpose.cli split     cv=kfold5_grouped
-python -m insectpose.cli train     experiment=exp_A cv.fold=0
-python -m insectpose.cli predict   run_id=<...> split=test
-python -m insectpose.cli evaluate  run_id=<...>
-python -m insectpose.cli tune      experiment=exp_A tuning=optuna_default
-python -m insectpose.cli report
-```
-
-`train` PEUT enchaîner `predict` + `evaluate` par commodité, mais chacun DOIT rester appelable indépendamment.
-
----
-
-## 6. Protocole expérimental
-
-### 6.1 Anti-fuite
-
-- Le découpage se fait par `group_id`. Si un spécimen apparaît sur plusieurs images, toutes ses images sont dans le même fold. **Si le `group_id` n'est pas connu pour un dataset, la valeur par défaut est `image_id` et cette limitation DOIT être écrite dans `DECISIONS.md`.**
-- Stratification par `dataset` (et par nombre d'instances par image si déséquilibré) obligatoire pour les folds poolés.
-- Aucune statistique (moyenne/écart-type de normalisation, taille d'ancres, clustering de keypoints) NE DOIT être calculée sur autre chose que le `train` du fold courant.
-
-### 6.2 Cross-validation
-
-- Schéma par défaut : **K=5 folds groupés stratifiés**, seed fixe, `split_id` unique partagé par toutes les approches. Les mêmes folds pour tout le monde, sinon aucune comparaison n'est valide.
-- Les approches « par dataset » (§9.2) utilisent **les mêmes folds**, simplement restreints à leur dataset. Ne jamais régénérer un découpage local.
-- Une approche est comparée sur la **moyenne ± écart-type inter-folds**, et les résultats par fold sont conservés pour les tests appariés (§8.3).
-
-### 6.3 Optimisation Optuna
-
-- **Nichée par défaut** (ADR-0012). Pour chaque fold externe, la recherche tourne sur des folds **internes** construits à partir du seul train externe. Ces découpages internes (`<split_id>__outer<k>`) sont générés par `cli split` et versionnés exactement comme les folds externes. Les meilleurs hyperparamètres sont ensuite appliqués au fold externe entier. **Le test externe n'a jamais servi à choisir un hyperparamètre.** Un test automatique vérifie cette propriété.
-- Mode dégradé `tune_once` : la recherche n'a lieu que sur les folds internes d'un seul fold externe, et le résultat est réutilisé pour tous les autres. Acceptable si documenté ; le budget de trials doit alors être identique entre approches.
-- **Coût** : `n_folds × n_trials × inner_folds` entraînements par approche. À calibrer avant de lancer une approche lourde ; le budget effectif est enregistré dans chaque manifeste.
-- L'objectif est **toujours la métrique primaire calculée par l'évaluateur partagé**, lue depuis `metrics.parquet` — jamais une loss de validation ni une métrique interne de framework.
-- Un trial = un run complet avec son propre `run_id` et son manifeste ; les trials sont donc évaluables et auditables comme n'importe quel run. Ils n'exportent pas de figures qualitatives (bruit inutile).
-- Stockage SQLite sous `runs/optuna/`, une étude par (approche, découpage, objectif, fold externe), reprise activée.
-- Pruning `MedianPruner` par défaut ; une approche qui ne peut pas rapporter d'intermédiaire déclare `prunable: false`.
-- **Budget équitable** : comparer 100 trials contre 10 invalide la conclusion.
-
-### 6.4 Déterminisme
-
-- Seed unique dans la config, dérivée par `seed_for(run_id, fold, purpose)` pour numpy / torch / python / dataloader workers.
-- `torch.use_deterministic_algorithms(True)` en mode `debug` ; en mode `full` on autorise cudnn benchmark mais on l'enregistre dans le manifeste.
-- Le non-déterminisme résiduel est absorbé par la répétition : toute conclusion finale DEVRAIT reposer sur ≥ 2 seeds pour l'approche gagnante.
-
----
-
-## 7. Évaluation
-
-### 7.1 Règle absolue
-
-L'évaluateur prend **uniquement** : un `predictions.parquet` (Contrat 3), les annotations canoniques (Contrat 1), et `configs/eval/*.yaml`. Il ne charge aucun modèle, n'importe aucun module d'approche, et ignore totalement comment les prédictions ont été produites. **Si l'évaluateur doit savoir quelle approche l'a alimenté, le design est cassé.**
-
-### 7.2 Jeu de métriques figé
-
-Identique pour toutes les approches, calculé en `overall`, par `dataset:*`, par `keypoint:*` et par `measurement:*` :
-
-- **Détection** (si `bbox_source == predicted`) : `det_ap@0.5`, `det_ap@[.5:.95]`.
-- **Pose** : `oks_ap`, `oks_ap@0.5`, `oks_ar` (sigmas dérivés de la difficulté, ADR-0007) ; `pck@{0.125, 0.25, 0.5}_thorax_width` — un point est correct si son erreur est inférieure à `alpha × largeur du thorax` (ADR-0009), `alpha = 0.25` étant la référence du projet ; `nme_matched_only`, `kpt_coverage`, PCK par keypoint.
-- **Échelle de référence** : `pck_normalizer_fallback_rate`. Quand les points de thorax ne sont pas annotés, la normalisation retombe sur la diagonale de bbox — et ce taux de repli est **publié**, jamais silencieux.
-- **Mesures morphométriques** (ADR-0008) : `measurement_mape_median`, `measurement_mape_worst`, détail par mesure, et `symmetry_gap_median` / `symmetry_gap_p90` — l'écart gauche/droite des mesures prédites, calculable **sans vérité terrain**, donc utilisable comme contrôle qualité en production.
-- **Bout-en-bout** : la métrique primaire pénalise les échecs de détection. Une pipeline qui ne détecte pas l'insecte n'a pas « 0 keypoint évalué », elle a un échec compté.
-- **Coût** : latence par instance et p95, nombre de paramètres, VRAM, temps d'entraînement — métriques de premier ordre, pas des annexes.
-
-**Métrique primaire du projet** : `oks_ap` (ADR-0010). C'est la **seule clé d'évaluation librement surchargeable** — elle ne modifie aucun calcul, seulement l'objectif d'Optuna et le classement des approches. Toutes les métriques étant calculées à chaque run, changer d'objectif n'oblige jamais à réévaluer :
-
-```
-python -m insectpose.cli train ... eval.primary_metric=measurement_mape_median \
-                                   eval.primary_direction=minimize
-```
-
-### 7.3 Appariement
-
-L'appariement prédiction↔GT (par OKS ou IoU, greedy par score décroissant) est implémenté **une seule fois** dans `evaluation/matching.py`. Aucune métrique ne réimplémente son propre appariement.
-
-### 7.4 Comparaison des approches sur périmètre commun
-
-Les approches n'ont pas le même périmètre naturel (une approche par dataset ne prédit rien hors de son dataset). Règle : **toute comparaison se fait sur l'union des images de test de tous les folds**, une approche restreinte étant évaluée comme la concaténation de ses N modèles. Un tableau de résultats DOIT indiquer le `n` sous-jacent de chaque cellule (§3.5) ; deux valeurs avec des `n` différents ne sont pas comparables et le rapport DOIT le signaler.
-
----
-
-## 8. Runs, artefacts et résultats
-
-### 8.1 `run_id`
-
-```
-<approach>__<data_scope>__<split_id>__fold<k>__<tag>__<hash8>
-ex. lora__pooled__kfold5grouped_seed42__fold2__baseline__a3f91c07
-```
-
-`hash8` = 8 premiers caractères du hash de la config résolue + du `content_hash` des données. Deux runs identiques ont le même `run_id` : le pipeline DOIT alors sauter le run (idempotence) sauf `force=true`.
-
-### 8.2 Contenu d'un dossier de run
-
-```
-runs/<run_id>/
-├── manifest.json          # Contrat 5, écrit en dernier -> sa présence signale un run complet
-├── config.yaml            # config résolue
-├── weights/               # poids, checkpoints, adaptateurs LoRA
-├── predictions/           # Contrat 3
-├── metrics.parquet        # Contrat 4
-├── logs/                  # stdout, courbes, tensorboard/mlflow
-└── figures/               # visualisations qualitatives (§8.4)
-```
-
-`manifest.json` est écrit **en dernier**. Un dossier sans manifeste = run interrompu, ignoré par l'agrégation, supprimable sans discussion.
-
-### 8.3 Langue des livrables
-
-**Tout ce qui est écrit dans un fichier produit est en anglais** : titres, axes, légendes et annotations de figures, en-têtes et valeurs textuelles de tableaux, champs de manifestes et de rapports JSON, noms de fichiers. Les livrables circulent hors de l'équipe et finissent dans des publications ; une figure en français y est inutilisable.
-
-Le code, les commentaires, les docstrings, les messages de log et la documentation interne (`CONVENTIONS.md`, `DECISIONS.md`, `README.md`) restent en français. La frontière est nette : ce qui sort dans `results/`, `runs/` ou `reports/` est en anglais, le reste non.
-
-Corollaire : un nom de métrique, de scope ou de colonne est un identifiant, jamais une phrase à traduire. `oks_ap`, `dataset:coleoptera`, `measurement_mape_median` sont figés (§3.5) et ne changent pas de langue.
-
-### 8.4 Agrégation et reporting
-
-- `aggregate.py` scanne `runs/*/metrics.parquet` + manifestes → `results/master.parquet`. **C'est le seul chemin vers un tableau de résultats.** Aucune figure, aucun tableau du rapport ne DOIT être produit à partir d'un copier-coller de console.
-- Les comparaisons entre approches DEVRAIENT utiliser des tests appariés par fold (Wilcoxon signé ou t apparié) avec correction pour comparaisons multiples, et rapporter des intervalles de confiance plutôt que des rangs bruts.
-- `reporting/` produit : tableau principal (approche × dataset × métrique), courbes PCK, scatter coût vs performance, matrice d'erreurs par keypoint, échecs qualitatifs.
-
-### 8.5 Qualitatif obligatoire
-
-Chaque run DOIT exporter au moins 12 images de test annotées pred vs GT, incluant les 6 pires cas selon la métrique primaire. Un modèle n'est jamais validé sur des chiffres seuls.
-
----
-
-## 9. Contraintes spécifiques par approche
-
-Ces notes fixent les pièges connus de chaque famille. Elles n'ajoutent aucune interface : tout passe par §4.2.
-
-### 9.1 YOLO poolé (une classe « insecte », tous datasets) — IMPLÉMENTÉ
-
-Le schéma de keypoints étant commun aux 4 ordres (ADR-0006), le modèle prédit directement dans le schéma attendu : aucune reprojection union → local n'est nécessaire. Les points absents d'un dataset (ADR-0016) sortent en `vis = 0` dans les labels et sont masqués dans la loss, jamais appris comme des zéros.
-
-Toute la logique risquée est isolée dans `data/yolo_export.py`, testée par aller-retour sans GPU :
-
-- la bbox YOLO est **centrée**, le contrat 1 est en coin haut-gauche ;
-- `flip_idx` est obligatoire dans `data.yaml` dès que `fliplr > 0`, sinon le miroir échange gauche et droite sans permuter les labels ;
-- les noms de fichiers sont aplatis (`coleoptera__img000`), sinon deux datasets ayant un `img000.png` se recouvrent silencieusement.
-
-Les fichiers YOLO sont un artefact **dérivé**, régénéré par fold sous `runs/<run_id>/yolo_dataset/`, jamais écrit dans `data/processed/`. `conf = 0.001` à l'inférence : le seuillage est une opération d'évaluation.
-
-Matériel (ADR-0019) : `train.device: auto` prend le GPU 0 si CUDA est disponible ; AMP activée par défaut mais désactivée en `mode: debug` ; FP16 à l'inférence sur GPU. VRAM maximale, temps d'entraînement et nombre de paramètres entrent dans le manifeste — ce sont des métriques de coût de premier ordre, et l'agrégation alerte si des runs comparés viennent de matériels différents.
-
-### 9.2 YOLO par dataset — IMPLÉMENTÉ
-
-Une **seule** classe `Approach` encapsulant N modèles, routés par `meta.dataset`. Le pipeline ne voit pas la différence : c'est ce qui garantit que A et B sont évaluées identiquement.
-
-Trois choix de protocole (ADR-0023) :
-
-- chaque modèle repart des **poids de base**, jamais du modèle poolé — A et B restent indépendantes, et la question posée est bien « un spécialiste vaut-il un généraliste ? » ;
-- les hyperparamètres sont **partagés** par les N modèles, un trial d'Optuna les entraînant tous. Le budget d'HPO reste ainsi strictement égal à celui de A. Une recherche indépendante par dataset le quadruplerait, et B gagnerait par l'optimisation plutôt que par la méthode ;
-- **même nombre d'époques** pour tous les datasets. Conséquence à garder en tête à la lecture : avec 192 images pour Hymenoptera contre 935 pour Coleoptera, le premier voit cinq fois moins de pas d'optimisation. Un écart de performance entre ordres n'est donc pas nécessairement une différence de difficulté.
-
-Les folds sont ceux du découpage partagé, simplement restreints (§6.2). Chaque sous-modèle range ses artefacts sous `weights/<dataset>/`, `yolo_dataset/<dataset>/`, `logs/<dataset>/`, et ses coûts sont préfixés dans le manifeste.
-
-### 9.3 Détection puis pose sur crop — IMPLÉMENTÉ
-
-Deux modèles dans un même run : un détecteur **poolé** (une classe, images entières, labels sans keypoints) puis un modèle YOLO-pose entraîné sur des crops normalisés à la résolution du protocole (ADR-0024).
-
-- Le modèle de pose est entraîné sur des crops issus de bboxes GT **bruitées** (`jitter_scale`, `jitter_shift`), jamais sur des cadrages parfaits : sinon décalage train/test garanti, puisqu'à l'inférence les cadrages viennent d'un détecteur. La validation, elle, utilise des cadrages nets — une métrique de validation bruitée ne servirait à rien.
-- Une marge (`crop.padding`) entoure la bbox. Sans elle, tarses et antennes tombent hors du crop et deviennent irrécupérables quelle que soit la qualité du modèle. Les points hors cadre sont marqués `vis = 0` : ni appris comme des zéros, ni comptés comme des erreurs.
-- La transformation crop → image est conservée et **toute prédiction est rétro-projetée** vers le repère de l'image d'origine avant écriture (contrat 3).
-- L'évaluation bout-en-bout utilise les bboxes **prédites**. Le mode `pose_on_gt_boxes: true` écrit `bbox_source: gt` : diagnostic uniquement, jamais dans le même tableau que les approches bout-en-bout.
-
-### 9.4 LoRA
-
-- Les artefacts sauvegardés sont les **adaptateurs seuls** + une référence explicite au modèle de base (nom, version, hash). Un run LoRA non rechargeable sans le bon modèle de base est invalide.
-- La config déclare explicitement : modules ciblés, rang, alpha, dropout, et **quels paramètres restent entraînables hors adaptateurs** (têtes, biais, normalisations). C'est souvent la vraie variable cachée d'une comparaison LoRA.
-
-### 9.5 BatchNorm par groupe (domain-specific BN)
-
-- Repose sur `meta.dataset_index` (§4.3). Les statistiques BN sont maintenues **par dataset** ; à l'inférence, le groupe est choisi par `dataset` de l'image.
-- Piège à documenter : ce que fait l'approche quand le dataset est inconnu à l'inférence (moyenne des groupes ? groupe par défaut ?). Le comportement DOIT être explicite en config, pas implicite dans le code.
-- Les batches mixtes multi-datasets doivent être supportés ; l'implémentation DOIT passer un test unitaire vérifiant qu'un batch mixte donne le même résultat que N batches purs.
-
-### 9.6 Approches futures
-
-Toute nouvelle approche (multi-tâches, distillation, pré-entraînement auto-supervisé, ensembles…) s'ajoute par §11 sans dérogation. Si une approche ne rentre pas dans le protocole `Approach`, **on modifie le protocole pour tout le monde, en bumpant sa version** — on ne crée pas de cas particulier.
-
----
-
-## 10. Tests
-
-Trois niveaux, tous obligatoires avant toute exécution longue :
-
-1. **Tests de contrat** (`tests/contracts/`) : valident qu'un parquet produit respecte le schéma, les bornes de coordonnées, l'unicité des identifiants, la cohérence keypoint_schema ↔ dimension. Exécutés automatiquement à l'écriture de tout artefact en mode `debug`.
-2. **Tests unitaires** : rétro-projection crop→image (aller-retour = identité à 1e-6 près), mapping local↔union, appariement, chaque métrique sur un cas calculé à la main, non-fuite (`fit` ne lit pas `test`), reproductibilité (deux runs même seed = mêmes prédictions).
-3. **Smoke test** (`make smoke`) : chaque approche enregistrée est exécutée sur un fixture de 8 images et 1 fold, de `train` à `report`. **Une approche qui ne passe pas le smoke test n'est pas considérée comme implémentée.** Le fixture est commité dans `tests/fixtures/`.
-
-CI : ruff + mypy (strict sur `contracts.py`, `registry.py`, `evaluation/`) + pytest + smoke.
-
----
-
-## 11. Procédure : ajouter une approche
-
-Exactement 6 artefacts, ni plus ni moins. Si vous devez toucher un 7ᵉ fichier existant, c'est un signal de conception à remonter.
-
-1. `src/insectpose/approaches/<nom>.py` — classe décorée `@register_approach("<nom>")`, implémentant §4.2.
-2. `configs/approach/<nom>.yaml` — hyperparamètres par défaut, `_target_` vers la classe.
-3. `search_space` dans la classe (ou `tuning/search_spaces.py` si volumineux).
-4. `tests/approaches/test_<nom>.py` — smoke + tests spécifiques (ex. §9.5).
-5. `configs/experiment/exp_<lettre>_<nom>.yaml` — expérience figée pour le rapport.
-6. Une entrée dans `DECISIONS.md` : ce que l'approche teste, ses hypothèses, ses limites connues.
-
----
-
-## 12. Règles de génération pour les IA
-
-À respecter par toute IA produisant du code sur ce dépôt.
-
-**Obligations**
-
-- Déclarer les dépendances lourdes via `availability()` : le smoke test ignore proprement une approche indisponible plutôt que d'échouer.
-- Écrire en **anglais** tout texte destiné à un fichier produit (§8.3), en français le code et ses commentaires.
-- Lire ce fichier et annoncer, avant d'écrire, quels contrats sont touchés.
-- Écrire des signatures typées ; `contracts.py` fait foi pour les types de données.
-- Toute fonction publique a une docstring indiquant : entrées, sorties, **effets de bord fichiers** (chemin exact écrit).
-- Valider les entrées aux frontières de module (schéma parquet, présence de clés de config) et échouer tôt, bruyamment, avec un message actionnable.
-- Produire, avec tout nouveau module, son test correspondant. Code sans test = non livré.
-- Toute décision méthodologique non triviale prise en cours de route → ligne dans `DECISIONS.md`, pas un commentaire enterré dans le code.
-
-**Interdictions**
-
-- Pas de chemin en dur, pas de constante magique, pas de seuil littéral dans un `.py`.
-- Pas de `try/except` silencieux, pas de `except Exception: pass`, pas de valeur de repli qui masque une donnée manquante.
-- Pas de logique d'approche dans `training/`, `evaluation/`, `tuning/`, `reporting/` — aucun `if approach == ...` nulle part.
-- Pas de calcul de métrique hors de `evaluation/metrics/`.
-- Pas de mutation de `data/raw/`. Jamais.
-- Pas de dépendance nouvelle sans justification et ajout à `pyproject.toml`.
-- Pas de notebook comme source de vérité : un notebook appelle le package, il ne contient pas de logique.
-- Pas de fichier « utils.py » fourre-tout : un module = une responsabilité nommable en une phrase.
-- Pas de refactor opportuniste hors du périmètre demandé.
-
-**Quand s'arrêter et demander**
-Une IA DOIT interrompre la génération et poser la question si : un contrat devrait changer ; deux approches exigeraient un champ incompatible ; une métrique est ambiguë ; le schéma de keypoints d'un dataset est inconnu ; une décision affecterait la comparabilité entre approches. Inventer une convention pour continuer est la faute la plus coûteuse du projet.
-
-**Gabarit de prompt de tâche recommandé**
-
-```
-Contexte : CONVENTIONS.md v1.0 (fourni intégralement).
-Tâche : implémenter <X>.
-Périmètre : fichiers autorisés à créer/modifier = [...]. Tout le reste est en lecture seule.
-Contrats touchés : [aucun | n° ...].
-Livrables : code + tests + entrée DECISIONS.md si décision prise.
-Critère d'acceptation : `make smoke` passe pour l'approche <X>.
-Si une règle de CONVENTIONS.md bloque : arrête-toi et explique.
-```
-
----
-
-## 13. Décisions de protocole (toutes tranchées)
-
-Consignées dans `DECISIONS.md`. Elles sont **fermées** : les modifier invalide les résultats déjà produits.
-
-| #        | Décision                | Valeur retenue                                                                      |
-| -------- | ------------------------ | ----------------------------------------------------------------------------------- |
-| ADR-0006 | Schéma de keypoints     | `insect42_v1`, 42 points, commun aux 4 datasets, union = identité                |
-| ADR-0007 | Sigmas OKS               | `sigma = difficulty × 0.0025` (10→0.025 … 40→0.100)                           |
-| ADR-0008 | Mesures morphométriques | 27 mesures + 9 paires symétriques, métriques de premier plan                      |
-| ADR-0009 | Normalisation PCK        | `alpha × largeur du thorax`, référence `alpha = 0.25`, taux de repli publié |
-| ADR-0010 | Métrique primaire       | `oks_ap`, seule clé d'évaluation librement surchargeable                        |
-| ADR-0011 | Groupement anti-fuite    | une image = un specimen,`group_id = image_id`                                     |
-| ADR-0012 | HPO                      | nichée : recherche sur folds internes, test externe jamais vu                      |
-| ADR-0013 | Résolution d'entrée    | 640×640 pour toutes les approches, garde-fou strict                                |
-| ADR-0014 | Dataset à l'inférence  | toujours déclaré ; un dataset inconnu est une erreur explicite                    |
-| ADR-0015 | Suivi d'expériences     | manifestes +`master.parquet` uniquement                                           |
-
-Restent ouverts sans bloquer : le budget d'HPO réellement soutenable (OPEN-09) et le traitement des keypoints systématiquement absents dans un dataset donné (OPEN-10).
-
----
-
-*Fin du contrat. Toute évolution passe par un incrément de version de ce fichier et une entrée dans `DECISIONS.md`*
-
-# CONVENTIONS.md — Règles d'architecture et de génération de code
-
-**Projet :** estimation de pose sur 4 datasets d'insectes (Coleoptera, Diptera, Hymenoptera, Lepidoptera)
-**Statut :** contrat normatif. Ce fichier fait autorité sur tout autre document du dépôt.
-**Version du contrat :** 2.0 — décisions de protocole tranchées (ADR-0006 à 0015)
-
----
-
-## 0. Comment utiliser ce fichier
-
-Ce document est destiné à être fourni **en entier et en contexte** à toute IA générative (ou tout contributeur humain) chargée d'écrire du code dans ce dépôt.
-
-Règle zéro : **toute génération de code doit citer, en commentaire d'en-tête du fichier produit, les sections de ce document qu'elle applique.** Si une instruction utilisateur contredit ce fichier, l'IA doit s'arrêter et signaler le conflit au lieu de trancher seule.
-
-Vocabulaire normatif : **DOIT** / **NE DOIT PAS** = contrainte dure, non négociable. **DEVRAIT** = recommandation forte, dérogation possible si documentée dans `DECISIONS.md`. **PEUT** = libre.
-
----
-
-## 1. Principes directeurs
-
-1. **L'approche est un plugin, pas une branche de `if`.** Ajouter une 6ᵉ approche NE DOIT PAS modifier le code d'entraînement générique, d'évaluation, d'optimisation ou de reporting. Si vous devez modifier `evaluation/` pour ajouter une approche, l'abstraction est mauvaise : signalez-le.
-2. **Les contrats de données sont l'API du projet.** Les approches ne communiquent jamais entre elles ni avec l'évaluateur par des objets Python : elles communiquent par des **fichiers au format figé** (§3). Cela permet d'entraîner avec Ultralytics, PyTorch pur, HuggingFace/PEFT, ou un modèle externe, sans que l'évaluateur ne le sache jamais.
-3. **Une seule implémentation des métriques.** Aucune métrique NE DOIT être lue depuis les logs d'un framework tiers. Les métriques internes d'Ultralytics, de PyTorch Lightning ou d'un autre entraîneur servent **uniquement au monitoring**, jamais à la comparaison entre approches (§7.1).
-4. **Séparation stricte : `fit` ≠ `predict` ≠ `evaluate` ≠ `aggregate`.** Quatre étapes, quatre artefacts, quatre points de reprise. On DOIT pouvoir ré-évaluer une expérience vieille de trois mois sans réentraîner.
-5. **Tout est configuration ; rien n'est en dur.** Aucun chemin, hyperparamètre, seuil, taille d'image, nom de classe ou de keypoint NE DOIT apparaître littéralement dans un `.py`. Tout vient d'un YAML ou du `RunContext`.
-6. **Reproductibilité par construction.** `run_id` déterministe, seeds explicites, config résolue sérialisée dans le dossier de run, versions de dépendances figées (§6.4).
-7. **Coût de l'ignorance.** Toute approche DOIT être exécutable en mode `smoke` (2 epochs, 8 images, 1 fold) pour valider le branchement de bout en bout en < 2 minutes, avant tout entraînement réel.
-
----
-
-## 2. Arborescence du dépôt
-
-```
-insectpose/
-├── CONVENTIONS.md              # ce fichier — fait autorité
-├── DECISIONS.md                # journal des choix méthodologiques (ADR, append-only)
-├── README.md                   # démarrage rapide uniquement, pas de doctrine
-├── pyproject.toml              # dépendances figées, config ruff/mypy/pytest
-├── Makefile                    # raccourcis: make smoke / make tune / make eval / make report
-│
-├── configs/                    # composition Hydra — SEULE source de paramètres
-│   ├── config.yaml             # config racine + defaults list
-│   ├── paths.yaml              # racines de chemins (surchargées par machine)
-│   ├── data/                   # coleoptera.yaml diptera.yaml ... pooled.yaml
-│   ├── keypoints/              # schémas de keypoints par dataset + union (§3.1)
-│   ├── approach/               # yolo_pooled.yaml yolo_per_dataset.yaml
-│   │                           # detect_then_pose.yaml lora.yaml group_bn.yaml
-│   ├── cv/                     # kfold5.yaml kfold5_grouped.yaml holdout.yaml
-│   ├── eval/                   # default.yaml (métriques, seuils, sigmas OKS)
-│   ├── tuning/                 # optuna_default.yaml + budgets par approche
-│   └── experiment/             # compositions nommées et figées (§5.3)
-│
-├── data/
-│   ├── raw/                    # IMMUABLE, jamais écrit par le code, jamais commité
-│   ├── interim/                # sorties d'adaptateurs, régénérable
-│   ├── processed/              # format canonique (§3.2), régénérable
-│   └── splits/                 # assignations de folds versionnées et hashées (§3.3)
-│
-├── src/insectpose/
-│   ├── contracts.py            # dataclasses/TypedDict des 5 contrats — INTOUCHABLE sans bump
-│   ├── registry.py             # registre par nom (approches, métriques, adaptateurs)
-│   ├── paths.py                # unique endroit qui construit des chemins
-│   ├── context.py              # RunContext (run_id, seed, fold, dossiers, logger)
-│   │
-│   ├── data/
-│   │   ├── schema.py           # validation du format canonique
-│   │   ├── adapters/           # raw -> canonique, un module par source
-│   │   ├── keypoints.py        # mapping par-dataset <-> espace union
-│   │   ├── datamodule.py       # canonique -> batches (superset de champs, §4.3)
-│   │   └── splits.py           # génération et lecture des folds
-│   │
-│   ├── approaches/
-│   │   ├── base.py             # Protocol Approach + BaseApproach
-│   │   ├── yolo_pooled.py
-│   │   ├── yolo_per_dataset.py
-│   │   ├── detect_then_pose.py
-│   │   ├── lora.py
-│   │   └── group_bn.py
-│   │
-│   ├── models/                 # briques réutilisables (backbones, têtes, adaptateurs LoRA, GroupBN)
-│   ├── training/               # boucles génériques, callbacks, early stopping
-│   ├── evaluation/
-│   │   ├── metrics/            # une métrique = un module enregistré
-│   │   ├── matching.py         # appariement pred<->gt (OKS/IoU), partagé
-│   │   ├── evaluator.py        # predictions.parquet -> metrics.parquet
-│   │   └── aggregate.py        # tous les runs -> results/master.parquet
-│   ├── tuning/
-│   │   ├── search_spaces.py    # espaces Optuna, un par approche
-│   │   └── objective.py        # objectif générique (§6.3)
-│   ├── reporting/              # tableaux, figures, tests statistiques
-│   ├── cli.py                  # points d'entrée (§5.4)
-│   └── utils/                  # seed, io, hashing, geometry, logging
-│
-├── runs/                       # artefacts d'exécution, non commités (§8)
-├── results/                    # agrégats consolidés, parquet + figures
-├── reports/                    # livrables (notebooks exportés, PDF, slides)
-└── tests/                      # unitaires + contrat + smoke (§10)
-```
-
-**Règle d'or de l'arborescence :** un fichier `.py` NE DOIT PAS écrire hors de `runs/<run_id>/`, `data/interim/`, `data/processed/`, `data/splits/` et `results/`. Toute autre écriture est un bug.
-
----
-
-## 3. Les cinq contrats
-
-Ce sont les cinq formats figés qui rendent le projet modulaire. Chacun porte un champ `schema_version`. **Modifier un contrat DOIT se faire par incrément de version + lecteur rétrocompatible**, jamais par modification en place.
-
-### 3.1 Contrat 0 — Schéma de keypoints (`kp_infos.yaml`, racine du depot)
-
-Les quatre datasets partagent **un seul schéma de 42 points** (ADR-0006). L'espace union est ce schéma lui-même : le mapping est l'identité, et le mécanisme d'union reste en place pour absorber une divergence future sans refonte.
-
-```yaml
-schema_version: 1
-name: insect42_v1
-status: VALIDATED
-union_space: insect42_v1
-sigma_from_difficulty: {scale: 0.0025}   # sigma = difficulty * scale (ADR-0007)
-keypoints:
-  - {name: thorax-left,  union: thorax-left,  difficulty: 30, flip: thorax-right}
-  - {name: thorax-right, union: thorax-right, difficulty: 30, flip: thorax-left}
-skeleton: [[0, 5], [0, 12], ...]         # 51 arêtes anatomiques
-```
-
-Règles :
-
-- **L'ordre des 42 points est figé à vie** : il est encodé dans tous les artefacts produits. Ajouter un point = l'ajouter *en fin de liste* et bumper `schema_version`.
-- Les tolérances OKS ne sont **pas** écrites en dur : `sigma = difficulty × scale`, où `difficulty` (10 à 40) est la difficulté de positionnement précis fournie par l'expert. Un point difficile à annoter est jugé avec plus d'indulgence, ce qui évite que la métrique soit dominée par le bruit d'annotation. Modifier `scale` change la définition de l'OKS : bumper `eval.version` et rejouer les runs.
-- `flip` définit les paires de symétrie ; toute augmentation par miroir sans cette table est interdite. Les points de l'axe médian sont leur propre miroir.
-- Un schéma marqué `status: PLACEHOLDER` est refusé quand `strict.require_validated_keypoints` est vrai (valeur par défaut).
-- **Mesures morphométriques** (`kp_infos.yaml` (racine du depot), ADR-0008) : 27 mesures définies comme des polylignes de keypoints, plus 9 paires gauche/droite. C'est la grandeur réellement consommée en aval, donc une métrique de premier plan — pas une annexe.
-
-### 3.2 Contrat 1 — Annotations canoniques (`data/processed/<dataset>/annotations.parquet`)
-
-Une ligne = une **instance annotée**. Format unique quelle que soit la source d'origine (COCO, CVAT, CSV…).
-
-| colonne                           | type             | description                                                                    |
-| --------------------------------- | ---------------- | ------------------------------------------------------------------------------ |
-| `schema_version`                | int              | 1                                                                              |
-| `dataset`                       | str              | `coleoptera` \| `diptera` \| `hymenoptera` \| `lepidoptera`            |
-| `image_id`                      | str              | identifiant**globalement unique** : `<dataset>/<nom_fichier_sans_ext>` |
-| `image_path`                    | str              | chemin**relatif à `paths.data_root`**, jamais absolu                  |
-| `image_width`, `image_height` | int              | pixels, image d'origine                                                        |
-| `instance_id`                   | str              | `<image_id>#<n>`                                                             |
-| `group_id`                      | str              | clé anti-fuite : spécimen, planche, session de capture (§6.1)               |
-| `bbox_xywh`                     | list[float] (4)  | coordonnées**image d'origine**, pixels absolus                          |
-| `kpts_xy`                       | list[float] (2K) | ordre du schéma local, pixels absolus, image d'origine                        |
-| `kpts_vis`                      | list[int] (K)    | 0 absent / 1 occulté / 2 visible                                              |
-| `area`                          | float            | aire du segment ou de la bbox                                                  |
-| `keypoint_schema`               | str              | nom du schéma de §3.1                                                        |
-| `split_source`                  | str              | `train` \| `test_officiel` \| `unknown` si un découpage amont existe    |
-
-Règles :
-
-- **Toutes les coordonnées, partout, dans tous les fichiers, sont exprimées dans le repère de l'image d'origine, en pixels absolus.** Aucun format normalisé, aucun `xyxy` relatif, aucune coordonnée dans un repère de crop ne doit jamais quitter un module.
-- Les adaptateurs (`data/adapters/`) sont les **seuls** modules autorisés à connaître les formats sources. Un adaptateur ne fait que : lire → convertir → valider (`schema.py`) → écrire. Aucun filtrage, aucune augmentation, aucune décision méthodologique.
-- Les instances invalides (keypoints hors image, bbox nulle) sont **conservées** avec un flag `qc_flags`, pas supprimées ; le filtrage est une décision de config, pas d'adaptateur.
-
-### 3.3 Contrat 2 — Splits (`data/splits/<split_id>.parquet` + `.json`)
-
-| colonne      | type                              |
-| ------------ | --------------------------------- |
-| `split_id` | str, ex.`kfold5_grouped_seed42` |
-| `image_id` | str                               |
-| `fold`     | int                               |
-| `role`     | `train` \| `val` \| `test`  |
-
-Règles :
-
-- Les folds sont **générés une seule fois** et **partagés par toutes les approches**. Une approche NE DOIT JAMAIS créer ses propres splits.
-- L'unité de découpage est `group_id`, pas `image_id` (§6.1).
-- Le `.json` compagnon contient : seed, stratégie, stratification, comptages par dataset/fold, et un `content_hash` des annotations utilisées. **Si le hash des annotations change, les splits sont invalidés** et le pipeline DOIT refuser de tourner.
-
-### 3.4 Contrat 3 — Prédictions (`runs/<run_id>/predictions/<split>_fold<k>.parquet`)
-
-C'est **le** contrat qui rend les approches interchangeables. Une ligne = une instance prédite.
-
-| colonne                                      | type             | description                                                                                                                                          |
-| -------------------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schema_version`                           | int              | 1                                                                                                                                                    |
-| `run_id`, `fold`, `split`, `dataset` | str/int          |                                                                                                                                                      |
-| `image_id`                                 | str              |                                                                                                                                                      |
-| `pred_id`                                  | str              | unique                                                                                                                                               |
-| `bbox_xywh`                                | list[float] (4)  | repère image d'origine ; obligatoire même pour une approche pose-only (alors = bbox GT ou bbox englobante des kpts, et`bbox_source` le précise) |
-| `bbox_score`                               | float            | 1.0 si non applicable                                                                                                                                |
-| `kpts_xy`                                  | list[float] (2K) | **repère image d'origine**, schéma local du dataset                                                                                          |
-| `kpts_score`                               | list[float] (K)  |                                                                                                                                                      |
-| `keypoint_schema`                          | str              | doit correspondre au schéma du dataset de l'image                                                                                                   |
-| `bbox_source`                              | str              | `predicted` \| `gt` \| `derived`                                                                                                               |
-| `inference_ms`                             | float            | temps par instance, pour la comparaison coût/perf                                                                                                   |
-
-Règles :
-
-- **Aucun seuil de score n'est appliqué à l'écriture.** On écrit toutes les prédictions au-dessus d'un seuil très bas (ex. 0.001) ; le seuillage est une opération d'évaluation, paramétrée en config. Sinon les courbes P/R sont tronquées et les approches deviennent incomparables.
-- Toute approche opérant sur **crop** (pipeline détection→pose, §9.3) DOIT conserver la transformation affine crop→image et **rétro-projeter** avant écriture. Écrire des coordonnées dans le repère du crop est une erreur bloquante.
-- Un modèle entraîné dans l'espace union DOIT projeter vers le schéma local avant écriture (§3.1).
-- Les prédictions sur `test` d'un fold ne DOIVENT contenir que les images de ce fold.
-
-### 3.5 Contrat 4 — Métriques (`runs/<run_id>/metrics.parquet`) et 5 — Manifeste (`runs/<run_id>/manifest.json`)
-
-`metrics.parquet` — format long, jamais large :
-
-| colonne                                       | description                                            |
-| --------------------------------------------- | ------------------------------------------------------ |
-| `run_id`, `approach`, `fold`, `split` |                                                        |
-| `scope`                                     | `overall` \| `dataset:<nom>` \| `keypoint:<nom>` |
-| `metric`                                    | nom canonique, ex.`pck@0.05_bboxdiag`                |
-| `value`                                     | float                                                  |
-| `n`                                         | taille de l'échantillon sous-jacent                   |
-
-`manifest.json` : `run_id`, timestamp, `approach`, `split_id`, config Hydra **résolue** (pas les surcharges CLI), `content_hash` des données, commit git + état propre/sale du dépôt, versions des dépendances clés, seeds, chemins des artefacts produits, durées, ressources GPU, et `optuna_study`/`trial_number` si applicable. **Un run sans manifeste complet est exclu de l'agrégation.**
-
----
-
-## 4. Interfaces et registre
-
-### 4.1 Registre
-
-Un décorateur unique, un espace de noms par famille :
-
-```python
-@register_approach("lora")            # approches
-@register_metric("pck")               # métriques
-@register_adapter("coleoptera_cvat")  # adaptateurs de données
-```
-
-Le nom enregistré DOIT être identique au nom du fichier YAML de config correspondant. Aucun `import` conditionnel, aucun `if approach == ...` ailleurs que dans le registre.
-
-### 4.2 Protocole `Approach`
-
-Toute approche DOIT implémenter exactement cette interface, ni plus ni moins côté pipeline :
-
-```python
-class Approach(Protocol):
-    name: str
-
-    def fit(self, data: FoldData, ctx: RunContext) -> None: ...
-        # entraîne sur data.train, valide sur data.val ; écrit ses poids dans ctx.run_dir/weights/
-        # NE DOIT PAS toucher à data.test
-
-    def predict(self, images: ImageSet, ctx: RunContext) -> Path: ...
-        # retourne le chemin d'un predictions parquet conforme au Contrat 3
-
-    @classmethod
-    def load(cls, run_dir: Path, cfg: DictConfig) -> "Approach": ...
-        # reconstruit un modèle prédictif depuis les artefacts, sans réentraînement
-
-    @classmethod
-    def search_space(cls, trial: optuna.Trial) -> dict: ...
-        # surcharges de config proposées à Optuna ; aucune logique d'entraînement ici
-```
-
-Règles :
-
-- `fit` NE DOIT JAMAIS accéder à `data.test`. Un test unitaire vérifie cette propriété (§10).
-- `predict` NE DOIT JAMAIS calculer de métrique.
-- Une approche PEUT s'appuyer sur plusieurs sous-modèles (cf. détection+pose) : c'est son affaire interne, invisible du pipeline.
-- Une approche « par dataset » (§9.2) reste **une seule** approche : elle encapsule N modèles et route selon `dataset`. Le pipeline ne doit pas voir la différence.
-
-### 4.3 DataModule : superset de champs
-
-Le batch produit par le datamodule DOIT toujours contenir le **superset** des champs utiles à toutes les approches, même si une approche donnée les ignore :
-
-```
-images, bboxes, keypoints, visibility, meta{image_id, instance_id, dataset,
-dataset_index, group_id, orig_size, transform_matrix}
-```
-
-`dataset_index` est indispensable à l'approche BatchNorm par groupe (§9.5) ; `transform_matrix` à la rétro-projection. Les ajouter au coup par coup casse la modularité : ils sont là dès le départ.
-
----
-
-## 5. Configuration
-
-### 5.1 Outil
-
-Hydra + OmegaConf. Composition par `defaults`, surcharge CLI par `clé=valeur`. Pas de `argparse` manuel, pas de dictionnaires de config codés en Python.
-
-### 5.2 Règles
-
-- Un fichier YAML par entité nommée ; le nom du fichier est l'identifiant.
-- Toute clé DOIT avoir une valeur par défaut explicite ; interdiction du `cfg.get("x", 3)` disséminé dans le code.
-- Les configs d'approche contiennent **uniquement** ce qui est spécifique à l'approche. Les paramètres communs (taille d'image, batch, epochs, seuils d'éval) vivent dans `config.yaml` et sont surchargeables.
-- Interdiction d'interpolations Hydra qui traversent plus d'un niveau (`${a.b.c.d}` illisible) : préférer un champ explicite.
-- La config **résolue** est écrite dans `runs/<run_id>/config.yaml` **avant** tout entraînement.
-
-### 5.3 Expériences nommées
-
-Toute exécution destinée au rapport final DOIT passer par un fichier `configs/experiment/*.yaml` figé et commité (ex. `exp_A_yolo_pooled_kfold5.yaml`). Les surcharges CLI ad hoc sont réservées à l'exploration et NE DOIVENT PAS produire de résultats cités dans le rapport.
-
-### 5.4 CLI
-
-Cinq verbes, pas plus :
-
-```
-python -m insectpose.cli prepare   data=coleoptera
-python -m insectpose.cli split     cv=kfold5_grouped
-python -m insectpose.cli train     experiment=exp_A cv.fold=0
-python -m insectpose.cli predict   run_id=<...> split=test
-python -m insectpose.cli evaluate  run_id=<...>
-python -m insectpose.cli tune      experiment=exp_A tuning=optuna_default
-python -m insectpose.cli report
-```
-
-`train` PEUT enchaîner `predict` + `evaluate` par commodité, mais chacun DOIT rester appelable indépendamment.
-
----
-
-## 6. Protocole expérimental
-
-### 6.1 Anti-fuite
-
-- Le découpage se fait par `group_id`. Si un spécimen apparaît sur plusieurs images, toutes ses images sont dans le même fold. **Si le `group_id` n'est pas connu pour un dataset, la valeur par défaut est `image_id` et cette limitation DOIT être écrite dans `DECISIONS.md`.**
-- Stratification par `dataset` (et par nombre d'instances par image si déséquilibré) obligatoire pour les folds poolés.
-- Aucune statistique (moyenne/écart-type de normalisation, taille d'ancres, clustering de keypoints) NE DOIT être calculée sur autre chose que le `train` du fold courant.
-
-### 6.2 Cross-validation
-
-- Schéma par défaut : **K=5 folds groupés stratifiés**, seed fixe, `split_id` unique partagé par toutes les approches. Les mêmes folds pour tout le monde, sinon aucune comparaison n'est valide.
-- Les approches « par dataset » (§9.2) utilisent **les mêmes folds**, simplement restreints à leur dataset. Ne jamais régénérer un découpage local.
-- Une approche est comparée sur la **moyenne ± écart-type inter-folds**, et les résultats par fold sont conservés pour les tests appariés (§8.3).
-
-### 6.3 Optimisation Optuna
-
-- **Nichée par défaut** (ADR-0012). Pour chaque fold externe, la recherche tourne sur des folds **internes** construits à partir du seul train externe. Ces découpages internes (`<split_id>__outer<k>`) sont générés par `cli split` et versionnés exactement comme les folds externes. Les meilleurs hyperparamètres sont ensuite appliqués au fold externe entier. **Le test externe n'a jamais servi à choisir un hyperparamètre.** Un test automatique vérifie cette propriété.
-- Mode dégradé `tune_once` : la recherche n'a lieu que sur les folds internes d'un seul fold externe, et le résultat est réutilisé pour tous les autres. Acceptable si documenté ; le budget de trials doit alors être identique entre approches.
-- **Coût** : `n_folds × n_trials × inner_folds` entraînements par approche. À calibrer avant de lancer une approche lourde ; le budget effectif est enregistré dans chaque manifeste.
-- L'objectif est **toujours la métrique primaire calculée par l'évaluateur partagé**, lue depuis `metrics.parquet` — jamais une loss de validation ni une métrique interne de framework.
-- Un trial = un run complet avec son propre `run_id` et son manifeste ; les trials sont donc évaluables et auditables comme n'importe quel run. Ils n'exportent pas de figures qualitatives (bruit inutile).
-- Stockage SQLite sous `runs/optuna/`, une étude par (approche, découpage, objectif, fold externe), reprise activée.
-- Pruning `MedianPruner` par défaut ; une approche qui ne peut pas rapporter d'intermédiaire déclare `prunable: false`.
-- **Budget équitable** : comparer 100 trials contre 10 invalide la conclusion.
-
-### 6.4 Déterminisme
-
-- Seed unique dans la config, dérivée par `seed_for(run_id, fold, purpose)` pour numpy / torch / python / dataloader workers.
-- `torch.use_deterministic_algorithms(True)` en mode `debug` ; en mode `full` on autorise cudnn benchmark mais on l'enregistre dans le manifeste.
-- Le non-déterminisme résiduel est absorbé par la répétition : toute conclusion finale DEVRAIT reposer sur ≥ 2 seeds pour l'approche gagnante.
-
----
-
-## 7. Évaluation
-
-### 7.1 Règle absolue
-
-L'évaluateur prend **uniquement** : un `predictions.parquet` (Contrat 3), les annotations canoniques (Contrat 1), et `configs/eval/*.yaml`. Il ne charge aucun modèle, n'importe aucun module d'approche, et ignore totalement comment les prédictions ont été produites. **Si l'évaluateur doit savoir quelle approche l'a alimenté, le design est cassé.**
-
-### 7.2 Jeu de métriques figé
-
-Identique pour toutes les approches, calculé en `overall`, par `dataset:*`, par `keypoint:*` et par `measurement:*` :
-
-- **Détection** (si `bbox_source == predicted`) : `det_ap@0.5`, `det_ap@[.5:.95]`.
-- **Pose** : `oks_ap`, `oks_ap@0.5`, `oks_ar` (sigmas dérivés de la difficulté, ADR-0007) ; `pck@{0.125, 0.25, 0.5}_thorax_width` — un point est correct si son erreur est inférieure à `alpha × largeur du thorax` (ADR-0009), `alpha = 0.25` étant la référence du projet ; `nme_matched_only`, `kpt_coverage`, PCK par keypoint.
-- **Échelle de référence** : `pck_normalizer_fallback_rate`. Quand les points de thorax ne sont pas annotés, la normalisation retombe sur la diagonale de bbox — et ce taux de repli est **publié**, jamais silencieux.
-- **Mesures morphométriques** (ADR-0008) : `measurement_mape_median`, `measurement_mape_worst`, détail par mesure, et `symmetry_gap_median` / `symmetry_gap_p90` — l'écart gauche/droite des mesures prédites, calculable **sans vérité terrain**, donc utilisable comme contrôle qualité en production.
-- **Bout-en-bout** : la métrique primaire pénalise les échecs de détection. Une pipeline qui ne détecte pas l'insecte n'a pas « 0 keypoint évalué », elle a un échec compté.
-- **Coût** : latence par instance et p95, nombre de paramètres, VRAM, temps d'entraînement — métriques de premier ordre, pas des annexes.
-
-**Métrique primaire du projet** : `oks_ap` (ADR-0010). C'est la **seule clé d'évaluation librement surchargeable** — elle ne modifie aucun calcul, seulement l'objectif d'Optuna et le classement des approches. Toutes les métriques étant calculées à chaque run, changer d'objectif n'oblige jamais à réévaluer :
-
-```
-python -m insectpose.cli train ... eval.primary_metric=measurement_mape_median \
-                                   eval.primary_direction=minimize
-```
-
-### 7.3 Appariement
-
-L'appariement prédiction↔GT (par OKS ou IoU, greedy par score décroissant) est implémenté **une seule fois** dans `evaluation/matching.py`. Aucune métrique ne réimplémente son propre appariement.
-
-### 7.4 Comparaison des approches sur périmètre commun
-
-Les approches n'ont pas le même périmètre naturel (une approche par dataset ne prédit rien hors de son dataset). Règle : **toute comparaison se fait sur l'union des images de test de tous les folds**, une approche restreinte étant évaluée comme la concaténation de ses N modèles. Un tableau de résultats DOIT indiquer le `n` sous-jacent de chaque cellule (§3.5) ; deux valeurs avec des `n` différents ne sont pas comparables et le rapport DOIT le signaler.
-
----
-
-## 8. Runs, artefacts et résultats
-
-### 8.1 `run_id`
-
-```
-<approach>__<data_scope>__<split_id>__fold<k>__<tag>__<hash8>
-ex. lora__pooled__kfold5grouped_seed42__fold2__baseline__a3f91c07
-```
-
-`hash8` = 8 premiers caractères du hash de la config résolue + du `content_hash` des données. Deux runs identiques ont le même `run_id` : le pipeline DOIT alors sauter le run (idempotence) sauf `force=true`.
-
-### 8.2 Contenu d'un dossier de run
-
-```
-runs/<run_id>/
-├── manifest.json          # Contrat 5, écrit en dernier -> sa présence signale un run complet
-├── config.yaml            # config résolue
-├── weights/               # poids, checkpoints, adaptateurs LoRA
-├── predictions/           # Contrat 3
-├── metrics.parquet        # Contrat 4
-├── logs/                  # stdout, courbes, tensorboard/mlflow
-└── figures/               # visualisations qualitatives (§8.4)
-```
-
-`manifest.json` est écrit **en dernier**. Un dossier sans manifeste = run interrompu, ignoré par l'agrégation, supprimable sans discussion.
-
-### 8.3 Langue des livrables
-
-**Tout ce qui est écrit dans un fichier produit est en anglais** : titres, axes, légendes et annotations de figures, en-têtes et valeurs textuelles de tableaux, champs de manifestes et de rapports JSON, noms de fichiers. Les livrables circulent hors de l'équipe et finissent dans des publications ; une figure en français y est inutilisable.
-
-Le code, les commentaires, les docstrings, les messages de log et la documentation interne (`CONVENTIONS.md`, `DECISIONS.md`, `README.md`) restent en français. La frontière est nette : ce qui sort dans `results/`, `runs/` ou `reports/` est en anglais, le reste non.
-
-Corollaire : un nom de métrique, de scope ou de colonne est un identifiant, jamais une phrase à traduire. `oks_ap`, `dataset:coleoptera`, `measurement_mape_median` sont figés (§3.5) et ne changent pas de langue.
-
-### 8.4 Agrégation et reporting
-
-- `aggregate.py` scanne `runs/*/metrics.parquet` + manifestes → `results/master.parquet`. **C'est le seul chemin vers un tableau de résultats.** Aucune figure, aucun tableau du rapport ne DOIT être produit à partir d'un copier-coller de console.
-- Les comparaisons entre approches DEVRAIENT utiliser des tests appariés par fold (Wilcoxon signé ou t apparié) avec correction pour comparaisons multiples, et rapporter des intervalles de confiance plutôt que des rangs bruts.
-- `reporting/` produit : tableau principal (approche × dataset × métrique), courbes PCK, scatter coût vs performance, matrice d'erreurs par keypoint, échecs qualitatifs.
-
-### 8.5 Qualitatif obligatoire
-
-Chaque run DOIT exporter au moins 12 images de test annotées pred vs GT, incluant les 6 pires cas selon la métrique primaire. Un modèle n'est jamais validé sur des chiffres seuls.
-
----
-
-## 9. Contraintes spécifiques par approche
-
-Ces notes fixent les pièges connus de chaque famille. Elles n'ajoutent aucune interface : tout passe par §4.2.
-
-### 9.1 YOLO poolé (une classe « insecte », tous datasets) — IMPLÉMENTÉ
-
-Le schéma de keypoints étant commun aux 4 ordres (ADR-0006), le modèle prédit directement dans le schéma attendu : aucune reprojection union → local n'est nécessaire. Les points absents d'un dataset (ADR-0016) sortent en `vis = 0` dans les labels et sont masqués dans la loss, jamais appris comme des zéros.
-
-Toute la logique risquée est isolée dans `data/yolo_export.py`, testée par aller-retour sans GPU :
-
-- la bbox YOLO est **centrée**, le contrat 1 est en coin haut-gauche ;
-- `flip_idx` est obligatoire dans `data.yaml` dès que `fliplr > 0`, sinon le miroir échange gauche et droite sans permuter les labels ;
-- les noms de fichiers sont aplatis (`coleoptera__img000`), sinon deux datasets ayant un `img000.png` se recouvrent silencieusement.
-
-Les fichiers YOLO sont un artefact **dérivé**, régénéré par fold sous `runs/<run_id>/yolo_dataset/`, jamais écrit dans `data/processed/`. `conf = 0.001` à l'inférence : le seuillage est une opération d'évaluation.
-
-Matériel (ADR-0019) : `train.device: auto` prend le GPU 0 si CUDA est disponible ; AMP activée par défaut mais désactivée en `mode: debug` ; FP16 à l'inférence sur GPU. VRAM maximale, temps d'entraînement et nombre de paramètres entrent dans le manifeste — ce sont des métriques de coût de premier ordre, et l'agrégation alerte si des runs comparés viennent de matériels différents.
-
-### 9.2 YOLO par dataset
-
-Une seule classe `Approach` encapsulant 4 modèles, routés par `meta.dataset`. Utilise les mêmes folds restreints (§6.2). L'HPO PEUT être fait par dataset, mais le budget total de trials DOIT être annoncé et comparable à celui des autres approches (sinon l'avantage vient du budget, pas de la méthode).
-
-### 9.3 Détection puis pose sur crop
-
-- Le modèle de pose est entraîné sur des crops issus de bboxes **GT bruitées** (jitter d'échelle et de translation paramétré en config), jamais sur des bboxes GT parfaites : sinon décalage train/test garanti.
-- La `transform_matrix` crop→image est conservée dans `meta` et appliquée à la rétro-projection (§3.4).
-- L'évaluation bout-en-bout utilise les bboxes **prédites**. Une évaluation avec bboxes GT est autorisée en **diagnostic** uniquement, écrite avec `bbox_source: gt` et **jamais mise dans le même tableau** que les résultats bout-en-bout.
-
-### 9.4 LoRA
-
-- Les artefacts sauvegardés sont les **adaptateurs seuls** + une référence explicite au modèle de base (nom, version, hash). Un run LoRA non rechargeable sans le bon modèle de base est invalide.
-- La config déclare explicitement : modules ciblés, rang, alpha, dropout, et **quels paramètres restent entraînables hors adaptateurs** (têtes, biais, normalisations). C'est souvent la vraie variable cachée d'une comparaison LoRA.
-
-### 9.5 BatchNorm par groupe (domain-specific BN)
-
-- Repose sur `meta.dataset_index` (§4.3). Les statistiques BN sont maintenues **par dataset** ; à l'inférence, le groupe est choisi par `dataset` de l'image.
-- Piège à documenter : ce que fait l'approche quand le dataset est inconnu à l'inférence (moyenne des groupes ? groupe par défaut ?). Le comportement DOIT être explicite en config, pas implicite dans le code.
-- Les batches mixtes multi-datasets doivent être supportés ; l'implémentation DOIT passer un test unitaire vérifiant qu'un batch mixte donne le même résultat que N batches purs.
-
-### 9.6 Approches futures
-
-Toute nouvelle approche (multi-tâches, distillation, pré-entraînement auto-supervisé, ensembles…) s'ajoute par §11 sans dérogation. Si une approche ne rentre pas dans le protocole `Approach`, **on modifie le protocole pour tout le monde, en bumpant sa version** — on ne crée pas de cas particulier.
-
----
-
-## 10. Tests
-
-Trois niveaux, tous obligatoires avant toute exécution longue :
-
-1. **Tests de contrat** (`tests/contracts/`) : valident qu'un parquet produit respecte le schéma, les bornes de coordonnées, l'unicité des identifiants, la cohérence keypoint_schema ↔ dimension. Exécutés automatiquement à l'écriture de tout artefact en mode `debug`.
-2. **Tests unitaires** : rétro-projection crop→image (aller-retour = identité à 1e-6 près), mapping local↔union, appariement, chaque métrique sur un cas calculé à la main, non-fuite (`fit` ne lit pas `test`), reproductibilité (deux runs même seed = mêmes prédictions).
-3. **Smoke test** (`make smoke`) : chaque approche enregistrée est exécutée sur un fixture de 8 images et 1 fold, de `train` à `report`. **Une approche qui ne passe pas le smoke test n'est pas considérée comme implémentée.** Le fixture est commité dans `tests/fixtures/`.
-
-CI : ruff + mypy (strict sur `contracts.py`, `registry.py`, `evaluation/`) + pytest + smoke.
-
----
-
-## 11. Procédure : ajouter une approche
-
-Exactement 6 artefacts, ni plus ni moins. Si vous devez toucher un 7ᵉ fichier existant, c'est un signal de conception à remonter.
-
-1. `src/insectpose/approaches/<nom>.py` — classe décorée `@register_approach("<nom>")`, implémentant §4.2.
-2. `configs/approach/<nom>.yaml` — hyperparamètres par défaut, `_target_` vers la classe.
-3. `search_space` dans la classe (ou `tuning/search_spaces.py` si volumineux).
-4. `tests/approaches/test_<nom>.py` — smoke + tests spécifiques (ex. §9.5).
-5. `configs/experiment/exp_<lettre>_<nom>.yaml` — expérience figée pour le rapport.
-6. Une entrée dans `DECISIONS.md` : ce que l'approche teste, ses hypothèses, ses limites connues.
-
----
-
-## 12. Règles de génération pour les IA
-
-À respecter par toute IA produisant du code sur ce dépôt.
-
-**Obligations**
-
-- Déclarer les dépendances lourdes via `availability()` : le smoke test ignore proprement une approche indisponible plutôt que d'échouer.
-- Écrire en **anglais** tout texte destiné à un fichier produit (§8.3), en français le code et ses commentaires.
-- Lire ce fichier et annoncer, avant d'écrire, quels contrats sont touchés.
-- Écrire des signatures typées ; `contracts.py` fait foi pour les types de données.
-- Toute fonction publique a une docstring indiquant : entrées, sorties, **effets de bord fichiers** (chemin exact écrit).
-- Valider les entrées aux frontières de module (schéma parquet, présence de clés de config) et échouer tôt, bruyamment, avec un message actionnable.
-- Produire, avec tout nouveau module, son test correspondant. Code sans test = non livré.
-- Toute décision méthodologique non triviale prise en cours de route → ligne dans `DECISIONS.md`, pas un commentaire enterré dans le code.
-
-**Interdictions**
-
-- Pas de chemin en dur, pas de constante magique, pas de seuil littéral dans un `.py`.
-- Pas de `try/except` silencieux, pas de `except Exception: pass`, pas de valeur de repli qui masque une donnée manquante.
-- Pas de logique d'approche dans `training/`, `evaluation/`, `tuning/`, `reporting/` — aucun `if approach == ...` nulle part.
-- Pas de calcul de métrique hors de `evaluation/metrics/`.
-- Pas de mutation de `data/raw/`. Jamais.
-- Pas de dépendance nouvelle sans justification et ajout à `pyproject.toml`.
-- Pas de notebook comme source de vérité : un notebook appelle le package, il ne contient pas de logique.
-- Pas de fichier « utils.py » fourre-tout : un module = une responsabilité nommable en une phrase.
-- Pas de refactor opportuniste hors du périmètre demandé.
-
-**Quand s'arrêter et demander**
-Une IA DOIT interrompre la génération et poser la question si : un contrat devrait changer ; deux approches exigeraient un champ incompatible ; une métrique est ambiguë ; le schéma de keypoints d'un dataset est inconnu ; une décision affecterait la comparabilité entre approches. Inventer une convention pour continuer est la faute la plus coûteuse du projet.
-
-**Gabarit de prompt de tâche recommandé**
-
-```
-Contexte : CONVENTIONS.md v1.0 (fourni intégralement).
-Tâche : implémenter <X>.
-Périmètre : fichiers autorisés à créer/modifier = [...]. Tout le reste est en lecture seule.
-Contrats touchés : [aucun | n° ...].
-Livrables : code + tests + entrée DECISIONS.md si décision prise.
-Critère d'acceptation : `make smoke` passe pour l'approche <X>.
-Si une règle de CONVENTIONS.md bloque : arrête-toi et explique.
-```
-
----
-
-## 13. Décisions de protocole (toutes tranchées)
-
-Consignées dans `DECISIONS.md`. Elles sont **fermées** : les modifier invalide les résultats déjà produits.
-
-| #        | Décision                | Valeur retenue                                                                      |
-| -------- | ------------------------ | ----------------------------------------------------------------------------------- |
-| ADR-0006 | Schéma de keypoints     | `insect42_v1`, 42 points, commun aux 4 datasets, union = identité                |
-| ADR-0007 | Sigmas OKS               | `sigma = difficulty × 0.0025` (10→0.025 … 40→0.100)                           |
-| ADR-0008 | Mesures morphométriques | 27 mesures + 9 paires symétriques, métriques de premier plan                      |
-| ADR-0009 | Normalisation PCK        | `alpha × largeur du thorax`, référence `alpha = 0.25`, taux de repli publié |
-| ADR-0010 | Métrique primaire       | `oks_ap`, seule clé d'évaluation librement surchargeable                        |
-| ADR-0011 | Groupement anti-fuite    | une image = un specimen,`group_id = image_id`                                     |
-| ADR-0012 | HPO                      | nichée : recherche sur folds internes, test externe jamais vu                      |
-| ADR-0013 | Résolution d'entrée    | 640×640 pour toutes les approches, garde-fou strict                                |
-| ADR-0014 | Dataset à l'inférence  | toujours déclaré ; un dataset inconnu est une erreur explicite                    |
-| ADR-0015 | Suivi d'expériences     | manifestes +`master.parquet` uniquement                                           |
-
-Restent ouverts sans bloquer : le budget d'HPO réellement soutenable (OPEN-09) et le traitement des keypoints systématiquement absents dans un dataset donné (OPEN-10).
-
----
-
-*Fin du contrat. Toute évolution passe par un incrément de version de ce fichier et une entrée dans `DECISIONS.md`.*
+*End of the contract. Any change goes through a version increment of this file and an entry in `DECISIONS.md`*

@@ -1,9 +1,8 @@
-"""Canvas de classement : QGraphicsView avec zoom/pan/rotation.
+"""Classification canvas: QGraphicsView with zoom/pan/rotation.
 
-L'affichage est en lecture seule (les keypoints viennent des annotations et ne
-sont ni déplaçables ni sélectionnables) : la seule interaction est la
-classification des segments, clic/glissé gauche = mesurable, droit = non
-mesurable.
+The display is read-only (the keypoints come from the annotations and can be neither
+moved nor selected): the only interaction is the classification of the segments,
+left click/drag = measurable, right = non measurable.
 """
 import functools
 
@@ -16,21 +15,21 @@ from PySide6.QtWidgets import (
 from app_logging import logger
 from models import MEASURABLE, NON_MEASURABLE
 
-KP_BASE_RADIUS = 4.0  # px écran, indépendant du zoom de l'image (ajusté par le zoom courant)
-LINK_HIT_SCREEN_PX = 10.0  # largeur de la zone cliquable d'un segment de mesure, en px écran
+KP_BASE_RADIUS = 4.0  # screen px, independent of the image zoom (adjusted by the current zoom)
+LINK_HIT_SCREEN_PX = 10.0  # width of the clickable area of a measurement segment, in screen px
 
 
 def _safe_event(fn):
-    """PySide6 termine le processus (pas juste une trace) quand une exception Python
-    non gérée traverse un handler d'événement Qt appelé depuis le C++. On l'attrape
-    ici pour la journaliser et continuer, plutôt que de faire planter le logiciel."""
+    """PySide6 terminates the process (not just a trace) when an unhandled Python
+    exception crosses a Qt event handler called from C++. It is caught here to log it
+    and go on, rather than crashing the software."""
 
     @functools.wraps(fn)
     def wrapper(self, event, *args, **kwargs):
         try:
             return fn(self, event, *args, **kwargs)
         except Exception:
-            logger.exception("Exception dans %s.%s, ignorée pour éviter un plantage",
+            logger.exception("Exception in %s.%s, ignored to avoid a crash",
                              type(self).__name__, fn.__name__)
             try:
                 event.accept()
@@ -42,7 +41,7 @@ def _safe_event(fn):
 
 
 class KeypointItem(QGraphicsEllipseItem):
-    """Point annoté, purement indicatif : aucune interaction."""
+    """Annotated point, purely informative: no interaction."""
 
     def __init__(self, name):
         super().__init__(-KP_BASE_RADIUS, -KP_BASE_RADIUS, KP_BASE_RADIUS * 2, KP_BASE_RADIUS * 2)
@@ -59,8 +58,8 @@ class KeypointItem(QGraphicsEllipseItem):
 
 
 class LinkLine(QGraphicsLineItem):
-    """Segment entre deux kp. Purement visuel : l'interaction (gomme) est gérée au
-    niveau du canvas pour permettre un survol continu multi-segments."""
+    """Segment between two kp. Purely visual: the interaction (eraser) is handled at
+    the canvas level to allow a continuous multi-segment hover."""
 
     def __init__(self, edge_key, canvas):
         super().__init__()
@@ -68,12 +67,12 @@ class LinkLine(QGraphicsLineItem):
         self.canvas = canvas
         self.setZValue(2)
         self.setCursor(Qt.CrossCursor)
-        self.setAcceptedMouseButtons(Qt.NoButton)  # géré par le canvas (itemAt), pas par l'item
+        self.setAcceptedMouseButtons(Qt.NoButton)  # handled by the canvas (itemAt), not by the item
 
     def shape(self):
-        # zone cliquable élargie et constante à l'écran (le trait lui-même est fin) :
-        # le shape() par défaut d'une QGraphicsLineItem est quasi infinitésimal et
-        # rendrait la détection au survol quasi impossible.
+        # clickable area widened and constant on screen (the stroke itself is thin):
+        # the default shape() of a QGraphicsLineItem is almost infinitesimal and
+        # would make the hover detection almost impossible.
         path = QPainterPath()
         line = self.line()
         path.moveTo(line.p1())
@@ -87,13 +86,13 @@ class LinkLine(QGraphicsLineItem):
             pen = QPen(QColor("lime"), 2)
         else:
             pen = QPen(QColor(150, 150, 150), 2, Qt.DashLine)
-        pen.setCosmetic(True)  # épaisseur constante à l'écran, suit le zoom
+        pen.setCosmetic(True)  # constant thickness on screen, follows the zoom
         self.setPen(pen)
 
 
 class MeasurementCanvas(QGraphicsView):
-    edgeChanged = Signal(object, str)  # edge_key (tuple), statut
-    strokeStarted = Signal()  # début d'un clic/glissé de gomme : point de sauvegarde undo
+    edgeChanged = Signal(object, str)  # edge_key (tuple), status
+    strokeStarted = Signal()  # start of an eraser click/drag: undo save point
 
     def __init__(self, config, parent=None):
         super().__init__(parent)
@@ -107,27 +106,27 @@ class MeasurementCanvas(QGraphicsView):
         self.setMouseTracking(True)
 
         self.image_item = None
-        self.kp_items = {}  # nom -> KeypointItem
+        self.kp_items = {}  # name -> KeypointItem
         self.link_items = {}  # edge_key -> LinkLine
         self.zoom = 1.0
-        self.rotation = 0  # degrés (0/90/180/270) : rotation d'affichage uniquement
+        self.rotation = 0  # degrees (0/90/180/270): display rotation only
         self._panning = False
         self._pan_start = None
         self._eraser_button = None
         self._stroke_notified = False
 
-    # ---------- affichage d'une annotation ----------
+    # ---------- display of an annotation ----------
     def show_annotation(self, ann):
-        """(Re)construit la scène : image, keypoints annotés, segments des mesures."""
+        """(Re)build the scene: image, annotated keypoints, measurement segments."""
         self.scene_.clear()
         self.kp_items.clear()
         self.link_items.clear()
 
         pix = QPixmap(ann.image_path) if ann.image_path else QPixmap()
         if pix.isNull():
-            logger.warning("Image introuvable ou illisible : %s", ann.image_path)
+            logger.warning("Image not found or unreadable: %s", ann.image_path)
             pix = QPixmap(max(ann.width, 1), max(ann.height, 1))
-            pix.fill(QColor(40, 40, 40))  # fond neutre : le squelette reste classable
+            pix.fill(QColor(40, 40, 40))  # neutral background: the skeleton stays classifiable
         self.image_item = QGraphicsPixmapItem(pix)
         self.image_item.setZValue(0)
         self.scene_.addItem(self.image_item)
@@ -154,7 +153,7 @@ class MeasurementCanvas(QGraphicsView):
         self.fit_to_view()
 
     def refresh_statuses(self, ann):
-        """Réapplique les couleurs des segments depuis le modèle (undo, preset, liste)."""
+        """Re-apply the segment colours from the model (undo, preset, list)."""
         for key, line in self.link_items.items():
             line.set_status(ann.edge_status(key))
 
@@ -165,22 +164,22 @@ class MeasurementCanvas(QGraphicsView):
 
     # ---------- zoom / rotation / pan ----------
     def fit_to_view(self):
-        """Réinitialise le transform (zoom + rotation) pour cadrer l'image dans la vue.
+        """Reset the transform (zoom + rotation) to fit the image in the view.
 
-        La rotation est appliquée uniquement à la vue (QGraphicsView), jamais aux
-        coordonnées scène : un kp annoté à (x, y) reste au même (x, y) quelle que
-        soit la rotation d'affichage courante."""
+        The rotation is applied to the view only (QGraphicsView), never to the scene
+        coordinates: a kp annotated at (x, y) stays at the same (x, y) whatever the
+        current display rotation."""
         if self.image_item is None:
             return
         self.resetTransform()
         rect = self.image_item.boundingRect()
         viewport_rect = self.viewport().rect()
-        # Si la vue n'est pas encore affichée/mise en page, le viewport peut être
-        # dégénéré (0 ou quelques px) : un scale nul rendrait le transform singulier
-        # et casserait toute la géométrie de la scène ensuite.
+        # If the view is not shown/laid out yet, the viewport can be degenerate
+        # (0 or a few px): a zero scale would make the transform singular and break
+        # the whole geometry of the scene afterwards.
         if viewport_rect.width() < 10 or viewport_rect.height() < 10:
             logger.warning(
-                "fit_to_view : viewport dégénéré (%dx%d), la fenêtre n'est peut-être pas encore affichée",
+                "fit_to_view: degenerate viewport (%dx%d), the window may not be shown yet",
                 viewport_rect.width(), viewport_rect.height(),
             )
         if rect.width() and rect.height() and viewport_rect.width() and viewport_rect.height():
@@ -191,7 +190,7 @@ class MeasurementCanvas(QGraphicsView):
             scale = min(avail_w / rect.width(), avail_h / rect.height())
         else:
             scale = 1.0
-        scale = max(scale, 1e-3)  # jamais 0 : un transform singulier casserait mapToScene/itemAt
+        scale = max(scale, 1e-3)  # never 0: a singular transform would break mapToScene/itemAt
         self.scale(scale, scale)
         if self.rotation:
             self.rotate(self.rotation)
@@ -215,17 +214,17 @@ class MeasurementCanvas(QGraphicsView):
         self._rescale_fixed_items()
         event.accept()
 
-    # ---------- classement des segments ----------
+    # ---------- segment classification ----------
     def _apply_eraser(self, view_pos, button):
         item = self.itemAt(view_pos)
         if not isinstance(item, LinkLine):
             return
-        # un seul point de sauvegarde par clic/glissé, et seulement s'il change
-        # vraiment quelque chose (sinon un clic dans le vide remplirait la pile undo)
+        # a single save point per click/drag, and only if it really changes something
+        # (otherwise a click in the void would fill the undo stack)
         if not self._stroke_notified:
             self._stroke_notified = True
             self.strokeStarted.emit()
-        # clic/glissé gauche = mesurable, clic/glissé droit = non mesurable (gomme)
+        # left click/drag = measurable, right click/drag = non measurable (eraser)
         status = MEASURABLE if button == Qt.LeftButton else NON_MEASURABLE
         self.edgeChanged.emit(item.edge_key, status)
 

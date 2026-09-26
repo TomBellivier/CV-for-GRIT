@@ -1,18 +1,18 @@
-"""BatchNorm par groupe d'insecte (ADR-0026).
+"""BatchNorm per insect group (ADR-0026).
 
-Chaque BatchNorm du reseau est remplacee par N copies, une par dataset : statistiques
-courantes ET parametres affines. Les poids convolutifs restent partages, seule la
-normalisation est conditionnee — c'est l'hypothese testee par l'approche E.
+Each BatchNorm of the network is replaced by N copies, one per dataset: running
+statistics AND affine parameters. The convolution weights stay shared, only the
+normalisation is conditioned — that is the hypothesis tested by approach E.
 
-Les lots sont **mixtes** (les 4 datasets melanges) : le forward se scinde par groupe,
-puis recompose dans l'ordre d'origine. Cela evite la correlation entre le gradient et
-le dataset qu'introduiraient des lots homogenes.
+Batches are **mixed** (the 4 datasets together): the forward pass splits by group, then
+recomposes in the original order. This avoids the correlation between the gradient and
+the dataset that homogeneous batches would introduce.
 
-Le groupe courant est porte par un contexte de module, renseigne :
-- a l'entrainement, depuis les noms de fichiers du lot (l'export YOLO les prefixe par
-  le dataset, cf. `yolo_export.flat_name`) ;
-- a l'inference, explicitement, puisque l'utilisateur declare toujours l'ordre traite
-  (ADR-0014). Un groupe inconnu est une **erreur explicite**, jamais un repli devine.
+The current group is carried by a module context, filled:
+- at training time, from the file names of the batch (the YOLO export prefixes them with
+  the dataset, see `yolo_export.flat_name`);
+- at inference, explicitly, since the user always declares the order processed
+  (ADR-0014). An unknown group is an **explicit error**, never a guessed fallback.
 """
 
 from __future__ import annotations
@@ -31,10 +31,10 @@ log = get_logger("group_norm")
 
 
 class GroupContext:
-    """Groupe(s) actif(s) pour le prochain forward.
+    """Active group(s) for the next forward pass.
 
-    Volontairement global au processus : les modules de normalisation sont appeles au
-    plus profond du reseau, la ou aucune information de dataset ne circule.
+    Deliberately global to the process: the normalisation modules are called deep inside
+    the network, where no dataset information flows.
     """
 
     def __init__(self) -> None:
@@ -47,20 +47,20 @@ class GroupContext:
         self.indices = None
 
     def require(self, batch_size: int) -> Any:
-        """Indices de groupe du lot courant, ou echec explicite."""
+        """Group indices of the current batch, or an explicit failure."""
         if self.indices is None:
             raise RuntimeError(
-                "Aucun groupe d'insecte declare avant le forward. Les modeles a "
-                "normalisation par groupe exigent de connaitre l'ordre traite "
-                "(ADR-0014) : utiliser `active_group(...)` ou renseigner le contexte."
+                "No insect group declared before the forward pass. The per-group "
+                "normalisation models require the order processed to be known "
+                "(ADR-0014): use `active_group(...)` or fill the context."
             )
         indices = np.atleast_1d(np.asarray(self.indices, dtype=int))
         if indices.size == 1:
             return np.repeat(indices, batch_size)
         if indices.size != batch_size:
             raise RuntimeError(
-                f"{indices.size} indice(s) de groupe pour un lot de {batch_size} : "
-                "le contexte n'a pas ete mis a jour pour ce lot."
+                f"{indices.size} group index(es) for a batch of {batch_size}: "
+                "the context was not updated for this batch."
             )
         return indices
 
@@ -70,7 +70,7 @@ CONTEXT = GroupContext()
 
 @contextmanager
 def active_group(indices: Any) -> Any:
-    """Fixe le groupe actif le temps d'un bloc, puis le libere."""
+    """Set the active group for the duration of a block, then release it."""
     previous = CONTEXT.indices
     CONTEXT.set(indices)
     try:
@@ -80,10 +80,10 @@ def active_group(indices: Any) -> Any:
 
 
 def dataset_indices_from_paths(paths: list[str], datasets: list[str]) -> np.ndarray:
-    """Indices de dataset deduits des noms de fichiers exportes.
+    """Dataset indices derived from the exported file names.
 
-    L'export YOLO aplatit `<dataset>/<stem>` en `<dataset>__<stem>` : le prefixe est
-    donc porte par le nom de fichier. Fonction pure, testable sans torch.
+    The YOLO export flattens `<dataset>/<stem>` into `<dataset>__<stem>`: the prefix is
+    therefore carried by the file name. Pure function, testable without torch.
     """
     lookup = {name: i for i, name in enumerate(datasets)}
     indices = []
@@ -93,22 +93,22 @@ def dataset_indices_from_paths(paths: list[str], datasets: list[str]) -> np.ndar
         name = match.group(1) if match else None
         if name not in lookup:
             raise RuntimeError(
-                f"Dataset indeterminable pour '{stem}'. Les modeles a normalisation par "
-                f"groupe exigent un dataset connu parmi {datasets} (ADR-0014)."
+                f"Cannot determine the dataset of '{stem}'. The per-group normalisation "
+                f"models require a known dataset among {datasets} (ADR-0014)."
             )
         indices.append(lookup[name])
     return np.asarray(indices, dtype=int)
 
 
 def register_picklable(cls: Any, namespace: dict[str, Any], qualname: str | None = None) -> Any:
-    """Rend picklable une classe creee dynamiquement.
+    """Make a dynamically created class picklable.
 
-    Pickle ne serialise pas le code d'une classe : il enregistre son chemin
-    (`module.QualName`) et le resout a la lecture. Une classe definie DANS une fonction
-    est donc introuvable — et Ultralytics serialise le modele a chaque sauvegarde de
-    checkpoint. On corrige son identite et on la publie dans le module.
+    Pickle does not serialise the code of a class: it records its path
+    (`module.QualName`) and resolves it when reading. A class defined INSIDE a function
+    therefore cannot be found — and Ultralytics serialises the model at every checkpoint
+    save. Its identity is fixed and it is published in the module.
 
-    Fonction pure : testable sans torch.
+    Pure function: testable without torch.
     """
     name = qualname or cls.__name__
     cls.__module__ = namespace["__name__"]
@@ -121,7 +121,7 @@ _GROUP_BN_CLASS: Any = None
 
 
 def build_group_batchnorm() -> Any:
-    """Fabrique (une seule fois) la classe GroupBatchNorm2d, import torch differe."""
+    """Build (only once) the GroupBatchNorm2d class, deferred torch import."""
     global _GROUP_BN_CLASS
     if _GROUP_BN_CLASS is not None:
         return _GROUP_BN_CLASS
@@ -129,7 +129,7 @@ def build_group_batchnorm() -> Any:
     nn = torch.nn
 
     class GroupBatchNorm2d(nn.Module):  # type: ignore[misc, valid-type]
-        """N BatchNorm2d paralleles, une par dataset, routees par le contexte."""
+        """N parallel BatchNorm2d, one per dataset, routed by the context."""
 
         def __init__(self, source: Any, n_groups: int) -> None:
             super().__init__()
@@ -140,9 +140,9 @@ def build_group_batchnorm() -> Any:
                                track_running_stats=source.track_running_stats)
                 for _ in range(n_groups)
             ])
-            # Chaque branche part des statistiques et des affines du modele pre-entraine :
-            # la specialisation commence donc d'un point commun, pas d'une initialisation
-            # aleatoire qui detruirait les poids COCO.
+            # Each branch starts from the statistics and affines of the pre-trained model:
+            # the specialisation therefore starts from a common point, not from a random
+            # initialisation that would destroy the COCO weights.
             for branch in self.branches:
                 branch.load_state_dict(source.state_dict())
             self.num_features = source.num_features
@@ -152,7 +152,7 @@ def build_group_batchnorm() -> Any:
             unique = np.unique(indices)
             if unique.size == 1:
                 return self.branches[int(unique[0])](x)
-            # Lot mixte : on scinde par groupe puis on recompose dans l'ordre d'origine.
+            # Mixed batch: split by group then recompose in the original order.
             output = torch.empty_like(x)
             for group in unique:
                 mask = torch.as_tensor(indices == group, device=x.device)
@@ -164,30 +164,30 @@ def build_group_batchnorm() -> Any:
 
 
 def __getattr__(name: str) -> Any:
-    """Construit `GroupBatchNorm2d` a la demande (PEP 562).
+    """Build `GroupBatchNorm2d` on demand (PEP 562).
 
-    Permet a pickle de resoudre `insectpose.models.group_norm.GroupBatchNorm2d` au
-    chargement d'un checkpoint, meme si la classe n'a pas encore ete construite dans ce
-    processus, tout en gardant l'import de torch differe.
+    Lets pickle resolve `insectpose.models.group_norm.GroupBatchNorm2d` when loading a
+    checkpoint, even if the class has not been built yet in this process, while keeping
+    the torch import deferred.
     """
     if name == "GroupBatchNorm2d":
         return build_group_batchnorm()
-    raise AttributeError(f"module {__name__!r} n'a pas d'attribut {name!r}")
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def replace_modules(root: Any, is_target: Any, make_replacement: Any,
                     is_replacement: Any) -> int:
-    """Remplace en profondeur les modules cibles, sans descendre dans les remplacants.
+    """Replace the target modules in depth, without going down into the replacements.
 
-    Deux precautions, toutes deux indispensables :
-    - le parcours materialise `named_children()` en liste avant de modifier l'arbre ;
-      iterer un generateur que l'on mute donne un comportement indefini ;
-    - il ne descend PAS dans un module deja remplace. Un `GroupBatchNorm2d` contient
-      lui-meme N `BatchNorm2d` : sans ce garde-fou, elles seraient remplacees a leur
-      tour, indefiniment, jusqu'a une RecursionError.
+    Two precautions, both essential:
+    - the traversal materialises `named_children()` into a list before modifying the
+      tree; iterating a generator being mutated gives an undefined behaviour;
+    - it does NOT go down into an already replaced module. A `GroupBatchNorm2d` itself
+      contains N `BatchNorm2d`: without this guard, they would be replaced in turn,
+      indefinitely, until a RecursionError.
 
-    Fonction pure vis-a-vis de torch : les predicats sont injectes, donc testable.
-    Retourne le nombre de remplacements.
+    Pure function with respect to torch: the predicates are injected, hence testable.
+    Returns the number of replacements.
     """
     replaced = 0
     for name, child in list(root.named_children()):
@@ -200,10 +200,10 @@ def replace_modules(root: Any, is_target: Any, make_replacement: Any,
 
 
 def replace_batchnorm(model: Any, n_groups: int) -> int:
-    """Remplace toutes les BatchNorm2d du modele par des versions par groupe.
+    """Replace every BatchNorm2d of the model by per-group versions.
 
-    Retourne le nombre de couches remplacees. Zero signalerait un modele sans BN, donc
-    une approche sans effet : l'appelant doit le traiter comme une erreur.
+    Returns the number of layers replaced. Zero would signal a model without BN, hence an
+    approach without effect: the caller must treat it as an error.
     """
     torch = require("torch", "dev")
     group_cls = build_group_batchnorm()
@@ -214,11 +214,11 @@ def replace_batchnorm(model: Any, n_groups: int) -> int:
         make_replacement=lambda m: group_cls(m, n_groups),
         is_replacement=lambda m: isinstance(m, group_cls),
     )
-    log.info("%d BatchNorm2d remplacees par des versions a %d groupes.", replaced, n_groups)
+    log.info("%d BatchNorm2d replaced by %d-group versions.", replaced, n_groups)
     return replaced
 
 
 def default_datasets(cfg: Any) -> list[str]:
-    """Datasets du perimetre courant, dans l'ordre fige de `contracts.DATASETS`."""
+    """Datasets of the current scope, in the frozen order of `contracts.DATASETS`."""
     wanted = {str(d) for d in cfg.data.datasets}
     return [name for name in DATASETS if name in wanted]

@@ -1,8 +1,8 @@
-"""Contrat des adaptateurs de donnees (CONVENTIONS.md §3.2).
+"""Contract of the data adapters (CONVENTIONS.md §3.2).
 
-Un adaptateur : lit -> convertit -> valide -> ecrit. Il ne filtre pas, n'augmente pas
-et ne prend aucune decision methodologique. Les instances douteuses sont conservees
-avec un `qc_flags`.
+An adapter: reads -> converts -> validates -> writes. It does not filter, does not
+augment and takes no methodological decision. Doubtful instances are kept with a
+`qc_flags`.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ log = get_logger("adapter")
 
 
 class BaseAdapter(ABC):
-    """Squelette commun a tous les adaptateurs."""
+    """Skeleton common to every adapter."""
 
     def __init__(self, dataset: str, source_dir: Path, options: dict[str, Any]) -> None:
         self.dataset = dataset
@@ -32,34 +32,34 @@ class BaseAdapter(ABC):
 
     @abstractmethod
     def read(self) -> pd.DataFrame:
-        """Lit la source et retourne un DataFrame aux colonnes du contrat 1 (non finalise)."""
+        """Read the source and return a DataFrame with the columns of contract 1 (not final)."""
 
     def convert(self) -> pd.DataFrame:
-        """Lit, complete, controle qualite et valide. Aucun effet de bord."""
+        """Read, complete, quality-check and validate. No side effect."""
         df = self.read()
         if df.empty:
-            raise ValueError(f"[{self.dataset}] aucune annotation lue depuis {self.source_dir}")
+            raise ValueError(f"[{self.dataset}] no annotation read from {self.source_dir}")
         df = ensure_columns(df, "annotations", extra={"dataset": self.dataset})
         df["schema_version"] = ANNOTATION_SCHEMA_VERSION
         if "group_id" not in df.columns or df["group_id"].isna().all():
-            # DECISION OPEN-04 : defaut degrade, sans groupement effectif.
+            # DECISION OPEN-04: degraded default, without an actual grouping.
             df["group_id"] = df["image_id"]
             log.info(
-                "[%s] group_id = image_id (ADR-0011 : une image = un specimen).",
+                "[%s] group_id = image_id (ADR-0011: one image = one specimen).",
                 self.dataset,
             )
         df["qc_flags"] = validate_coordinates_in_image(df)
         flagged = int((df["qc_flags"] != "").sum())
         if flagged:
             log.warning(
-                "[%s] %d instances marquees qc_flags (conservees, non filtrees).",
+                "[%s] %d instances flagged in qc_flags (kept, not filtered).",
                 self.dataset, flagged,
             )
         validate_frame(df, "annotations")
         return df
 
     def write(self, df: pd.DataFrame, paths: ProjectPaths) -> Path:
-        """Ecrit le contrat 1. Effet de bord : data/processed/<dataset>/annotations.parquet."""
+        """Write contract 1. Side effect: data/processed/<dataset>/annotations.parquet."""
         return write_parquet(paths.annotations(self.dataset), df, artifact="annotations")
 
     def run(self, paths: ProjectPaths) -> Path:

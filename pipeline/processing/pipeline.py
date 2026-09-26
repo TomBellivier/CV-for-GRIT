@@ -28,7 +28,7 @@ from . import tta
 from .definitions import MEASUREMENT_NAMES
 from .measurements import compute_measurements, measurement_keypoint_confidences
 from .pose_inference import run_pose_ensemble
-from .scale import detect_scale
+from .scale import ScaleResult, detect_scale
 
 
 @dataclass
@@ -36,6 +36,7 @@ class Models:
     """The models a worker needs. Built once per thread (see worker.py)."""
     pose_models: list[YOLO]              # the ensemble of retained_models/pose/
     scale_bar_model: YOLO | None
+    device: str | None = None            # where this worker runs them (hardware.py)
 
 
 def _measurement_confidences_keypoint(keypoints) -> dict[str, float]:
@@ -47,9 +48,9 @@ def _measurement_confidences_keypoint(keypoints) -> dict[str, float]:
     }
 
 
-def _measurement_confidences_tta(pose_models, img_bgr) -> dict[str, float]:
+def _measurement_confidences_tta(pose_models, img_bgr, device=None) -> dict[str, float]:
     """TTA-based confidence for every measurement (stability signal)."""
-    per_measure = tta.collect_tta_measurements(pose_models, img_bgr)
+    per_measure = tta.collect_tta_measurements(pose_models, img_bgr, device)
     return {
         name: confidence.measurement_confidence_tta(per_measure.get(name, []))
         for name in MEASUREMENT_NAMES
@@ -57,7 +58,7 @@ def _measurement_confidences_tta(pose_models, img_bgr) -> dict[str, float]:
 
 
 def process_image(img_bgr: np.ndarray, image_name: str,
-                  models: Models, membership,
+                  models: Models,
                   measurement_classifiers=None, group_index=None) -> dict:
     """Run the whole pipeline on one decoded image and return a CSV record."""
     timings: dict[str, float] = {}
@@ -65,8 +66,6 @@ def process_image(img_bgr: np.ndarray, image_name: str,
 
     record: dict = {
         "image_name": image_name,
-        "in_train": membership.in_train(image_name),
-        "in_val": membership.in_val(image_name),
         "pixels": {},
         "mm": {},
         "conf": {},
@@ -83,14 +82,20 @@ def process_image(img_bgr: np.ndarray, image_name: str,
 
     # ---- 1. scale (independent of the pose) ---------------------------------
     t0 = time.perf_counter()
-    scale = detect_scale(img_bgr, models.scale_bar_model)
+    if config.USE_SCALE_BAR or config.USE_RULER_FALLBACK:
+        scale = detect_scale(img_bgr, models.scale_bar_model, models.device)
+    else:
+        # Scale extraction switched off: no detector runs, the confidences are NaN
+        # ("not computed", not "failed"), so they flag nothing for review.
+        scale = ScaleResult(None, "disabled", math.nan, math.nan, math.nan,
+                            "Scale extraction disabled.")
     timings["scale"] = time.perf_counter() - t0
     record["scale_px_per_mm"] = scale.px_per_mm
     record["scale_confidence"] = scale.scale_conf
 
     # ---- 2. pose inference (every model of the ensemble, averaged) -----------
     t0 = time.perf_counter()
-    pose = run_pose_ensemble(models.pose_models, img_bgr)
+    pose = run_pose_ensemble(models.pose_models, img_bgr, models.device)
     timings["pose"] = time.perf_counter() - t0
     if pose is None:
         timings["total"] = time.perf_counter() - t_start
@@ -114,7 +119,8 @@ def process_image(img_bgr: np.ndarray, image_name: str,
     # ---- 4. measurement confidences (selected signal) -----------------------
     t0 = time.perf_counter()
     if config.MEASUREMENT_CONFIDENCE_SIGNAL == "tta":
-        record["conf"] = _measurement_confidences_tta(models.pose_models, img_bgr)
+        record["conf"] = _measurement_confidences_tta(models.pose_models, img_bgr,
+                                                      models.device)
     else:  # "keypoint" (default)
         record["conf"] = _measurement_confidences_keypoint(keypoints)
 
@@ -207,6 +213,6 @@ def _fill_optional_columns(record, img_bgr, pose, scale):
         thr = config.NEEDS_REVIEW_THRESHOLD
         flagged = (
             (isinstance(pose_conf, float) and not math.isnan(pose_conf) and pose_conf < thr)
-            or (scale_conf < thr)
+            or (not math.isnan(scale_conf) and scale_conf < thr)
         )
         record["needs_review"] = bool(flagged)

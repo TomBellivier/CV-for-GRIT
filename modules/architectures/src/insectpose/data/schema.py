@@ -1,7 +1,7 @@
-"""Validation des contrats de donnees (CONVENTIONS.md §3, §10).
+"""Validation of the data contracts (CONVENTIONS.md §3, §10).
 
-Echoue tot, bruyamment, avec un message actionnable. Aucun filtrage, aucune
-correction automatique : valider n'est pas nettoyer.
+Fails early, loudly, with an actionable message. No filtering, no automatic
+correction: validating is not cleaning.
 """
 
 from __future__ import annotations
@@ -26,18 +26,18 @@ _LIST_KINDS = {"list_float", "list_int"}
 
 
 def validate_frame(df: pd.DataFrame, artifact: str) -> None:
-    """Valide un DataFrame contre un contrat ('annotations', 'splits', ...).
+    """Validate a DataFrame against a contract ('annotations', 'splits', ...).
 
-    Leve ContractError au premier probleme structurel.
+    Raises ContractError at the first structural problem.
     """
     if artifact not in SCHEMAS:
-        raise ContractError(f"Artefact inconnu : {artifact}. Connus : {sorted(SCHEMAS)}")
+        raise ContractError(f"Unknown artefact: {artifact}. Known: {sorted(SCHEMAS)}")
 
     missing = [c for c in required_columns(artifact) if c not in df.columns]
     if missing:
         raise ContractError(
-            f"[{artifact}] colonnes obligatoires manquantes : {missing}. "
-            f"Attendu : {required_columns(artifact)}"
+            f"[{artifact}] missing mandatory columns: {missing}. "
+            f"Expected: {required_columns(artifact)}"
         )
     if df.empty:
         return
@@ -46,8 +46,8 @@ def validate_frame(df: pd.DataFrame, artifact: str) -> None:
     versions = set(pd.unique(df["schema_version"]))
     if versions != {expected_version}:
         raise ContractError(
-            f"[{artifact}] schema_version={versions}, attendu {expected_version}. "
-            "Un artefact d'une autre version doit passer par un lecteur dedie."
+            f"[{artifact}] schema_version={versions}, expected {expected_version}. "
+            "An artefact of another version must go through a dedicated reader."
         )
 
     for spec in SCHEMAS[artifact]:
@@ -55,7 +55,7 @@ def validate_frame(df: pd.DataFrame, artifact: str) -> None:
             continue
         col = df[spec.name]
         if col.isna().any() and spec.required:
-            raise ContractError(f"[{artifact}] valeurs nulles interdites dans '{spec.name}'.")
+            raise ContractError(f"[{artifact}] null values forbidden in '{spec.name}'.")
         if spec.kind in _LIST_KINDS:
             _check_list_column(artifact, spec.name, col)
 
@@ -64,115 +64,114 @@ def validate_frame(df: pd.DataFrame, artifact: str) -> None:
 
 
 def _check_list_column(artifact: str, name: str, col: pd.Series) -> None:
-    """Verifie qu'une colonne de listes contient bien des sequences numeriques."""
+    """Check that a list column does contain numeric sequences."""
     sample = col.iloc[0]
     if not isinstance(sample, (list, tuple, np.ndarray)):
         raise ContractError(
-            f"[{artifact}] '{name}' doit contenir des listes, trouve {type(sample).__name__}."
+            f"[{artifact}] '{name}' must contain lists, found {type(sample).__name__}."
         )
 
 
 def _validate_vocabulary(df: pd.DataFrame, artifact: str) -> None:
-    """Verifie les colonnes a vocabulaire ferme."""
+    """Check the columns with a closed vocabulary."""
     if "dataset" in df.columns:
         unknown = set(df["dataset"].unique()) - set(DATASETS)
         if unknown:
             raise ContractError(
-                f"[{artifact}] datasets inconnus : {sorted(unknown)}. "
-                f"Vocabulaire ferme : {list(DATASETS)} (cf. contracts.DATASETS)."
+                f"[{artifact}] unknown datasets: {sorted(unknown)}. "
+                f"Closed vocabulary: {list(DATASETS)} (see contracts.DATASETS)."
             )
     if artifact == "splits":
         unknown_roles = set(df["role"].unique()) - set(ROLES)
         if unknown_roles:
-            raise ContractError(f"[splits] roles inconnus : {sorted(unknown_roles)}")
+            raise ContractError(f"[splits] unknown roles: {sorted(unknown_roles)}")
     if artifact == "predictions":
         unknown_src = set(df["bbox_source"].unique()) - set(BBOX_SOURCES)
         if unknown_src:
-            raise ContractError(f"[predictions] bbox_source inconnus : {sorted(unknown_src)}")
+            raise ContractError(f"[predictions] unknown bbox_source: {sorted(unknown_src)}")
         if df["pred_id"].duplicated().any():
             dup = df.loc[df["pred_id"].duplicated(), "pred_id"].head(3).tolist()
-            raise ContractError(f"[predictions] pred_id non uniques, ex. {dup}")
+            raise ContractError(f"[predictions] pred_id not unique, e.g. {dup}")
     if artifact == "annotations" and df["instance_id"].duplicated().any():
         dup = df.loc[df["instance_id"].duplicated(), "instance_id"].head(3).tolist()
-        raise ContractError(f"[annotations] instance_id non uniques, ex. {dup}")
+        raise ContractError(f"[annotations] instance_id not unique, e.g. {dup}")
 
 
 def _validate_geometry(df: pd.DataFrame, artifact: str) -> None:
-    """Verifie la coherence bbox / keypoints / visibilite."""
+    """Check the bbox / keypoints / visibility consistency."""
     if artifact not in ("annotations", "predictions"):
         return
     bad_bbox = df["bbox_xywh"].map(lambda b: len(b) != 4)
     if bad_bbox.any():
-        raise ContractError(f"[{artifact}] bbox_xywh doit contenir 4 valeurs (xywh).")
+        raise ContractError(f"[{artifact}] bbox_xywh must contain 4 values (xywh).")
 
-    # Ce controle vient EN PREMIER : il nomme les fichiers fautifs, la ou les suivants
-    # ne rapportent que des tailles. Sur des donnees reelles, c'est cette difference qui
-    # evite une enquete manuelle.
+    # This check comes FIRST: it names the faulty files, where the next ones only report
+    # sizes. On real data, this difference is what saves a manual investigation.
     _validate_schema_consistency(df, artifact)
 
     n_kpts = df["kpts_xy"].map(len)
     if (n_kpts % 2 != 0).any():
-        raise ContractError(f"[{artifact}] kpts_xy doit contenir 2K valeurs.")
+        raise ContractError(f"[{artifact}] kpts_xy must contain 2K values.")
     k = (n_kpts // 2).astype(int)
 
     second = "kpts_vis" if artifact == "annotations" else "kpts_score"
     n_second = df[second].map(len).astype(int)
     if not (n_second == k).all():
         raise ContractError(
-            f"[{artifact}] longueur de '{second}' incoherente avec kpts_xy "
-            f"(K deduit={sorted(set(k))[:3]}, trouve={sorted(set(n_second))[:3]})."
+            f"[{artifact}] length of '{second}' inconsistent with kpts_xy "
+            f"(K derived={sorted(set(k))[:3]}, found={sorted(set(n_second))[:3]})."
         )
 
 
 def _validate_schema_consistency(df: pd.DataFrame, artifact: str) -> None:
-    """Refuse un schema de keypoints presentant plusieurs tailles, en nommant les fautifs.
+    """Refuse a keypoint schema showing several sizes, naming the faulty ones.
 
-    L'ordre et le nombre de points sont figes a vie (ADR-0006) : une divergence signale
-    des labels d'un autre schema, ou un fichier mal forme.
+    The order and the number of points are frozen for life (ADR-0006): a divergence
+    signals labels of another schema, or a malformed file.
     """
     sizes = df["kpts_xy"].map(len)
     for schema_name, group in df.groupby("keypoint_schema"):
         counts = sizes[group.index].value_counts()
         if len(counts) <= 1:
             continue
-        # La taille majoritaire est presumee correcte ; on nomme celles qui en devient.
+        # The majority size is presumed correct; the ones deviating from it are named.
         expected = int(counts.idxmax())
         outliers = group[sizes[group.index] != expected]
         column = "image_path" if "image_path" in outliers.columns else "instance_id"
         examples = "\n  ".join(
-            f"{row[column]} : {len(row['kpts_xy']) // 2} keypoints"
+            f"{row[column]}: {len(row['kpts_xy']) // 2} keypoints"
             for _, row in outliers.head(5).iterrows()
         )
         raise ContractError(
-            f"[{artifact}] le schema '{schema_name}' apparait avec plusieurs tailles de "
-            f"keypoints : {sorted(int(v) // 2 for v in counts.index)} points. L'ordre et "
-            f"le nombre de points sont figes.\n"
-            f"Attendu {expected // 2} points ({int(counts.max())} instances). "
-            f"{len(outliers)} instance(s) divergente(s), par exemple :\n  {examples}"
+            f"[{artifact}] the schema '{schema_name}' appears with several keypoint "
+            f"sizes: {sorted(int(v) // 2 for v in counts.index)} points. The order and "
+            f"the number of points are frozen.\n"
+            f"Expected {expected // 2} points ({int(counts.max())} instances). "
+            f"{len(outliers)} diverging instance(s), for example:\n  {examples}"
         )
 
 
 def validate_single_instance(df: pd.DataFrame) -> None:
-    """Verifie l'hypothese "une image = un insecte" (ADR-0017).
+    """Check the "one image = one insect" hypothesis (ADR-0017).
 
-    Si elle est violee, la detection top-1 des approches devient fausse en silence :
-    l'echec doit donc etre bloquant, au moment de la preparation des donnees.
+    If it is violated, the top-1 detection of the approaches silently becomes wrong: the
+    failure must therefore be blocking, at data preparation time.
     """
     counts = df.groupby("image_id").size()
     offenders = counts[counts > 1]
     if len(offenders):
         raise ContractError(
-            f"{len(offenders)} image(s) contiennent plusieurs instances "
-            f"(ex. {offenders.index[0]} : {int(offenders.iloc[0])}), alors que "
-            "data.single_instance_per_image=true (ADR-0017). Corriger les annotations "
-            "ou passer ce drapeau a false et revoir les approches a detection top-1."
+            f"{len(offenders)} image(s) contain several instances "
+            f"(e.g. {offenders.index[0]}: {int(offenders.iloc[0])}), whereas "
+            "data.single_instance_per_image=true (ADR-0017). Fix the annotations or set "
+            "this flag to false and review the top-1 detection approaches."
         )
 
 
 def validate_coordinates_in_image(df: pd.DataFrame, tolerance: float = 0.05) -> pd.Series:
-    """Signale (sans supprimer) les instances dont les coordonnees sortent de l'image.
+    """Flag (without deleting) the instances whose coordinates leave the image.
 
-    Retourne une Series de drapeaux ; le filtrage reste une decision de config (§3.2).
+    Returns a Series of flags; filtering remains a config decision (§3.2).
     """
     flags = []
     for row in df.itertuples(index=False):
@@ -197,7 +196,7 @@ def validate_coordinates_in_image(df: pd.DataFrame, tolerance: float = 0.05) -> 
 
 def ensure_columns(df: pd.DataFrame, artifact: str, extra: dict[str, Any] | None = None
                    ) -> pd.DataFrame:
-    """Complete les colonnes optionnelles manquantes et ordonne selon le contrat."""
+    """Add the missing optional columns and order the columns as in the contract."""
     out = df.copy()
     if extra:
         for key, value in extra.items():

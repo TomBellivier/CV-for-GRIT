@@ -1,10 +1,10 @@
-"""Point d'entrée de l'application de classement des mesures.
+"""Entry point of the measurement classification application.
 
     python annotation_tools/measurement_validation/main.py --annotations_csv annotations.csv
 
-Le CSV d'entrée est celui produit par annotation_tools/labelstudio_to_csv.py. Le
-CSV de sortie (statut de chaque mesure pour chaque image) est écrit dans
-annotation_data/meas_classifier/, sous le nom "<csv d'entrée>_measurements.csv".
+The input CSV is the one produced by annotation_tools/labelstudio_to_csv.py. The
+output CSV (status of each measurement for each image) is written to
+annotation_data/meas_classifier/, under the name "<input csv>_measurements.csv".
 """
 import argparse
 import sys
@@ -25,50 +25,50 @@ DEFAULT_EXPORT_DIR = REPO_ROOT / "annotation_data" / "meas_classifier"
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Classement mesurable / non mesurable des mesures.")
+    parser = argparse.ArgumentParser(description="Measurable / non measurable classification of the measurements.")
     parser.add_argument("--annotations_csv", default=None,
-                        help="CSV produit par labelstudio_to_csv.py (demandé au lancement si absent).")
+                        help="CSV produced by labelstudio_to_csv.py (asked at launch if missing).")
     parser.add_argument("--output_dir", default=str(DEFAULT_EXPORT_DIR),
-                        help=f"Dossier du CSV de statuts (défaut : {DEFAULT_EXPORT_DIR}).")
+                        help=f"Folder of the status CSV (default: {DEFAULT_EXPORT_DIR}).")
     parser.add_argument("--kp_infos", default=None,
-                        help="kp_infos.yaml d'où sont lues les mesures (défaut : kp_infos.yaml à la racine du dépôt).")
+                        help="kp_infos.yaml the measurements are read from (default: kp_infos.yaml at the repository root).")
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
     app = QApplication(sys.argv)
-    logger.info("QApplication créée")
+    logger.info("QApplication created")
 
     config = load_config(args.kp_infos)
-    logger.info("%d mesure(s) chargée(s)", len(config.measurements))
+    logger.info("%d measurement(s) loaded", len(config.measurements))
 
     csv_path = args.annotations_csv
     if not csv_path:
         csv_path, _ = QFileDialog.getOpenFileName(
-            None, "Sélectionner le CSV d'annotations", str(REPO_ROOT), "CSV (*.csv)")
+            None, "Select the annotation CSV", str(REPO_ROOT), "CSV (*.csv)")
     if not csv_path:
-        logger.info("Aucun CSV sélectionné, sortie")
+        logger.info("No CSV selected, exiting")
         return
 
     annotations = csv_io.load_annotations(csv_path)
     if not annotations:
-        QMessageBox.warning(None, "Aucune annotation", f"Aucune annotation exploitable dans {csv_path}.")
+        QMessageBox.warning(None, "No annotation", f"No usable annotation in {csv_path}.")
         return
 
     project_name = Path(csv_path).stem
     win = MainWindow(config, annotations, project_name, args.output_dir)
-    # Reprise : statut par segment et images déjà validées lors d'une session précédente.
+    # Resume: status per segment and images already validated in a previous session.
     csv_io.load_state(win.state_path, annotations)
     win.show()
-    # chargée après l'affichage : le viewport a alors sa taille réelle, ce qui évite
-    # un calcul de zoom foireux (fenêtre pas encore mise en page).
+    # loaded after showing the window: the viewport then has its real size, which avoids
+    # a broken zoom computation (window not laid out yet).
     win.load_image(win.first_unvalidated_index())
-    logger.info("Projet '%s' : %d annotation(s), export vers %s",
+    logger.info("Project '%s': %d annotation(s), export to %s",
                 project_name, len(annotations), win.csv_path)
 
     exit_code = app.exec()
-    logger.info("Fin de la boucle d'événements (code %d)", exit_code)
+    logger.info("End of the event loop (code %d)", exit_code)
     sys.exit(exit_code)
 
 
@@ -76,7 +76,7 @@ if __name__ == "__main__":
     try:
         main()
     except Exception:
-        logger.critical("Exception fatale dans main()", exc_info=True)
+        logger.critical("Fatal exception in main()", exc_info=True)
         raise
     finally:
-        logger.info("Logs disponibles dans %s", LOG_DIR)
+        logger.info("Logs available in %s", LOG_DIR)

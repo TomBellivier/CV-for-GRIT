@@ -1,8 +1,8 @@
-"""Metriques de pose : OKS-AP/AR, PCK, NME, taux de detection par keypoint.
+"""Pose metrics: OKS-AP/AR, PCK, NME, per-keypoint detection rate.
 
-Les instances GT non appariees comptent comme echec quand
-`eval.count_missed_gt_as_failure` est vrai : une pipeline qui ne detecte pas
-l'insecte n'a pas "0 keypoint evalue", elle a un echec (§7.2).
+Unmatched GT instances count as failures when `eval.count_missed_gt_as_failure` is
+true: a pipeline that does not detect the insect does not have "0 keypoint
+evaluated", it has a failure (§7.2).
 """
 
 from __future__ import annotations
@@ -21,17 +21,17 @@ from insectpose.utils.geometry import bbox_diag
 
 def compute_normalizer(spec: Any, schema: KeypointSchema, gt_kpts: np.ndarray,
                        gt_vis: np.ndarray, gt_bbox: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Echelle de reference de chaque instance pour le PCK et la NME (ADR-0009).
+    """Reference scale of each instance for the PCK and the NME (ADR-0009).
 
-    Retourne (valeurs, masque de repli). Le repli est COMPTE et publie : une echelle
-    de reference silencieusement remplacee fausserait la comparaison entre approches.
+    Returns (values, fallback mask). The fallback is COUNTED and published: a silently
+    replaced reference scale would bias the comparison between approaches.
     """
     fallback = bbox_diag(gt_bbox)
     kind = str(spec.type)
     if kind == "bbox_diag":
         return fallback, np.zeros(len(gt_bbox), dtype=bool)
     if kind != "keypoint_distance":
-        raise ValueError(f"pck.normalizer.type inconnu : '{kind}'.")
+        raise ValueError(f"Unknown pck.normalizer.type: '{kind}'.")
 
     idx = [schema.index(str(n)) for n in spec.keypoints]
     usable = gt_vis[:, idx].all(axis=1)
@@ -44,7 +44,7 @@ def compute_normalizer(spec: Any, schema: KeypointSchema, gt_kpts: np.ndarray,
 
 @register_metric("oks_ap_ar")
 def oks_ap_ar(bundle: EvalBundle) -> list[dict[str, Any]]:
-    """OKS-AP (moyenne sur les seuils) et OKS-AR, metrique primaire par defaut."""
+    """OKS-AP (mean over the thresholds) and OKS-AR, primary metric by default."""
     thresholds = [float(t) for t in bundle.cfg.oks.thresholds]
     out: list[dict[str, Any]] = []
     for scope, pairs in bundle.scopes():
@@ -75,25 +75,25 @@ def oks_ap_ar(bundle: EvalBundle) -> list[dict[str, Any]]:
 
 @dataclass
 class _Block:
-    """Distances normalisees d'un groupe d'instances partageant le MEME schema.
+    """Normalised distances of a group of instances sharing the SAME schema.
 
-    Les schemas de keypoints n'ont pas le meme K d'un dataset a l'autre : les
-    metriques ponctuelles agregent donc des compteurs, jamais des tableaux empiles.
+    Keypoint schemas do not have the same K from one dataset to another: the point
+    metrics therefore aggregate counters, never stacked arrays.
     """
 
     schema: str
     dataset: str
-    dist: np.ndarray      # (N_gt, K) - +inf pour une instance GT non appariee
-    valid: np.ndarray     # (N_gt, K) - keypoints annotes (vis > 0)
-    fallback: np.ndarray  # (N_gt,) - echelle de reference remplacee par le repli
-    conf: np.ndarray      # (N_gt, K) - confiance predite, NaN si non appariee
+    dist: np.ndarray      # (N_gt, K) - +inf for an unmatched GT instance
+    valid: np.ndarray     # (N_gt, K) - annotated keypoints (vis > 0)
+    fallback: np.ndarray  # (N_gt,) - reference scale replaced by the fallback
+    conf: np.ndarray      # (N_gt, K) - predicted confidence, NaN if unmatched
 
 
 def _pointwise(bundle: EvalBundle, pairs: list) -> list[_Block]:
-    """Distances normalisees par keypoint, groupees par schema.
+    """Normalised distances per keypoint, grouped by schema.
 
-    Une GT non appariee garde dist = +inf : elle echoue tous les seuils PCK au lieu
-    de disparaitre du denominateur (§7.2).
+    An unmatched GT keeps dist = +inf: it fails every PCK threshold instead of
+    disappearing from the denominator (§7.2).
     """
     thr = float(bundle.cfg.match_oks_threshold)
     score_thr = float(bundle.cfg.score_threshold_pointwise)
@@ -140,7 +140,7 @@ def _pointwise(bundle: EvalBundle, pairs: list) -> list[_Block]:
 
 @register_metric("pck")
 def pck(bundle: EvalBundle) -> list[dict[str, Any]]:
-    """PCK@alpha normalise (par defaut diagonale de bbox GT ; DECISION OPEN-02)."""
+    """Normalised PCK@alpha (normaliser set in eval.pck.normalizer; ADR-0009)."""
     normalizer = str(bundle.cfg.pck.normalizer.name)
     out: list[dict[str, Any]] = []
     for scope, pairs in bundle.scopes():
@@ -162,7 +162,7 @@ def pck(bundle: EvalBundle) -> list[dict[str, Any]]:
 
 @register_metric("nme")
 def nme(bundle: EvalBundle) -> list[dict[str, Any]]:
-    """Erreur moyenne normalisee. Deux variantes, jamais confondues."""
+    """Normalised mean error. Two variants, never confused."""
     out: list[dict[str, Any]] = []
     for scope, pairs in bundle.scopes():
         blocks = _pointwise(bundle, pairs)
@@ -177,7 +177,7 @@ def nme(bundle: EvalBundle) -> list[dict[str, Any]]:
             finite_sum += float(b.dist[finite].sum())
             finite_n += int(finite.sum())
         if finite_n:
-            # variante 'appariee' : ne dit rien des instances manquees
+            # 'matched' variant: says nothing about the missed instances
             out.append(record(scope, "nme_matched_only", finite_sum / finite_n, finite_n))
         out.append(record(scope, "kpt_coverage", finite_n / total, total))
     return out
@@ -185,10 +185,10 @@ def nme(bundle: EvalBundle) -> list[dict[str, Any]]:
 
 @register_metric("keypoint_rate")
 def keypoint_rate(bundle: EvalBundle) -> list[dict[str, Any]]:
-    """Detail par keypoint : PCK, erreur normalisee et confiance predite.
+    """Per-keypoint detail: PCK, normalised error and predicted confidence.
 
-    La confiance et l'erreur sont publiees par point car leur relation dit si la
-    confiance du modele est exploitable comme filtre en production (§8.3).
+    The confidence and the error are published per point because their relation says
+    whether the confidence of the model can be used as a filter in production (§8.4).
     """
     if not bool(bundle.cfg.scopes.per_keypoint):
         return []

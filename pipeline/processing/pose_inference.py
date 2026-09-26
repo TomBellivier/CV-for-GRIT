@@ -27,6 +27,7 @@ from ultralytics import YOLO
 
 from . import config
 from .definitions import NUM_KEYPOINTS
+from .hardware import precision_kwargs
 
 
 @dataclass
@@ -172,10 +173,15 @@ def ensemble_pose(per_model: list[_Instances | None]) -> PoseResult | None:
     )
 
 
-def run_pose_ensemble(models: list[YOLO], img) -> PoseResult | None:
-    """Run every model of the ensemble on an image (path or in-memory array)."""
+def run_pose_ensemble(models: list[YOLO], img, device: str | None = None) -> PoseResult | None:
+    """Run every model of the ensemble on an image (path or in-memory array).
+
+    `device` is the worker's device (hardware.next_device); FP16 on a CUDA GPU.
+    """
+    kwargs = {"device": device, **precision_kwargs(device)} if device else {}
     return ensemble_pose([
-        _instances(model.predict(source=img, conf=config.POSE_CONF_THRESHOLD, verbose=False))
+        _instances(model.predict(source=img, conf=config.POSE_CONF_THRESHOLD,
+                                 verbose=False, **kwargs))
         for model in models
     ])
 

@@ -16,8 +16,8 @@ Why threads (and not processes) for CPU work?
     so several inferences really do run at once. Threads also share the loaded
     models cheaply (one copy per thread via worker.py) and let a thread that is
     blocked on a network download yield the GIL to a thread that is computing.
-    On 16 CPUs this overlaps I/O and compute without the memory cost of 16
-    separate processes.
+    This overlaps I/O and compute without the memory cost of one process per
+    worker. How many workers run is decided by hardware.py.
 
 Why bounded (the `buffer`)?
     Submitting millions of tasks at once would build millions of futures and,

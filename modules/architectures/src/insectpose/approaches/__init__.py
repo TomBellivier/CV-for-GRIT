@@ -1,1 +1,1 @@
-"""Approches enfichables. Ajouter une approche = 6 artefacts (CONVENTIONS.md §11)."""
+"""Pluggable approaches. Adding an approach = 6 artefacts (CONVENTIONS.md §11)."""

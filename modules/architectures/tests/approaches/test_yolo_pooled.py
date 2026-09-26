@@ -1,8 +1,8 @@
-"""Tests de l'approche yolo_pooled (CONVENTIONS.md §9.1, §11).
+"""Tests of the yolo_pooled approach (CONVENTIONS.md §9.1, §11).
 
-La couche Ultralytics n'est pas testable sans GPU ni dependance lourde. En revanche
-TOUTE la logique risquee — conversion de coordonnees, format des labels, symetrie —
-l'est par aller-retour, et c'est elle qui casse silencieusement en production.
+The Ultralytics layer cannot be tested without a GPU or heavy dependencies. On the other
+hand ALL the risky logic — coordinate conversion, label format, symmetry — can be,
+through round trips, and it is what breaks silently in production.
 """
 
 from __future__ import annotations
@@ -33,9 +33,9 @@ def image_set(project) -> ImageSet:
     return ImageSet(name="train", annotations=annotations, paths=project, schemas={SCHEMA: schema})
 
 
-# --- aller-retour de coordonnees --------------------------------------------
+# --- coordinate round trip -------------------------------------------------
 def test_label_roundtrip_preserves_geometry(image_set, project) -> None:
-    """Le bug classique du format YOLO : bbox CENTREE vs coin haut-gauche."""
+    """The classic bug of the YOLO format: CENTRED bbox vs top-left corner."""
     schema = load_schema(SCHEMA, project.configs)
     row = image_set.annotations.iloc[[0]]
     width = int(row["image_width"].iloc[0])
@@ -48,11 +48,11 @@ def test_label_roundtrip_preserves_geometry(image_set, project) -> None:
     assert np.allclose(parsed["bbox_xywh"], row["bbox_xywh"].iloc[0], atol=1e-3)
     assert np.allclose(parsed["kpts_xy"], row["kpts_xy"].iloc[0], atol=1e-3)
     assert parsed["kpts_vis"] == list(row["kpts_vis"].iloc[0])
-    assert parsed["class"] == 0   # une seule classe : insecte
+    assert parsed["class"] == 0   # a single class: insect
 
 
 def test_unannotated_keypoints_are_written_as_masked(project) -> None:
-    """Un point absent doit sortir en vis=0, jamais en zero appris."""
+    """A missing point must come out as vis=0, never as a learned zero."""
     import pandas as pd
 
     schema = load_schema(SCHEMA, project.configs)
@@ -75,7 +75,7 @@ def test_out_of_image_coordinates_are_clipped_and_counted(project) -> None:
 
     schema = load_schema(SCHEMA, project.configs)
     k = schema.n_keypoints
-    kpts = [150.0] * (2 * k)   # tous les points hors image
+    kpts = [150.0] * (2 * k)   # every point outside the image
     row = pd.DataFrame([{
         "instance_id": "x#0", "bbox_xywh": [0.0, 0.0, 100.0, 100.0],
         "kpts_xy": kpts, "kpts_vis": [2] * k,
@@ -91,11 +91,11 @@ def test_wrong_keypoint_count_is_refused(project) -> None:  # noqa: ARG001
         "instance_id": "x#0", "bbox_xywh": [0.0, 0.0, 10.0, 10.0],
         "kpts_xy": [1.0, 2.0], "kpts_vis": [2],
     }])
-    with pytest.raises(ContractError, match="keypoints pour un schema"):
+    with pytest.raises(ContractError, match="keypoints for a schema"):
         to_label_lines(row, 100, 100, 42)
 
 
-# --- arborescence exportee ---------------------------------------------------
+# --- exported tree -----------------------------------------------------------
 def test_export_creates_one_label_per_image(image_set, project, tmp_path) -> None:
     schema = load_schema(SCHEMA, project.configs)
     root = tmp_path / "yolo"
@@ -107,14 +107,14 @@ def test_export_creates_one_label_per_image(image_set, project, tmp_path) -> Non
 
 
 def test_filenames_do_not_collide_across_datasets(image_set) -> None:
-    """Deux datasets ont des `img000.png` : sans aplatissement, ils s'ecrasent."""
+    """Two datasets have `img000.png` files: without flattening, they overwrite each other."""
     ids = list(image_set.images["image_id"])
     assert len({flat_name(i) for i in ids}) == len(ids)
     assert flat_name("coleoptera/img000") == "coleoptera__img000"
 
 
 def test_data_yaml_carries_flip_index(project, tmp_path) -> None:
-    """Sans flip_idx, l'augmentation par miroir apprend une anatomie fausse."""
+    """Without flip_idx, the mirror augmentation learns a wrong anatomy."""
     schema = load_schema(SCHEMA, project.configs)
     path = write_data_yaml(tmp_path, schema, {"train": "train", "val": "val"})
     payload = yaml.safe_load(path.read_text())
@@ -125,7 +125,7 @@ def test_data_yaml_carries_flip_index(project, tmp_path) -> None:
     assert payload["flip_idx"][left] == schema.index("right-eye")
 
 
-# --- approche ----------------------------------------------------------------
+# --- approach ----------------------------------------------------------------
 def test_approach_is_registered_and_declares_availability() -> None:
     cls = APPROACHES.get("yolo_pooled")
     available, reason = cls.availability()
@@ -134,7 +134,7 @@ def test_approach_is_registered_and_declares_availability() -> None:
 
 
 def test_search_space_is_declared(config_factory) -> None:
-    """L'espace de recherche doit etre lisible en config, pas enterre dans le code."""
+    """The search space must be readable in the config, not buried in the code."""
     import optuna
 
     yolo_cfg = config_factory(["approach=yolo_pooled"])
@@ -144,14 +144,14 @@ def test_search_space_is_declared(config_factory) -> None:
 
 
 def test_single_detection_per_image_is_configured(config_factory) -> None:
-    """ADR-0017 : une image = un insecte, donc max_det = 1."""
+    """ADR-0017: one image = one insect, so max_det = 1."""
     yolo_cfg = config_factory(["approach=yolo_pooled"])
     assert int(yolo_cfg.approach.max_det) == 1
-    assert float(yolo_cfg.approach.conf) <= 0.01   # pas de troncature des courbes AP
+    assert float(yolo_cfg.approach.conf) <= 0.01   # no truncation of the AP curves
 
 
 def test_heterogeneous_schemas_are_refused(project) -> None:
-    """yolo_pooled suppose un schema unique : sinon il faut passer par l'espace union."""
+    """yolo_pooled assumes a single schema: otherwise the union space must be used."""
     from types import SimpleNamespace
 
     from insectpose.approaches.yolo_pooled import YoloPooledApproach
@@ -159,18 +159,18 @@ def test_heterogeneous_schemas_are_refused(project) -> None:
     schema = load_schema(SCHEMA, project.configs)
     other = load_schema(SCHEMA, project.configs)
     source = SimpleNamespace(schemas={"a": schema, "b": other})
-    with pytest.raises(ValueError, match="schema de keypoints unique"):
+    with pytest.raises(ValueError, match="single keypoint schema"):
         YoloPooledApproach._schema(source)
 
 
 def test_missing_config_key_is_reported_by_name(config_factory) -> None:
-    """Une config plus ancienne que le code doit produire un message actionnable."""
+    """A config older than the code must produce an actionable message."""
     from omegaconf import OmegaConf
 
     from insectpose.approaches.yolo_pooled import YoloPooledApproach
 
     cfg = config_factory(["approach=yolo_pooled"])
-    YoloPooledApproach(cfg)   # config complete : aucune erreur
+    YoloPooledApproach(cfg)   # complete config: no error
 
     incomplete = cfg.copy()
     OmegaConf.set_struct(incomplete, False)
@@ -180,7 +180,7 @@ def test_missing_config_key_is_reported_by_name(config_factory) -> None:
 
 
 def test_declared_keys_match_the_shipped_config(config_factory) -> None:
-    """Garde-fou : toute cle declaree requise doit exister dans le YAML livre."""
+    """Safeguard: every key declared as required must exist in the shipped YAML."""
     from insectpose.approaches.yolo_pooled import YoloPooledApproach as A
 
     cfg = config_factory(["approach=yolo_pooled"])

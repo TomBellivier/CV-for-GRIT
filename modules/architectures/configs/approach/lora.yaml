@@ -1,35 +1,35 @@
 # @package _global_
-# Approche D : adaptateurs LoRA sur un YOLO-pose pre-entraine (ADR-0025).
+# Approach D: LoRA adapters on a pre-trained YOLO-pose (ADR-0025).
 approach:
   name: lora
   _target_: insectpose.approaches.lora.LoraApproach
 
-  # ADR-0033 : yolo26n est le modele de base FIGE des six approches. Une taille
-  # differente changerait la capacite du reseau, et la comparaison porterait alors sur
-  # elle plutot que sur la methode. Pour comparer des poids de depart (etude annexe,
-  # hors tableau principal) :
+  # ADR-0033: yolo26n is the FROZEN base model of the six approaches. A different size
+  # would change the capacity of the network, and the comparison would then be about it
+  # rather than about the method. To compare starting weights (side study, outside the
+  # main table):
   #   python -m insectpose.cli train experiment=exp_a_yolo_pooled \
   #       approach.weights=yolo11n-pose.pt tag=yolo11n
-  # Le `tag` est OBLIGATOIRE : sans lui, les deux variantes seraient distinguees par
-  # leur variant_hash mais porteraient la meme etiquette dans les figures.
+  # The `tag` is MANDATORY: without it, the two variants would be told apart by their
+  # variant_hash but would carry the same label in the figures.
   weights: yolo26n-pose.pt
   prunable: false
 
   lora:
-    r: 8                        # rang des adaptateurs
-    # ADR-0031 : alpha n'est PAS cherche separement. La litterature converge : alpha=2r
-    # est crucial aux rangs eleves, et le prefacteur alpha/r rend le taux d'apprentissage
-    # optimal quasi independant du rang. Chercher alpha en plus de r explorerait une
-    # redondance et gaspillerait une dimension du budget.
-    alpha_ratio: 2.0            # alpha = alpha_ratio x r, calcule a l'execution
-    alpha: null                 # renseigne => ecrase le ratio (etude annexe)
+    r: 8                        # rank of the adapters
+    # ADR-0031: alpha is NOT searched separately. The literature converges: alpha=2r is
+    # crucial at high ranks, and the alpha/r prefactor makes the optimal learning rate
+    # almost independent of the rank. Searching alpha on top of r would explore a
+    # redundancy and waste a dimension of the budget.
+    alpha_ratio: 2.0            # alpha = alpha_ratio x r, computed at run time
+    alpha: null                 # set => overrides the ratio (side study)
     dropout: 0.0
-    # Nombre de blocs, en fin de cou, recevant les adaptateurs. Les index sont calcules
-    # depuis la structure du modele : changer de taille (n/s/m/l) ne casse rien.
+    # Number of blocks, at the end of the neck, receiving the adapters. The indices are
+    # computed from the structure of the model: changing its size (n/s/m/l) breaks nothing.
     neck_blocks: 3
-    # ADR-0025 : les tetes restent entrainables, tout le reste est gele. C'est LA
-    # variable cachee des comparaisons LoRA : le manifeste enregistre le nombre exact
-    # de parametres entrainables, sans quoi "LoRA rang 8" ne veut rien dire.
+    # ADR-0025: the heads stay trainable, everything else is frozen. It is THE hidden
+    # variable of LoRA comparisons: the manifest records the exact number of trainable
+    # parameters, without which "LoRA rank 8" means nothing.
     train_head: true
 
   # --- inference ---
@@ -40,7 +40,7 @@ approach:
   predict_chunk_size: 16
 
   # --- optimisation ---
-  # Peu de parametres entraines : un pas plus grand qu'en entrainement complet est usuel.
+  # Few trained parameters: a larger step than in full training is usual.
   optimizer: auto
   lr0: 0.001
   lrf: 0.01
@@ -62,12 +62,12 @@ approach:
   hsv_s: 0.7
   hsv_v: 0.4
 
-  # ADR-0031 : QUATRE hyperparametres, budget identique aux autres approches.
-  # `lora.r` fixe la capacite de l'adaptateur, `neck_blocks` son etendue, et `lr0` reste
-  # le levier dominant — la litterature recommande de balayer le taux d'apprentissage en
-  # retenant la plus haute valeur qui reste stable. Plage relevee par rapport au socle :
-  # le taux optimal en LoRA est typiquement bien superieur a celui d'un entrainement
-  # complet, a nombre de parametres entraines bien moindre.
+  # ADR-0031: FOUR hyperparameters, budget identical to the other approaches.
+  # `lora.r` sets the capacity of the adapter, `neck_blocks` its extent, and `lr0` stays
+  # the dominant lever — the literature recommends sweeping the learning rate and keeping
+  # the highest value that stays stable. Range raised compared with the base: the optimal
+  # rate in LoRA is typically well above that of a full training, with far fewer trained
+  # parameters.
   search_space:
     lr0: {type: float, low: 1.0e-4, high: 1.0e-1, log: true}
     lora.r: {type: categorical, choices: [4, 8, 16, 32]}

@@ -1,11 +1,11 @@
-"""Compare tous les modeles entraines et produit les heatmaps et figures de cout.
+"""Compare every trained model and produce the heatmaps and cost figures.
 
-Ce script n'est qu'une interface : toute la logique vit dans
-`insectpose.reporting.compare` et `insectpose.reporting.figures`, donc elle est testee
-et reutilisable ailleurs (notebook, autre script). Il exige que `cli report` ait deja
-tourne, puisqu'il lit `results/master.parquet` sans le regenerer.
+This script is only an interface: all the logic lives in `insectpose.reporting.compare`
+and `insectpose.reporting.figures`, so it is tested and reusable elsewhere (notebook,
+other script). It requires `cli report` to have run already, since it reads
+`results/master.parquet` without regenerating it.
 
-Exemples
+Examples
 --------
 python scripts/compare_models.py
 python scripts/compare_models.py --tags surface_f0 --out-dir results/comparison_surface
@@ -30,48 +30,48 @@ log = get_logger("compare_models")
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--root", default=".", help="Racine du projet.")
+    parser.add_argument("--root", default=".", help="Project root.")
     parser.add_argument("--results", default=str(POSE_RESULTS_DIR),
-                        help="Dossier des analyses du module, ou `report` a ecrit "
-                             "master.parquet (defaut : <depot>/results/pose).")
+                        help="Analysis folder of the module, where `report` wrote "
+                             "master.parquet (default: <repo>/results/pose).")
     parser.add_argument("--out-dir", default=None,
-                        help="Repertoire de sortie (defaut : results/comparison).")
+                        help="Output directory (default: results/comparison).")
     parser.add_argument("--split", default="test", choices=["train", "val", "test"])
     parser.add_argument("--approaches", nargs="*", default=[],
-                        help="Ne garder que ces approches.")
-    parser.add_argument("--tags", nargs="*", default=[], help="Ne garder que ces etiquettes.")
+                        help="Keep only these approaches.")
+    parser.add_argument("--tags", nargs="*", default=[], help="Keep only these tags.")
     parser.add_argument("--data-scopes", nargs="*", default=[],
-                        help="Ne garder que ces perimetres de donnees (pooled, coleoptera...).")
+                        help="Keep only these data scopes (pooled, coleoptera...).")
     parser.add_argument("--split-ids", nargs="*", default=[],
-                        help="Ne garder que ces decoupages.")
-    parser.add_argument("--run-ids", nargs="*", default=[], help="Ne garder que ces runs.")
+                        help="Keep only these splits.")
+    parser.add_argument("--run-ids", nargs="*", default=[], help="Keep only these runs.")
     parser.add_argument("--exclude-keypoints", nargs="*", default=[],
-                        help="Motifs de keypoints a exclure des heatmaps par point "
-                             "(ex. leg hindwing). Ajoute une ligne MEAN (retained).")
+                        help="Keypoint patterns to exclude from the per-point heatmaps "
+                             "(e.g. leg hindwing). Adds a MEAN (retained) row.")
     parser.add_argument("--metrics", nargs="*", default=[],
-                        help="Ne tracer que ces metriques (defaut : toutes).")
+                        help="Plot only these metrics (default: all).")
     parser.add_argument("--label-by", nargs="*", default=["approach", "tag"],
-                        help="Champs composant l'etiquette de chaque modele.")
+                        help="Fields making up the label of each model.")
     parser.add_argument("--no-per-dataset-keypoints", action="store_true",
-                        help="Une seule heatmap keypoints, tous datasets confondus.")
+                        help="A single keypoint heatmap, all datasets together.")
     parser.add_argument("--cost-metric", default="oks_ap",
-                        help="Metrique portee en ordonnee des figures de cout.")
+                        help="Metric on the y axis of the cost figures.")
     parser.add_argument("--no-cost-figures", action="store_true",
-                        help="Ne pas produire les figures performance vs cout.")
+                        help="Do not produce the performance vs cost figures.")
     parser.add_argument("--dpi", type=int, default=150)
     return parser.parse_args()
 
 
 def write_cost_figures(paths: ProjectPaths, selection: CompareFilter, out_dir: Path,
                        metric: str, dpi: int) -> list[Path]:
-    """Figures performance vs cout, sur le sous-ensemble filtre.
+    """Performance vs cost figures, on the filtered subset.
 
-    Deux axes, car aucun ne suffit seul : le temps d'entrainement separe reellement les
-    approches, tandis que le nombre de parametres specialises isole le cout de la
-    specialisation par groupe. Le temps d'INFERENCE, lui, ne discrimine pas — un modele
-    LoRA fusionne fait le meme forward qu'un modele entraine entierement.
+    Two axes, because none is enough on its own: the training time really separates the
+    approaches, while the number of specialised parameters isolates the cost of the
+    per-group specialisation. The INFERENCE time does not discriminate — a merged LoRA
+    model runs the same forward pass as a fully trained model.
 
-    Effet de bord : ecrit dans `out_dir`.
+    Side effect: writes into `out_dir`.
     """
     from insectpose.reporting.figures import (
         fig_performance_vs_specialisation,
@@ -107,12 +107,12 @@ def main() -> None:
     )
 
     if not args.no_cost_figures:
-        # `--metrics` filtre les heatmaps ; la metrique de cout est independante, sinon
-        # restreindre les heatmaps supprimerait aussi les figures de cout.
+        # `--metrics` filters the heatmaps; the cost metric is independent, otherwise
+        # restricting the heatmaps would also remove the cost figures.
         cost = write_cost_figures(paths, selection, out_dir, args.cost_metric, args.dpi)
         if not cost:
-            log.info("Figures de cout non produites : metrique '%s' absente des runs "
-                     "selectionnes, ou manifestes manquants.", args.cost_metric)
+            log.info("Cost figures not produced: metric '%s' missing from the selected "
+                     "runs, or missing manifests.", args.cost_metric)
         figures.extend(cost)
 
     for path in figures:

@@ -1,7 +1,7 @@
-"""Contexte d'evaluation partage par toutes les metriques.
+"""Evaluation context shared by every metric.
 
-L'evaluateur ne connait ni l'approche, ni le framework qui a produit les predictions :
-il ne voit que des DataFrames conformes aux contrats 1 et 3 (§7.1).
+The evaluator knows neither the approach nor the framework that produced the
+predictions: it only sees DataFrames complying with contracts 1 and 3 (§7.1).
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from insectpose.evaluation.matching import ImagePairs
 
 @dataclass
 class EvalBundle:
-    """Tout ce dont une metrique a besoin, et rien de plus."""
+    """Everything a metric needs, and nothing more."""
 
     gt: pd.DataFrame
     pred: pd.DataFrame
@@ -29,7 +29,7 @@ class EvalBundle:
     records: list[dict[str, Any]] = field(default_factory=list)
 
     def scopes(self) -> Iterator[tuple[str, list[ImagePairs]]]:
-        """Perimetres d'agregation : overall puis dataset:<nom> (§7.4)."""
+        """Aggregation scopes: overall then dataset:<name> (§7.4)."""
         if bool(self.cfg.scopes.overall):
             yield "overall", self.pairs
         if bool(self.cfg.scopes.per_dataset):
@@ -38,14 +38,14 @@ class EvalBundle:
                 yield f"dataset:{dataset}", [p for p in self.pairs if p.dataset == dataset]
 
     def n_gt(self, pairs: list[ImagePairs]) -> int:
-        """Nombre d'instances GT d'un perimetre (denominateur des metriques)."""
+        """Number of GT instances of a scope (denominator of the metrics)."""
         return int(sum(p.n_gt for p in pairs))
 
     def matched_instances(self, pairs: list[ImagePairs] | None = None) -> pd.DataFrame:
-        """Couples (instance GT, prediction) apparies, au seuil d'appariement configure.
+        """Matched (GT instance, prediction) pairs, at the configured matching threshold.
 
-        Point d'entree unique des metriques qui ont besoin des paires : elles ne
-        refont jamais leur propre appariement (§7.3).
+        Single entry point of the metrics that need the pairs: they never redo their own
+        matching (§7.3).
         """
         from insectpose.evaluation.matching import assign_greedy
 
@@ -72,18 +72,18 @@ class EvalBundle:
         )
 
     def bbox_sources(self) -> set[str]:
-        """Origines des bboxes presentes dans les predictions."""
+        """Origins of the bboxes present in the predictions."""
         return set(self.pred["bbox_source"].unique()) if len(self.pred) else set()
 
     def gt_array(self, key: str, rows: np.ndarray) -> np.ndarray:
-        """Extrait une colonne de listes du GT sous forme de tableau empile."""
+        """Extract a list column of the GT as a stacked array."""
         return np.stack(self.gt.loc[rows, key].map(lambda v: np.asarray(v, float)).to_numpy())
 
     def pred_array(self, key: str, rows: np.ndarray) -> np.ndarray:
-        """Extrait une colonne de listes des predictions sous forme de tableau empile."""
+        """Extract a list column of the predictions as a stacked array."""
         return np.stack(self.pred.loc[rows, key].map(lambda v: np.asarray(v, float)).to_numpy())
 
 
 def record(scope: str, metric: str, value: float, n: int) -> dict[str, Any]:
-    """Cree une ligne du contrat 4 (format long, jamais large)."""
+    """Create a row of contract 4 (long format, never wide)."""
     return {"scope": scope, "metric": metric, "value": float(value), "n": int(n)}

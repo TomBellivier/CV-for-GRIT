@@ -15,6 +15,9 @@ repo_root/
 ├── pipeline/
 │   ├── process_folder.py        # run this
 │   └── processing/               # the package (see below)
+├── modules/
+│   ├── ruler_detection/          # ruler / Fourier detector (single copy, imported by scale.py)
+│   └── scale_bar_detection/      # scale-bar detector + OCR (single copy, imported by scale.py)
 ├── retained_models/              # EVERY model this pipeline loads
 │   ├── pose/
 │   │   └── <run_id>/best.pt      # the pose ensemble: EVERY *.pt here is used
@@ -24,8 +27,8 @@ repo_root/
 │       ├── rf_related_*.joblib   # measurement-validity classifiers
 │       └── metrics.csv           # their thresholds
 ├── images_to_process/            # the images you want to measure
-└── datasets/                     # standard YOLO datasets (for train/val columns)
-    └── <dataset>/images/{train,val}/...
+└── all_images/full databases/    # image database, one folder per insect group:
+    └── <group>/...               #   the group of each image is looked up here
 ```
 
 `retained_models/` is filled by the modules under `modules/` (a pose training run
@@ -44,16 +47,31 @@ pipeline never reads a model from inside `modules/`. See
 # LOCAL folder (default)
 python process_folder.py --source folder --input images_to_process
 
-# HUGGING FACE dataset, streamed into RAM, 16 parallel workers
-python process_folder.py --source hf --dataset TomBellivier/all_images --workers 16
+# HUGGING FACE dataset, streamed into RAM (workers sized to the machine)
+python process_folder.py --source hf --dataset TomBellivier/all_images
 
 # only sub-folders 1 and 2 of the dataset
 python process_folder.py --source hf --dataset TomBellivier/all_images --hf-folders 1 2
 ```
 
 Common options: `--output results.csv`, `--models <folder or .pt>` (another ensemble),
-`--workers 16`, `--buffer 32`, `--torch-threads N` (compute threads per worker),
+`--workers N`, `--buffer N`, `--torch-threads N` (force the automatic sizing, see below),
 `--hf-token` (or env `HF_TOKEN`) for private repos.
+
+Two steps are optional:
+
+- `--scale auto|scale_bar|ruler|none` — scale extraction: scale bar then ruler (`auto`),
+  one of them only, or none. With `none`, no detector runs, the millimetre columns stay
+  empty, the scale confidence is empty ("not computed") and `scale_method` is
+  `disabled`; the scale then flags no image for review. Default: `config.USE_SCALE_BAR`
+  / `config.USE_RULER_FALLBACK`.
+- `--no-measurement-classifier` — no measurement-validity classifier and no
+  `<group>_one_hot` / validity columns. Default: `config.RUN_MEASUREMENT_CLASSIFIER`.
+
+```bash
+# pose and pixel measurements only
+python process_folder.py --input images_to_process --scale none --no-measurement-classifier
+```
 
 Dependencies: `ultralytics`, `opencv-python`, `easyocr`, `numpy`, `scipy`,
 `pillow`, and `huggingface_hub` (only for `--source hf`).
@@ -74,10 +92,23 @@ the exact same measurement code:
   NumPy/SciPy/PyTorch release the GIL during heavy compute, and a thread blocked
   on a download lets another thread compute.
 - **`worker.py`** gives each thread its own model copies (a single Ultralytics
-  model is not safe to call from several threads at once) and splits the CPU
-  cores across workers (`cpus // workers`) so the 16 CPUs are used without
-  oversubscription. Lower `--workers` if RAM is tight (fewer model copies);
-  raise it to overlap more downloads/inferences.
+  model is not safe to call from several threads at once), on the device the
+  plan hands it.
+- **`hardware.py`** sizes the run to the machine, once, at start-up (the plan is
+  printed on the `Hardware` line):
+  - **device**: every CUDA GPU (workers take them in turn), else the Apple GPU,
+    else the CPU (`config.DEVICE`); FP16 on CUDA (`config.HALF_PRECISION_ON_GPU`);
+    EasyOCR runs on the GPU when there is one;
+  - **workers**: with a GPU, `config.WORKERS_PER_GPU` per GPU (never more than
+    the CPUs); CPU only, one per `config.CPU_THREADS_PER_WORKER` cores (twice as
+    many for a Hugging Face source). Always capped so that every worker's copy
+    of the models fits in `config.MEMORY_BUDGET_FRACTION` of the free RAM / VRAM;
+  - **threads**: PyTorch/OpenCV compute threads = CPUs // workers, so the workers
+    share the cores instead of each grabbing all of them;
+  - **buffer**: 2 × workers images in flight.
+
+  On a single CPU this gives 1 worker × 1 thread; `--workers`, `--buffer` and
+  `--torch-threads` (or `config.WORKERS`) force a value.
 
 The pixel/scale pipeline itself now works on an **in-memory image** (a decoded
 BGR array) rather than a file path, which is what makes disk-free HF streaming
@@ -93,14 +124,12 @@ possible.
 | `pose_inference.py` | Load the pose ensemble, match the instance across models, return mean + std keypoints. |
 | `confidence.py` | **All confidence formulas** (see below). |
 | `tta.py` | Test-time augmentation for the TTA confidence signal. |
-| `scale_bar_detection_utils.py` | Scale-bar detector (adapted from your file). |
-| `ruler_detection.py` | Ruler / Fourier detector (adapted from your file). |
 | `scale.py` | Scale-bar → ruler fallback, returns scale + confidence. |
-| `dataset_membership.py` | Train/val membership by exact file name. |
 | `pipeline.py` | The per-image pipeline, operating on an in-memory BGR array. |
 | `image_source.py` | Local folder **or** Hugging Face dataset, unified. |
 | `parallel.py` | Bounded, multi-thread, as-completed task runner. |
-| `worker.py` | Per-thread model copies + CPU-thread balancing. |
+| `worker.py` | Per-thread model copies, on the device the plan hands out. |
+| `hardware.py` | Sizes the run to the machine: devices, workers, threads, buffer. |
 | `csv_writer.py` | Assemble and write the CSV. |
 
 ## Confidence methods (implemented in `confidence.py`)
@@ -142,19 +171,21 @@ deviation over the ensemble, 0 with a single model) — 5 × NUM_KEYPOINTS colum
 `n_pose_models` says how many models were averaged for the row: a model whose
 instance does not overlap the reference one (`config.ENSEMBLE_MIN_IOU`) is left out.
 
-`analyze_results.py` uses these, together with the YOLO **label files**
-(`datasets/<dataset>/labels/<split>/<stem>.txt`), to measure real error:
-it rebuilds the ground-truth keypoints/measurements (de-normalised with each
-image's size, read from disk or from the `image_width/height` columns) and
-computes, among others, OKS vs overall confidence, per-keypoint error-vs-
+`analyze_results.py` uses these, together with the annotated keypoints of
+`annotation_data/annotation_data.csv` (`config.ANNOTATION_DATA_CSV`), to measure
+real error on the images of the CSV that are annotated: it rebuilds the
+ground-truth keypoints/measurements (rescaled when the `image_width/height`
+columns show the image was processed at another size) and computes, among others, OKS vs overall confidence, per-keypoint error-vs-
 confidence correlation and heatmap, per-measurement error, and needs-review vs
 error, plus the per-keypoint disagreement of the ensemble. Run
 `python analyze_results.py` (reads `config.OUTPUT_CSV`, writes to
 `results/pipeline/<CSV name>/` at the repository root; `--input`/`--output-dir`
-override them, `--no-gt` skips the label-based part). OKS uses an uncalibrated falloff `--oks-kappa`
+override them, `--no-gt` skips the ground-truth part). These errors are
+optimistic: the pose models were trained on the same annotations. The
+cross-validated score is `cv_estimate` in `retained_models/pose/ensemble.json`. OKS uses an uncalibrated falloff `--oks-kappa`
 (default 0.05) since the bee keypoints have no standard COCO sigmas.
 
-## Bugs fixed in the adapted detector files
+## Bugs fixed in the detector files (modules/ruler_detection, modules/scale_bar_detection)
 
 - **Scale bar:** `_ensure_ocr_reader()` was called with no argument although it
   required one → replaced by a cached module-level reader.
@@ -176,4 +207,5 @@ where the quadrature combination for millimetre errors
 
 - `model.names` printed for the pose model matches `KEYPOINT_NAMES` ordering.
 - `model.names` printed for the scale-bar model matches the class ids in config.
-- The train/val counts printed at startup look right for your datasets.
+- The `[group] <group>: N image(s) indexed` lines printed at startup look right for your
+  image database.

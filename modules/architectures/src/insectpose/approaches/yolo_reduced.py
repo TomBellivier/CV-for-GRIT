@@ -1,14 +1,13 @@
-"""Approche F : YOLO-pose poule prive de certains keypoints (ADR-0027).
+"""Approach F: pooled YOLO-pose deprived of some keypoints (ADR-0027).
 
-Variante de l'approche A ou les pattes et les ailes posterieures sont **retirees des
-labels d'entrainement** (`vis = 0`). Question posee : la capacite du reseau, liberee
-des points les plus difficiles et les plus mobiles, ameliore-t-elle le positionnement
-des autres ?
+Variant of approach A where the legs and hind wings are **removed from the training
+labels** (`vis = 0`). Question asked: does the capacity of the network, freed from the
+hardest and most mobile points, improve the placement of the others?
 
-Precaution de lecture, essentielle : la verite terrain contient toujours ces points, et
-l'evaluation les compte. Les metriques `overall` de F sont donc **mecaniquement moins
-bonnes** que celles de A et ne sont pas comparables. La comparaison valide se fait sur
-les scopes `keypoint:*` des points CONSERVES :
+Essential reading precaution: the ground truth still contains these points, and the
+evaluation counts them. The `overall` metrics of F are therefore **mechanically worse**
+than A's and are not comparable. The valid comparison is on the `keypoint:*` scopes of
+the KEPT points:
 
     python scripts/compare_models.py --exclude-keypoints leg hindwing
 """
@@ -28,16 +27,16 @@ log = get_logger("yolo_reduced")
 
 
 def dropped_indices(schema: KeypointSchema, patterns: list[str]) -> list[int]:
-    """Indices des keypoints dont le nom contient l'un des motifs. Fonction pure."""
+    """Indices of the keypoints whose name contains one of the patterns. Pure function."""
     return [i for i, name in enumerate(schema.names)
             if any(str(p).lower() in name.lower() for p in patterns)]
 
 
 def mask_keypoints(annotations: Any, indices: list[int]) -> Any:
-    """Copie des annotations avec `vis = 0` sur les indices donnes.
+    """Copy of the annotations with `vis = 0` on the given indices.
 
-    Les coordonnees sont conservees telles quelles : c'est la visibilite qui pilote la
-    supervision, et un point a vis=0 est masque dans la loss, jamais appris a zero.
+    The coordinates are kept as they are: the visibility drives the supervision, and a
+    point with vis=0 is masked in the loss, never learnt as zero.
     """
     if not indices:
         return annotations
@@ -50,7 +49,7 @@ def mask_keypoints(annotations: Any, indices: list[int]) -> Any:
 
 @register_approach("yolo_pooled_reduced")
 class YoloPooledReducedApproach(YoloPooledApproach):
-    """YOLO-pose poule entraine sans supervision sur un sous-ensemble de keypoints."""
+    """Pooled YOLO-pose trained without supervision on a subset of the keypoints."""
 
     REQUIRED_APPROACH_KEYS = (
         "weights", "max_det", "conf", "iou", "inference_precision", "predict_chunk_size",
@@ -58,21 +57,21 @@ class YoloPooledReducedApproach(YoloPooledApproach):
     )
 
     def _prepare_data(self, data: FoldData, ctx: RunContext) -> FoldData:
-        """Masque les keypoints exclus dans train et val, jamais dans test.
+        """Mask the excluded keypoints in train and val, never in test.
 
-        Le test reste intact : c'est la verite terrain de reference, commune a toutes
-        les approches. Masquer aussi le test reviendrait a changer la metrique.
+        The test stays intact: it is the reference ground truth, common to every
+        approach. Masking the test as well would amount to changing the metric.
         """
         schema = self._schema(data)
         patterns = [str(p) for p in self.cfg.approach.drop_keypoints]
         indices = dropped_indices(schema, patterns)
         if not indices:
             raise ValueError(
-                f"Aucun keypoint ne correspond a {patterns} dans le schema "
-                f"'{schema.name}' : l'approche serait identique a yolo_pooled."
+                f"No keypoint matches {patterns} in the schema "
+                f"'{schema.name}': the approach would be identical to yolo_pooled."
             )
         names = [schema.names[i] for i in indices]
-        log.info("%d keypoint(s) retire(s) des labels d'entrainement : %s",
+        log.info("%d keypoint(s) removed from the training labels: %s",
                  len(indices), ", ".join(names))
         ctx.extra["dropped_keypoints"] = names
         ctx.extra["n_supervised_keypoints"] = schema.n_keypoints - len(indices)

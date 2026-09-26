@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Compare cinq poids de depart sur l'approche A, fold 0.
-# Degrossissage pour trancher ADR-0033 : un seul fold, donc rien de citable.
+# Compare five starting weights on approach A, fold 0.
+# Rough screening to settle ADR-0033: a single fold, so nothing quotable.
 
 set -x
 
@@ -18,9 +18,9 @@ python scripts/compare_models.py \
 
 set +x
 
-# Tableau recapitulatif : les metriques cles plus le temps d'entrainement, qui fait
-# partie de la decision — un gain de 2 points d'OKS pour trois fois le calcul ne se
-# justifie pas forcement, d'autant que le choix vaudra pour les huit approches.
+# Summary table: the key metrics plus the training time, which is part of the decision
+# — a gain of 2 OKS points for three times the compute is not necessarily justified,
+# especially since the choice will apply to the eight approaches.
 python - <<'EOF'
 import pandas as pd
 from insectpose.evaluation.aggregate import final_runs
@@ -30,10 +30,10 @@ m = m[m.tag.astype(str).str.startswith("base_test_")].copy()
 m["model"] = m.tag.str.replace("base_test_", "", regex=False)
 s = m[(m.scope == "overall") & (m.split == "test")]
 
-metriques = ["oks_ap", "pck@0.25_thorax_width", "kpt_coverage",
-             "measurement_mape_median", "latency_ms_per_instance"]
-t = s[s.metric.isin(metriques)].pivot_table(index="model", columns="metric", values="value")
-t = t[[c for c in metriques if c in t.columns]]
+metrics = ["oks_ap", "pck@0.25_thorax_width", "kpt_coverage",
+           "measurement_mape_median", "latency_ms_per_instance"]
+t = s[s.metric.isin(metrics)].pivot_table(index="model", columns="metric", values="value")
+t = t[[c for c in metrics if c in t.columns]]
 t = t.join(s.groupby("model").train_time_s.mean().rename("train_s").round())
 print(t.sort_values("oks_ap", ascending=False).round(4).to_string())
 EOF

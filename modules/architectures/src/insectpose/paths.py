@@ -1,7 +1,7 @@
-"""Construction des chemins du projet (CONVENTIONS.md §2).
+"""Construction of the project paths (CONVENTIONS.md §2).
 
-SEUL module autorise a fabriquer des chemins. Un `.py` qui concatene un chemin en
-dur est un bug. Aucun effet de bord a l'import.
+The ONLY module allowed to build paths. A `.py` that concatenates a hard-coded path
+is a bug. No side effect at import.
 """
 
 from __future__ import annotations
@@ -11,20 +11,20 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-# Definition unique des keypoints, du squelette et des mesures de TOUT le depot :
-# kp_infos.yaml, a sa racine (src/insectpose/paths.py -> parents[4]). Le schema
-# `insect42_v1` et les mesures y sont lus ; `KP_INFOS` le deplace.
+# Single definition of the keypoints, the skeleton and the measurements of the WHOLE
+# repository: kp_infos.yaml, at its root (src/insectpose/paths.py -> parents[4]). The
+# `insect42_v1` schema and the measurements are read from it; `KP_INFOS` moves it.
 KP_INFOS_PATH = Path(os.environ.get("KP_INFOS")
                      or Path(__file__).resolve().parents[4] / "kp_infos.yaml")
 
-# Analyses de ce module dans le dossier `results/` commun du depot (configs/paths.yaml
-# pour la CLI ; ici pour les scripts qui n'ont pas de config Hydra).
+# Analyses of this module in the shared `results/` folder of the repository
+# (configs/paths.yaml for the CLI; here for the scripts that have no Hydra config).
 POSE_RESULTS_DIR = Path(__file__).resolve().parents[4] / "results" / "pose"
 
 
 @dataclass(frozen=True)
 class ProjectPaths:
-    """Racines du projet, resolues en absolu."""
+    """Roots of the project, resolved as absolute paths."""
 
     root: Path
     data: Path
@@ -36,20 +36,20 @@ class ProjectPaths:
     results: Path
     reports: Path
     configs: Path
-    # Racine des modeles retenus, HORS du module (racine du depot) : c'est la seule
-    # sortie que `pipeline/` lit. Voir retained_models/README.md.
+    # Root of the retained models, OUTSIDE the module (repository root): it is the only
+    # output that `pipeline/` reads. See retained_models/README.md.
     retained: Path
 
     @classmethod
     def from_config(cls, cfg: Any) -> ProjectPaths:
-        """Construit les chemins depuis la section `paths` d'une config Hydra."""
+        """Build the paths from the `paths` section of a Hydra config."""
         p = cfg.paths if hasattr(cfg, "paths") else cfg
         root = Path(str(p.root)).resolve()
 
         def sub(key: str, default: str) -> Path:
             value = getattr(p, key, None)
-            # `.resolve()` des deux cotes : un defaut peut remonter hors de la racine
-            # (retained), et un chemin non normalise casserait les comparaisons.
+            # `.resolve()` on both sides: a default may go up outside the root
+            # (retained), and a non-normalised path would break the comparisons.
             return Path(str(value)).resolve() if value is not None else (root / default).resolve()
 
         return cls(
@@ -68,7 +68,7 @@ class ProjectPaths:
 
     @classmethod
     def default(cls, root: str | Path = ".") -> ProjectPaths:
-        """Chemins standards relatifs a une racine donnee."""
+        """Standard paths relative to a given root."""
         r = Path(root).resolve()
         return cls(
             root=r, data=r / "data", raw=r / "data/raw", interim=r / "data/interim",
@@ -77,62 +77,62 @@ class ProjectPaths:
             retained=(r / "../../retained_models").resolve(),
         )
 
-    # --- artefacts ---------------------------------------------------------
+    # --- artefacts -----------------------------------------------------------------
     def annotations(self, dataset: str) -> Path:
-        """Contrat 1 : annotations canoniques d'un dataset."""
+        """Contract 1: canonical annotations of a dataset."""
         return self.processed / dataset / "annotations.parquet"
 
     def raw_dir(self, dataset: str, subdir: str | None = None) -> Path:
-        """Repertoire source IMMUABLE d'un dataset."""
+        """IMMUTABLE source folder of a dataset."""
         return self.raw / (subdir or dataset)
 
     def split_file(self, split_id: str) -> Path:
-        """Contrat 2 : table des folds."""
+        """Contract 2: fold table."""
         return self.splits / f"{split_id}.parquet"
 
     def split_meta(self, split_id: str) -> Path:
-        """Metadonnees du decoupage (seed, strategie, content_hash)."""
+        """Metadata of the split (seed, strategy, content_hash)."""
         return self.splits / f"{split_id}.json"
 
     def run_dir(self, run_id: str) -> Path:
-        """Racine des artefacts d'un run. SEULE zone d'ecriture d'une approche."""
+        """Root of the artefacts of a run. The ONLY place an approach writes to."""
         return self.runs / run_id
 
     def manifest(self, run_id: str) -> Path:
-        """Contrat 5. Sa presence signale un run complet (§8.2)."""
+        """Contract 5. Its presence marks a complete run (§8.2)."""
         return self.run_dir(run_id) / "manifest.json"
 
     def predictions(self, run_id: str, split: str, fold: int) -> Path:
-        """Contrat 3."""
+        """Contract 3."""
         return self.run_dir(run_id) / "predictions" / f"{split}_fold{fold}.parquet"
 
     def metrics(self, run_id: str) -> Path:
-        """Contrat 4."""
+        """Contract 4."""
         return self.run_dir(run_id) / "metrics.parquet"
 
     def master_results(self) -> Path:
-        """Agregat de tous les runs : unique source des tableaux du rapport (§8.3)."""
+        """Aggregate of every run: the only source of the report tables (§8.4)."""
         return self.results / "master.parquet"
 
     def optuna_storage(self, study_name: str) -> Path:
-        """Base Optuna d'une etude (reprise possible)."""
+        """Optuna database of a study (can be resumed)."""
         return self.runs / "optuna" / f"{study_name}.db"
 
     def keypoint_schema(self, name: str) -> Path:
-        """Fichier de schema de keypoints (§3.1) : kp_infos.yaml, ou configs/keypoints/."""
+        """Keypoint schema file (§3.1): kp_infos.yaml, or configs/keypoints/."""
         from insectpose.data.keypoints import schema_file
 
         return schema_file(name, self.configs)
 
     def retained_model(self, name: str, kind: str = "pose") -> Path:
-        """Dossier d'un modele retenu, lu directement par `pipeline/`.
+        """Folder of a retained model, read directly by `pipeline/`.
 
-        `kind` est la famille de modeles ('pose' ici ; les autres familles de
-        retained_models/ sont produites par d'autres modules).
+        `kind` is the model family ('pose' here; the other families of
+        retained_models/ are produced by other modules).
         """
         return self.retained / kind / name
 
     def ensure_writable_dirs(self) -> None:
-        """Cree les repertoires d'ecriture autorises. Ne touche jamais a `raw`."""
+        """Create the folders the code may write to. Never touches `raw`."""
         for d in (self.interim, self.processed, self.splits, self.runs, self.results, self.reports):
             d.mkdir(parents=True, exist_ok=True)

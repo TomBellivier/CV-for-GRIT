@@ -1,6 +1,6 @@
-"""Callbacks agnostiques du framework : early stopping et report Optuna.
+"""Framework-agnostic callbacks: early stopping and Optuna reporting.
 
-Une approche non elagable declare `prunable: false` dans sa config (§6.3).
+An approach that cannot be pruned declares `prunable: false` in its config (§6.3).
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from typing import Any
 
 @dataclass
 class EarlyStopping:
-    """Arret sur stagnation de la metrique de validation."""
+    """Stop when the validation metric stagnates."""
 
     patience: int = 20
     mode: str = "max"
@@ -21,7 +21,7 @@ class EarlyStopping:
     best_epoch: int = -1
 
     def step(self, value: float, epoch: int) -> bool:
-        """Retourne True s'il faut arreter l'entrainement."""
+        """Return True if the training must stop."""
         improved = (
             self.best is None
             or (self.mode == "max" and value > self.best + self.min_delta)
@@ -36,13 +36,13 @@ class EarlyStopping:
 
 @dataclass
 class OptunaReporter:
-    """Remonte une metrique intermediaire a Optuna et applique l'elagage."""
+    """Report an intermediate metric to Optuna and apply the pruning."""
 
     trial: Any = None
     history: list[float] = field(default_factory=list)
 
     def step(self, value: float, epoch: int) -> None:
-        """Leve optuna.TrialPruned si le trial doit etre elague."""
+        """Raise optuna.TrialPruned if the trial must be pruned."""
         self.history.append(float(value))
         if self.trial is None:
             return

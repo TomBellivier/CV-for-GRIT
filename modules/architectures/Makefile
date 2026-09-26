@@ -33,6 +33,6 @@ tune:
 report:
 	$(PY) -m insectpose.cli report $(ARGS)
 
-# Supprime uniquement les runs incomplets (sans manifeste), cf. CONVENTIONS.md 8.2
+# Only deletes the incomplete runs (without a manifest), see CONVENTIONS.md 8.2
 clean-runs:
 	$(PY) -c "from insectpose.paths import ProjectPaths; from insectpose.utils.io import purge_incomplete_runs; print(purge_incomplete_runs(ProjectPaths.default().runs))"

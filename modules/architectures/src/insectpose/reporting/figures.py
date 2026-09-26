@@ -1,11 +1,10 @@
-"""Figures du rapport (CONVENTIONS.md §8.3).
+"""Report figures (CONVENTIONS.md §8.4).
 
-Toutes les figures sont produites a partir des ARTEFACTS : `results/master.parquet`,
-les rapports de couverture, les predictions, les manifestes et les journaux
-d'entrainement. Aucune ne recalcule une metrique — sans quoi deux chiffres du meme
-rapport pourraient diverger.
+Every figure is produced from the ARTEFACTS: `results/master.parquet`, the coverage
+reports, the predictions, the manifests and the training logs. None recomputes a
+metric — otherwise two numbers of the same report could diverge.
 
-Les runs d'HPO sont exclus par `final_runs` : ce sont des essais, pas des resultats.
+HPO runs are excluded by `final_runs`: they are attempts, not results.
 """
 
 from __future__ import annotations
@@ -15,7 +14,7 @@ from typing import Any
 
 import matplotlib
 
-matplotlib.use("Agg")   # backend sans affichage : le rapport tourne aussi sans X
+matplotlib.use("Agg")   # headless backend: the report also runs without X
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
@@ -30,8 +29,8 @@ from insectpose.utils.logging import get_logger  # noqa: E402
 
 log = get_logger("figures")
 
-# Groupes anatomiques utilises pour le code couleur. L'ordre compte : la premiere
-# regle qui correspond gagne (les regles specifiques avant les generiques).
+# Anatomical groups used for the colour code. The order matters: the first matching
+# rule wins (specific rules before generic ones).
 _GROUP_RULES: tuple[tuple[str, str], ...] = (
     ("eye", "eyes"),
     ("antenna", "antennae"),
@@ -44,10 +43,10 @@ _GROUP_RULES: tuple[tuple[str, str], ...] = (
     ("neck", "head"),
 )
 
-# Couleurs de l'interface d'annotation (Label Studio), pour que les figures et
-# l'outil d'annotation parlent le meme langage visuel. Declarees en **BGR** dans
-# kp_infos.yaml (definition unique du depot), comme dans l'interface : la conversion
-# vers RGB est faite une seule fois, dans `keypoint_color`.
+# Colours of the annotation interface (Label Studio), so that the figures and the
+# annotation tool speak the same visual language. Declared in **BGR** in kp_infos.yaml
+# (single definition of the repository), as in the interface: the conversion to RGB is
+# done once, in `keypoint_color`.
 with KP_INFOS_PATH.open(encoding="utf-8") as _f:
     _KP_INFOS_KEYPOINTS: list[dict[str, Any]] = yaml.safe_load(_f)["keypoints"]
 _KEYPOINT_COLORS_BGR: dict[str, tuple[int, int, int]] = {
@@ -56,16 +55,16 @@ _KEYPOINT_COLORS_BGR: dict[str, tuple[int, int, int]] = {
 
 
 def keypoint_color(name: str) -> tuple[float, float, float]:
-    """Couleur RGB normalisee d'un keypoint, selon la palette de l'annotation.
+    """Normalised RGB colour of a keypoint, following the annotation palette.
 
-    La table est en BGR (convention OpenCV, celle de l'interface) : l'inversion est
-    faite ici, une fois pour toutes. Un point inconnu retombe sur la couleur de son
-    groupe anatomique, ce qui evite un gris uniforme si le schema evolue.
+    The table is in BGR (OpenCV convention, the one of the interface): the inversion is
+    done here, once and for all. An unknown point falls back to the colour of its
+    anatomical group, which avoids a uniform grey if the schema evolves.
     """
     bgr = _KEYPOINT_COLORS_BGR.get(name)
     if bgr is None:
         return matplotlib.colors.to_rgb(group_color(keypoint_group(name)))
-    return tuple(canal / 255 for canal in reversed(bgr))
+    return tuple(channel / 255 for channel in reversed(bgr))
 
 
 _GROUP_COLORS = {
@@ -76,10 +75,10 @@ _GROUP_COLORS = {
 
 
 def keypoint_group(name: str, with_side: bool = True) -> str:
-    """Groupe anatomique d'un keypoint, ex. 'right hindwings' ou 'head'.
+    """Anatomical group of a keypoint, e.g. 'right hindwings' or 'head'.
 
-    Les points de l'axe median n'ont pas de cote ; les autres le portent, car une
-    asymetrie gauche/droite est en soi une information de diagnostic.
+    Points of the median axis have no side; the others carry it, because a left/right
+    asymmetry is in itself a diagnostic information.
     """
     lowered = name.lower()
     base = next((group for token, group in _GROUP_RULES if token in lowered), "other")
@@ -93,25 +92,25 @@ def keypoint_group(name: str, with_side: bool = True) -> str:
 
 
 def group_color(group: str) -> str:
-    """Couleur stable d'un groupe anatomique, cote inclus ou non."""
+    """Stable colour of an anatomical group, side included or not."""
     base = group.replace("left ", "").replace("right ", "")
     return _GROUP_COLORS.get(base, _GROUP_COLORS["other"])
 
 
 def _bgr(triplet: tuple[int, int, int]) -> tuple[float, float, float]:
-    """BGR entier (0-255) -> RGB flottant (0-1), le format attendu par matplotlib."""
-    bleu, vert, rouge = triplet
-    return (rouge / 255, vert / 255, bleu / 255)
+    """Integer BGR (0-255) -> float RGB (0-1), the format expected by matplotlib."""
+    blue, green, red = triplet
+    return (red / 255, green / 255, blue / 255)
 
 
 KEYPOINT_COLORS: dict[str, tuple[float, float, float]] = {
-    nom: _bgr(valeur) for nom, valeur in _KEYPOINT_COLORS_BGR.items()
+    name: _bgr(value) for name, value in _KEYPOINT_COLORS_BGR.items()
 }
 
 
 # --- helpers ----------------------------------------------------------------
 def _save(fig: Any, path: Path, dpi: int = 150) -> Path:
-    """Ecrit une figure et la ferme. Effet de bord : cree `path`."""
+    """Write a figure and close it. Side effect: creates `path`."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.tight_layout()
     fig.savefig(path, dpi=dpi)
@@ -121,7 +120,7 @@ def _save(fig: Any, path: Path, dpi: int = 150) -> Path:
 
 def _select(master: pd.DataFrame, metric: str, split: str = "test",
             scope_prefix: str | None = None, scope: str | None = None) -> pd.DataFrame:
-    """Sous-ensemble citable de master.parquet pour une metrique."""
+    """Quotable subset of master.parquet for a metric."""
     data = final_runs(master)
     data = data[(data["metric"] == metric) & (data["split"] == split)]
     if scope is not None:
@@ -132,26 +131,26 @@ def _select(master: pd.DataFrame, metric: str, split: str = "test",
 
 
 def _dataset_of(scope: str) -> str:
-    """Nom du dataset porte par un scope 'dataset:x' ou 'keypoint:x:nom'."""
+    """Name of the dataset carried by a scope 'dataset:x' or 'keypoint:x:name'."""
     parts = str(scope).split(":")
     return parts[1] if len(parts) > 1 else "overall"
 
 
 def available_metrics(master: pd.DataFrame, split: str = "test") -> list[str]:
-    """Metriques scalaires disponibles au perimetre 'overall' ou par dataset."""
+    """Scalar metrics available at the 'overall' scope or per dataset."""
     data = final_runs(master)
     data = data[(data["split"] == split) & (
         (data["scope"] == "overall") | data["scope"].str.startswith("dataset:"))]
     return sorted(data["metric"].unique())
 
 
-# --- 1. une figure par metrique : barres par dataset -------------------------
+# --- 1. one figure per metric: bars per dataset ------------------------------
 def fig_metric_by_dataset(master: pd.DataFrame, metric: str, out_dir: Path,
                           split: str = "test", dpi: int = 150) -> Path | None:
-    """Barres par dataset, groupees par approche, avec ecart-type inter-folds.
+    """Bars per dataset, grouped by approach, with the standard deviation across folds.
 
-    L'ecart-type n'est pas decoratif : sans lui, un ecart de quelques points entre
-    deux approches n'est pas interpretable (§8.3).
+    The standard deviation is not decorative: without it, a gap of a few points between
+    two approaches cannot be interpreted (§8.4).
     """
     data = _select(master, metric, split, scope_prefix="dataset:")
     overall = _select(master, metric, split, scope="overall")
@@ -186,14 +185,14 @@ def fig_metric_by_dataset(master: pd.DataFrame, metric: str, out_dir: Path,
     return _save(fig, out_dir / f"metric_{metric.replace('@', '').replace('/', '_')}.png", dpi)
 
 
-# --- 2. confiance vs erreur par keypoint, un panneau par dataset -------------
+# --- 2. confidence vs error per keypoint, one panel per dataset --------------
 def fig_confidence_vs_error(master: pd.DataFrame, out_dir: Path, split: str = "test",
                             dpi: int = 150) -> Path | None:
-    """Confiance predite vs erreur normalisee, par keypoint, code couleur anatomique.
+    """Predicted confidence vs normalised error, per keypoint, anatomical colour code.
 
-    Un nuage en L (confiance haute et erreur basse) signifie que la confiance est
-    exploitable comme filtre en production ; un nuage sans structure signifie
-    l'inverse, et c'est une information de premier plan pour l'usage reel.
+    An L-shaped cloud (high confidence and low error) means the confidence can be used
+    as a filter in production; a cloud without structure means the opposite, and that
+    is a first-rank information for the real use.
     """
     conf = _select(master, "kpt_conf_mean", split, scope_prefix="keypoint:")
     err = _select(master, "nme", split, scope_prefix="keypoint:")
@@ -236,13 +235,13 @@ def fig_confidence_vs_error(master: pd.DataFrame, out_dir: Path, split: str = "t
     return _save(fig, out_dir / "keypoint_confidence_vs_error.png", dpi)
 
 
-# --- 3. courbes d'apprentissage ---------------------------------------------
+# --- 3. training curves -----------------------------------------------------
 def fig_training_curves(paths: ProjectPaths, master: pd.DataFrame, out_dir: Path,
                         dpi: int = 150) -> Path | None:
-    """Courbes d'apprentissage par epoque, une ligne par run (si le framework en produit).
+    """Training curves per epoch, one line per run (if the framework produces them).
 
-    Ces courbes servent au diagnostic (convergence, surapprentissage) et JAMAIS a la
-    comparaison entre approches : les metriques citables viennent de l'evaluateur (§7.1).
+    These curves are for diagnosis (convergence, overfitting) and NEVER for comparing
+    approaches: the quotable metrics come from the evaluator (§7.1).
     """
     curves: list[pd.DataFrame] = []
     for run_id in sorted(final_runs(master)["run_id"].dropna().unique()):
@@ -258,7 +257,7 @@ def fig_training_curves(paths: ProjectPaths, master: pd.DataFrame, out_dir: Path
         curves.append(frame)
 
     if not curves:
-        log.info("Aucune courbe d'apprentissage : le framework n'en produit pas.")
+        log.info("No training curve: the framework does not produce any.")
         return None
 
     data = pd.concat(curves, ignore_index=True)
@@ -289,13 +288,13 @@ def fig_training_curves(paths: ProjectPaths, master: pd.DataFrame, out_dir: Path
     return _save(fig, out_dir / "training_curves.png", dpi)
 
 
-# --- 4. dispersion inter-folds ----------------------------------------------
+# --- 4. spread across folds -------------------------------------------------
 def fig_fold_boxplot(master: pd.DataFrame, metric: str, out_dir: Path,
                      split: str = "test", dpi: int = 150) -> Path | None:
-    """Boxplot de la metrique par approche, un point par fold.
+    """Boxplot of the metric per approach, one point per fold.
 
-    C'est la figure qui accompagne les tests apparies : elle montre si un ecart de
-    moyenne survit a la variabilite entre folds.
+    This is the figure that goes with the paired tests: it shows whether a gap in the
+    mean survives the variability between folds.
     """
     data = _select(master, metric, split, scope="overall")
     if data.empty:
@@ -315,13 +314,13 @@ def fig_fold_boxplot(master: pd.DataFrame, metric: str, out_dir: Path,
     return _save(fig, out_dir / f"folds_{metric.replace('@', '')}.png", dpi)
 
 
-# --- 5. courbe PCK vs alpha --------------------------------------------------
+# --- 5. PCK vs alpha curve ---------------------------------------------------
 def fig_pck_curve(master: pd.DataFrame, out_dir: Path, split: str = "test",
                   dpi: int = 150) -> Path | None:
-    """PCK en fonction du seuil alpha, une ligne par (approche, dataset).
+    """PCK as a function of the alpha threshold, one line per (approach, dataset).
 
-    Un seuil unique cache la forme de la distribution d'erreur : deux modeles au meme
-    PCK@0.25 peuvent differer nettement aux seuils serres.
+    A single threshold hides the shape of the error distribution: two models with the
+    same PCK@0.25 can differ clearly at tight thresholds.
     """
     data = final_runs(master)
     data = data[data["metric"].str.startswith("pck@") & (data["split"] == split)
@@ -349,9 +348,9 @@ def fig_pck_curve(master: pd.DataFrame, out_dir: Path, split: str = "test",
     return _save(fig, out_dir / "pck_curve.png", dpi)
 
 
-# --- 6. PCK par keypoint vs couverture d'annotation -------------------------
+# --- 6. keypoint PCK vs annotation coverage ----------------------------------
 def _keypoint_pck(master: pd.DataFrame, split: str = "test") -> pd.DataFrame:
-    """PCK moyen par (dataset, keypoint), au seuil de reference."""
+    """Mean PCK per (dataset, keypoint), at the reference threshold."""
     data = final_runs(master)
     data = data[data["scope"].str.startswith("keypoint:") & (data["split"] == split)
                 & data["metric"].str.startswith("pck@")]
@@ -365,10 +364,10 @@ def _keypoint_pck(master: pd.DataFrame, split: str = "test") -> pd.DataFrame:
 
 def fig_pck_vs_coverage(master: pd.DataFrame, coverage: pd.DataFrame, out_dir: Path,
                         split: str = "test", dpi: int = 150) -> Path | None:
-    """PCK par keypoint vs taux d'annotation de ce keypoint dans le dataset.
+    """PCK per keypoint vs annotation rate of that keypoint in the dataset.
 
-    Evite la conclusion erronee "ce point est mal predit" alors qu'il est simplement
-    rarement annote (ADR-0016).
+    Avoids the wrong conclusion "this point is poorly predicted" when it is simply
+    rarely annotated (ADR-0016).
     """
     pck = _keypoint_pck(master, split)
     if pck.empty or coverage.empty:
@@ -393,14 +392,14 @@ def fig_pck_vs_coverage(master: pd.DataFrame, coverage: pd.DataFrame, out_dir: P
     return _save(fig, out_dir / "pck_vs_coverage.png", dpi)
 
 
-# --- 7. PCK par keypoint vs difficulte experte ------------------------------
+# --- 7. keypoint PCK vs expert difficulty ------------------------------------
 def fig_pck_vs_difficulty(master: pd.DataFrame, schema: KeypointSchema, out_dir: Path,
                           split: str = "test", dpi: int = 150) -> Path | None:
-    """PCK par keypoint vs difficulte declaree par l'expert.
+    """PCK per keypoint vs the difficulty declared by the expert.
 
-    Cette figure valide (ou non) l'echelle de difficulte qui fonde les sigmas OKS
-    (ADR-0007) : une correlation faible signifierait que la metrique primaire elle-meme
-    est mal calibree.
+    This figure validates (or not) the difficulty scale on which the OKS sigmas are
+    based (ADR-0007): a weak correlation would mean that the primary metric itself is
+    badly calibrated.
     """
     pck = _keypoint_pck(master, split)
     if pck.empty:
@@ -429,14 +428,14 @@ def fig_pck_vs_difficulty(master: pd.DataFrame, schema: KeypointSchema, out_dir:
     return _save(fig, out_dir / "pck_vs_difficulty.png", dpi)
 
 
-# --- 8. symetrie gauche/droite des mesures ----------------------------------
+# --- 8. left/right symmetry of the measurements ------------------------------
 def fig_symmetry_scatter(paths: ProjectPaths, master: pd.DataFrame, cfg: Any,
                          out_dir: Path, split: str = "test", dpi: int = 150
                          ) -> Path | None:
-    """Mesure gauche vs mesure droite predite, un panneau par paire symetrique.
+    """Predicted left measurement vs right measurement, one panel per symmetric pair.
 
-    Un modele coherent aligne les points sur la diagonale. L'ecart a la diagonale se
-    lit sans verite terrain : c'est un controle qualite utilisable en production.
+    A consistent model aligns the points on the diagonal. The distance to the diagonal
+    is read without ground truth: it is a quality check usable in production.
     """
     spec = load_measurements(Path(str(cfg.eval.measurements.file)))
     if not spec.symmetric_pairs:
@@ -491,74 +490,76 @@ def fig_symmetry_scatter(paths: ProjectPaths, master: pd.DataFrame, cfg: Any,
     return _save(fig, out_dir / "symmetry_pairs.png", dpi)
 
 
-# --- 9. performance vs cout -------------------------------------------------
+# --- 9. performance vs cost --------------------------------------------------
 def _higher_is_better(metric: str) -> bool:
-    """Sens de la metrique. Le front de Pareto s'inverserait sinon."""
+    """Direction of the metric. The Pareto front would be reversed otherwise."""
     from insectpose.reporting.compare import LOWER_IS_BETTER
 
     return metric not in LOWER_IS_BETTER
-def _run_costs(paths: ProjectPaths, master: pd.DataFrame) -> pd.DataFrame:
-    """Couts par run, lus dans les MANIFESTES (§7.2).
 
-    `master.parquet` ne porte pas tous les couts : les champs propres a une approche
-    (`n_models`, `n_adapter_sets`, ratios de parametres entrainables) vivent dans les
-    manifestes. On les lit ici plutot que de les recalculer.
+
+def _run_costs(paths: ProjectPaths, master: pd.DataFrame) -> pd.DataFrame:
+    """Costs per run, read from the MANIFESTS (§7.2).
+
+    `master.parquet` does not carry every cost: the approach-specific fields
+    (`n_models`, `n_adapter_sets`, trainable parameter ratios) live in the manifests.
+    They are read here rather than recomputed.
     """
-    lignes: list[dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     for run_id in final_runs(master)["run_id"].dropna().unique():
         manifest = paths.manifest(str(run_id))
         if not manifest.exists():
             continue
         meta = read_json(manifest)
 
-        # Parametres reellement ENTRAINES. `model_params` ne convient pas : apres fusion
-        # des adaptateurs, un modele LoRA compte autant de parametres qu'un modele
-        # entraine entierement (ADR-0025). Le champ differe selon l'approche.
+        # Parameters actually TRAINED. `model_params` does not fit: after merging the
+        # adapters, a LoRA model counts as many parameters as a fully trained model
+        # (ADR-0025). The field differs depending on the approach.
         trainable = None
-        for prefixe in ("lora", "head", "head_only"):
-            if meta.get(f"{prefixe}_trainable_params") is not None:
-                trainable = meta[f"{prefixe}_trainable_params"]
+        for prefix in ("lora", "head", "head_only"):
+            if meta.get(f"{prefix}_trainable_params") is not None:
+                trainable = meta[f"{prefix}_trainable_params"]
                 break
         if trainable is None:
-            rapport = meta.get("lora_final_report") or {}
-            trainable = rapport.get("trainable_params") or meta.get("model_params")
+            report = meta.get("lora_final_report") or {}
+            trainable = report.get("trainable_params") or meta.get("model_params")
 
-        # Parametres qui VARIENT d'un groupe a l'autre : c'est le cout de la
-        # specialisation, nul pour une approche a modele unique.
+        # Parameters that VARY from one group to another: this is the cost of the
+        # specialisation, zero for a single-model approach.
         copies = int(meta.get("n_models") or meta.get("n_adapter_sets") or 1)
-        specialises = int(trainable or 0) * copies if copies > 1 else 0
+        specialised = int(trainable or 0) * copies if copies > 1 else 0
 
-        lignes.append({
+        rows.append({
             "run_id": str(run_id),
             "train_time_s": meta.get("train_time_s") or meta.get("duration_s"),
             "trainable_params": trainable,
-            "specialised_params": specialises,
+            "specialised_params": specialised,
             "n_copies": copies,
         })
-    return pd.DataFrame(lignes)
+    return pd.DataFrame(rows)
 
 
 def pareto_front(costs: np.ndarray, performances: np.ndarray,
                  higher_is_better: bool = True) -> np.ndarray:
-    """Indices des points non domines, tries par cout croissant.
+    """Indices of the non-dominated points, sorted by increasing cost.
 
-    Un point est domine s'il existe un autre point a la fois moins couteux ET au moins
-    aussi performant. Le front relie donc les seuls choix defendables : tout ce qui est
-    en dessous peut etre remplace par une option strictement meilleure.
+    A point is dominated if another point is both cheaper AND at least as good. The
+    front therefore links the only defensible choices: everything below it can be
+    replaced by a strictly better option.
 
-    Fonction pure, testable sans matplotlib.
+    Pure function, testable without matplotlib.
     """
-    ordre = np.argsort(costs, kind="stable")
+    order = np.argsort(costs, kind="stable")
     front: list[int] = []
-    meilleur = -np.inf if higher_is_better else np.inf
-    for indice in ordre:
-        valeur = performances[indice]
-        if not np.isfinite(valeur):
+    best = -np.inf if higher_is_better else np.inf
+    for idx in order:
+        value = performances[idx]
+        if not np.isfinite(value):
             continue
-        gagne = valeur > meilleur if higher_is_better else valeur < meilleur
-        if gagne or not front:
-            front.append(int(indice))
-            meilleur = valeur
+        improves = value > best if higher_is_better else value < best
+        if improves or not front:
+            front.append(int(idx))
+            best = value
     return np.asarray(front, dtype=int)
 
 
@@ -566,64 +567,65 @@ def _cost_scatter(master: pd.DataFrame, costs: pd.DataFrame, metric: str, cost_c
                   xlabel: str, title: str, path: Path, split: str = "test",
                   log_x: bool = False, dpi: int = 150,
                   higher_is_better: bool = True) -> Path | None:
-    """Nuage performance vs cout, un point etiquete par modele, avec front de Pareto.
+    """Performance vs cost scatter, one labelled point per model, with the Pareto front.
 
-    Pas de legende : chaque point porte son nom, et une legende dupliquerait
-    l'information tout en mangeant la surface utile.
+    No legend: each point carries its name, and a legend would duplicate the
+    information while eating the useful area.
     """
     from insectpose.evaluation.aggregate import model_label
 
     data = _select(master, metric, split, scope="overall")
     if data.empty or costs.empty or cost_column not in costs.columns:
         return None
-    # `master.parquet` remonte deja certains champs de manifeste (dont train_time_s) :
-    # sans ce retrait, la fusion produirait `train_time_s_x`/`_y` et la colonne demandee
-    # n'existerait plus. On garde la valeur de `costs`, qui vient directement du manifeste.
-    doublons = [c for c in costs.columns if c != "run_id" and c in data.columns]
-    data = data.drop(columns=doublons).merge(costs, on="run_id", how="left")
+    # `master.parquet` already carries some manifest fields (including train_time_s):
+    # without this removal, the merge would produce `train_time_s_x`/`_y` and the
+    # requested column would no longer exist. The value of `costs` is kept, as it comes
+    # directly from the manifest.
+    duplicates = [c for c in costs.columns if c != "run_id" and c in data.columns]
+    data = data.drop(columns=duplicates).merge(costs, on="run_id", how="left")
     data = data.dropna(subset=[cost_column])
     if data.empty:
-        log.info("Aucun cout '%s' exploitable pour '%s' : figure ignoree.",
+        log.info("No usable cost '%s' for '%s': figure skipped.",
                  cost_column, metric)
         return None
     data = data.copy()
     data["model"] = model_label(data)
 
     stats = data.groupby("model").agg(
-        perf=("value", "mean"), erreur=("value", "std"),
-        cout=(cost_column, "mean"), folds=("value", "size"),
+        perf=("value", "mean"), error=("value", "std"),
+        cost=(cost_column, "mean"), folds=("value", "size"),
     ).reset_index()
     if log_x:
-        # Une approche a modele unique a un cout de specialisation NUL : en echelle log
-        # elle disparaitrait, alors que c'est justement le point de reference. On la
-        # place a gauche de l'axe, une decade sous le plus petit cout non nul.
-        positifs = stats.loc[stats["cout"] > 0, "cout"]
-        plancher = float(positifs.min()) / 10 if len(positifs) else 1.0
-        stats["cout"] = stats["cout"].replace(0, plancher)
+        # A single-model approach has a ZERO specialisation cost: on a log scale it
+        # would disappear, while it is precisely the reference point. It is placed at
+        # the left of the axis, one decade below the smallest non-zero cost.
+        positive = stats.loc[stats["cost"] > 0, "cost"]
+        floor = float(positive.min()) / 10 if len(positive) else 1.0
+        stats["cost"] = stats["cost"].replace(0, floor)
 
     fig, ax = plt.subplots(figsize=(8, 5.5))
-    couleurs = plt.get_cmap("tab10")
+    colors = plt.get_cmap("tab10")
 
-    couts = stats["cout"].to_numpy(dtype=float)
+    cost_values = stats["cost"].to_numpy(dtype=float)
     perfs = stats["perf"].to_numpy(dtype=float)
-    front = pareto_front(couts, perfs, higher_is_better)
+    front = pareto_front(cost_values, perfs, higher_is_better)
     if len(front) > 1:
-        ax.plot(couts[front], perfs[front], "--", color="grey", lw=1.2, zorder=1)
+        ax.plot(cost_values[front], perfs[front], "--", color="grey", lw=1.2, zorder=1)
 
-    for i, ligne in enumerate(stats.itertuples(index=False)):
-        sur_le_front = i in set(front.tolist())
-        ax.errorbar(ligne.cout, ligne.perf,
-                    yerr=ligne.erreur if np.isfinite(ligne.erreur) else None,
-                    fmt="o", ms=10 if sur_le_front else 7, capsize=4,
-                    color=couleurs(i % 10), zorder=3,
-                    markeredgecolor="black" if sur_le_front else "none",
-                    markeredgewidth=1.0 if sur_le_front else 0)
-        ax.annotate(str(ligne.model).split(" · ")[0], (ligne.cout, ligne.perf),
+    for i, row in enumerate(stats.itertuples(index=False)):
+        on_front = i in set(front.tolist())
+        ax.errorbar(row.cost, row.perf,
+                    yerr=row.error if np.isfinite(row.error) else None,
+                    fmt="o", ms=10 if on_front else 7, capsize=4,
+                    color=colors(i % 10), zorder=3,
+                    markeredgecolor="black" if on_front else "none",
+                    markeredgewidth=1.0 if on_front else 0)
+        ax.annotate(str(row.model).split(" · ")[0], (row.cost, row.perf),
                     textcoords="offset points", xytext=(9, 5), fontsize=8)
 
     if log_x:
         ax.set_xscale("log")
-    ax.margins(x=0.12, y=0.12)   # de la place pour les etiquettes
+    ax.margins(x=0.12, y=0.12)   # room for the labels
     ax.set_xlabel(xlabel)
     ax.set_ylabel(metric)
     ax.grid(alpha=0.3)
@@ -634,12 +636,12 @@ def _cost_scatter(master: pd.DataFrame, costs: pd.DataFrame, metric: str, cost_c
 def fig_performance_vs_training_cost(paths: ProjectPaths, master: pd.DataFrame, out_dir: Path,
                                      metric: str = "oks_ap", split: str = "test",
                                      dpi: int = 150) -> Path | None:
-    """Performance vs temps d'entrainement.
+    """Performance vs training time.
 
-    C'est l'axe de cout ou les approches se separent reellement. Le temps d'INFERENCE
-    est quasi identique partout — un modele LoRA fusionne fait le meme forward qu'un
-    modele entraine entierement — alors que le cout d'adaptation varie d'un facteur 2.
-    Cette figure repond a "laquelle deployer ?" plutot qu'a "laquelle est la meilleure ?".
+    This is the cost axis on which the approaches really differ. The INFERENCE time is
+    almost identical everywhere — a merged LoRA model runs the same forward pass as a
+    fully trained model — whereas the adaptation cost varies by a factor of 2.
+    This figure answers "which one to deploy?" rather than "which one is the best?".
     """
     return _cost_scatter(
         master, _run_costs(paths, master), metric, "train_time_s",
@@ -653,16 +655,15 @@ def fig_performance_vs_training_cost(paths: ProjectPaths, master: pd.DataFrame, 
 def fig_performance_vs_specialisation(paths: ProjectPaths, master: pd.DataFrame, out_dir: Path,
                                       metric: str = "oks_ap", split: str = "test",
                                       dpi: int = 150) -> Path | None:
-    """Performance vs nombre de parametres SPECIALISES par groupe d'insecte.
+    """Performance vs number of parameters SPECIALISED per insect group.
 
-    Isole le cout de la specialisation : nul pour une approche a modele unique, de
-    l'ordre de 10^4 pour une normalisation par groupe, 10^5 pour des adaptateurs par
-    groupe, 10^7 pour N modeles complets. Echelle logarithmique, ces ordres de grandeur
-    couvrant trois decades.
+    Isolates the cost of the specialisation: zero for a single-model approach, around
+    10^4 for a per-group normalisation, 10^5 for per-group adapters, 10^7 for N full
+    models. Logarithmic scale, as these orders of magnitude span three decades.
     """
     costs = _run_costs(paths, master)
     if costs.empty or (costs["specialised_params"] == 0).all():
-        log.info("Aucune approche specialisee par groupe : figure de specialisation ignoree.")
+        log.info("No per-group specialised approach: specialisation figure skipped.")
         return None
     return _cost_scatter(
         master, costs, metric, "specialised_params",
@@ -674,31 +675,31 @@ def fig_performance_vs_specialisation(paths: ProjectPaths, master: pd.DataFrame,
 
 
 
-# --- 10. PCK par keypoint, trie -------------------------------------------
+# --- 10. PCK per keypoint, sorted ------------------------------------------
 def fig_keypoint_pck_bars(master: pd.DataFrame, out_dir: Path, split: str = "test",
                           dataset: str | None = None, dpi: int = 150,
                           alpha: float | None = None) -> Path | None:
-    """PCK de chaque keypoint, trie par ordre croissant, couleurs d'annotation.
+    """PCK of each keypoint, sorted in increasing order, annotation colours.
 
-    Le tri met les points problematiques en tete de lecture : c'est la figure qui
-    designe ou porter l'effort. Les couleurs reprennent celles de l'interface
-    d'annotation, pour que cette figure et une capture d'ecran d'annotation se lisent
-    ensemble sans effort de correspondance.
+    The sorting puts the problematic points first: this is the figure that shows where
+    to put the effort. The colours are those of the annotation interface, so that this
+    figure and an annotation screenshot can be read together without any matching
+    effort.
 
-    Un panneau par dataset quand `dataset` est None : les ordres d'insectes n'ont ni
-    les memes points annotes ni les memes difficultes, et les melanger effacerait
-    justement ce que la figure doit montrer.
+    One panel per dataset when `dataset` is None: the insect orders have neither the
+    same annotated points nor the same difficulties, and mixing them would erase
+    precisely what the figure must show.
 
-    A croiser avec `pck_vs_coverage.png` : un point en tete de liste ET rarement
-    annote n'est pas un echec du modele (ADR-0016).
+    To be crossed with `pck_vs_coverage.png`: a point at the top of the list AND rarely
+    annotated is not a failure of the model (ADR-0016).
     """
     data = final_runs(master)
-    prefixe = "pck@" if alpha is None else f"pck@{alpha:g}"
+    prefix = "pck@" if alpha is None else f"pck@{alpha:g}"
     data = data[data["scope"].str.startswith("keypoint:") & (data["split"] == split)
-                & data["metric"].str.startswith(prefixe)]
+                & data["metric"].str.startswith(prefix)]
     if data.empty:
-        log.info("Aucune metrique '%s*' par keypoint sur le split '%s' : figure ignoree.",
-                 prefixe, split)
+        log.info("No per-keypoint metric '%s*' on split '%s': figure skipped.",
+                 prefix, split)
         return None
 
     data = data.copy()
@@ -710,83 +711,83 @@ def fig_keypoint_pck_bars(master: pd.DataFrame, out_dir: Path, split: str = "tes
             return None
 
     stats = (data.groupby(["dataset", "keypoint"])["value"]
-             .agg(pck="mean", ecart="std", folds="size")
+             .agg(pck="mean", spread="std", folds="size")
              .reset_index())
 
     datasets = sorted(stats["dataset"].unique())
-    largeur = max(8.0, 0.32 * stats["keypoint"].nunique() + 3)
+    width = max(8.0, 0.32 * stats["keypoint"].nunique() + 3)
     fig, axes = plt.subplots(len(datasets), 1, squeeze=False,
-                             figsize=(largeur, 4.6 * len(datasets)))
+                             figsize=(width, 4.6 * len(datasets)))
 
-    for ax, nom in zip(axes.flat, datasets, strict=True):
-        sub = stats[stats["dataset"] == nom].sort_values("pck").reset_index(drop=True)
+    for ax, name in zip(axes.flat, datasets, strict=True):
+        sub = stats[stats["dataset"] == name].sort_values("pck").reset_index(drop=True)
         positions = np.arange(len(sub))
-        couleurs = [keypoint_color(point) for point in sub["keypoint"]]
-        # Barres d'erreur seulement si plusieurs folds : sur un fold unique, l'ecart-type
-        # vaut NaN et matplotlib tracerait des moustaches vides.
-        erreurs = sub["ecart"].to_numpy() if (sub["folds"] > 1).any() else None
-        ax.bar(positions, sub["pck"], color=couleurs, edgecolor="black", linewidth=0.4,
-               yerr=erreurs, capsize=2, error_kw={"lw": 0.8})
+        colors = [keypoint_color(point) for point in sub["keypoint"]]
+        # Error bars only with several folds: on a single fold, the standard deviation
+        # is NaN and matplotlib would draw empty whiskers.
+        errors = sub["spread"].to_numpy() if (sub["folds"] > 1).any() else None
+        ax.bar(positions, sub["pck"], color=colors, edgecolor="black", linewidth=0.4,
+               yerr=errors, capsize=2, error_kw={"lw": 0.8})
 
         ax.set_xticks(positions)
         ax.set_xticklabels(sub["keypoint"], rotation=90, fontsize=7)
         ax.set_ylabel("PCK")
         ax.set_ylim(0, 1.02)
         ax.grid(axis="y", alpha=0.3)
-        moyenne = float(sub["pck"].mean())
-        ax.axhline(moyenne, color="grey", ls="--", lw=1)
-        # Etiquette hors du trace : posee sur la ligne, elle chevaucherait les dernieres
-        # barres, qui sont justement les plus hautes.
-        ax.text(1.005, moyenne, f"mean\n{moyenne:.3f}", transform=ax.get_yaxis_transform(),
+        mean = float(sub["pck"].mean())
+        ax.axhline(mean, color="grey", ls="--", lw=1)
+        # Label outside the plot: placed on the line, it would overlap the last bars,
+        # which are precisely the highest ones.
+        ax.text(1.005, mean, f"mean\n{mean:.3f}", transform=ax.get_yaxis_transform(),
                 va="center", fontsize=8, color="grey")
-        ax.set_title(f"{nom} ({len(sub)} keypoints)", fontsize=10)
+        ax.set_title(f"{name} ({len(sub)} keypoints)", fontsize=10)
 
-    seuil = "" if alpha is None else f"@{alpha:g}"
-    fig.suptitle(f"Keypoint PCK{seuil}, sorted ({split} split)")
-    suffixe = f"_{dataset}" if dataset else ""
-    return _save(fig, out_dir / f"keypoint_pck_sorted{suffixe}.png", dpi)
+    threshold = "" if alpha is None else f"@{alpha:g}"
+    fig.suptitle(f"Keypoint PCK{threshold}, sorted ({split} split)")
+    suffix = f"_{dataset}" if dataset else ""
+    return _save(fig, out_dir / f"keypoint_pck_sorted{suffix}.png", dpi)
 
 
-# --- 11. PCK moyen sur les datasets ------------------------------------------
+# --- 11. mean PCK over the datasets ------------------------------------------
 def fig_keypoint_pck_bars_pooled(master: pd.DataFrame, out_dir: Path, split: str = "test",
                                  alpha: float | None = None, dpi: int = 150) -> Path | None:
-    """PCK par keypoint, MOYENNE sur les datasets, en un seul panneau.
+    """PCK per keypoint, AVERAGED over the datasets, in a single panel.
 
-    Complement de `keypoint_pck_sorted.png`, qui separe les ordres : cette vue-ci
-    repond a "quels points sont difficiles en general ?", l'autre a "quels points sont
-    difficiles chez cet ordre ?".
+    Complement of `keypoint_pck_sorted.png`, which separates the orders: this view
+    answers "which points are hard in general?", the other one "which points are hard
+    for this order?".
 
-    La moyenne est ponderee par le nombre d'instances (`n`) et non par dataset : sans
-    cela, Hymenoptera (192 images) pèserait autant que Coleoptera (1026), et la figure
-    decrirait un corpus qui n'existe pas. Un point absent d'un ordre ne fausse donc
-    rien — il n'y contribue simplement pas.
+    The mean is weighted by the number of instances (`n`) and not per dataset:
+    otherwise Hymenoptera (192 images) would weigh as much as Coleoptera (1026), and
+    the figure would describe a corpus that does not exist. A point missing from an
+    order therefore distorts nothing — it simply does not contribute to it.
     """
     data = final_runs(master)
-    prefixe = "pck@" if alpha is None else f"pck@{alpha:g}"
+    prefix = "pck@" if alpha is None else f"pck@{alpha:g}"
     data = data[data["scope"].str.startswith("keypoint:") & (data["split"] == split)
-                & data["metric"].str.startswith(prefixe)]
+                & data["metric"].str.startswith(prefix)]
     if data.empty:
-        log.info("Aucune metrique '%s*' par keypoint : figure poolee ignoree.", prefixe)
+        log.info("No per-keypoint metric '%s*': pooled figure skipped.", prefix)
         return None
 
     data = data.copy()
     data["keypoint"] = data["scope"].map(lambda scope: str(scope).split(":")[-1])
-    data["poids"] = data["n"].fillna(1).clip(lower=1)
-    data["produit"] = data["value"] * data["poids"]
+    data["weight"] = data["n"].fillna(1).clip(lower=1)
+    data["product"] = data["value"] * data["weight"]
 
     stats = data.groupby("keypoint").agg(
-        produit=("produit", "sum"), poids=("poids", "sum"),
-        ecart=("value", "std"), datasets=("scope", "nunique"),
+        product=("product", "sum"), weight=("weight", "sum"),
+        spread=("value", "std"), datasets=("scope", "nunique"),
     ).reset_index()
-    stats["pck"] = stats["produit"] / stats["poids"]
+    stats["pck"] = stats["product"] / stats["weight"]
     stats = stats.sort_values("pck").reset_index(drop=True)
 
     fig, ax = plt.subplots(figsize=(max(9.0, 0.34 * len(stats) + 3), 5.5))
     positions = np.arange(len(stats))
-    couleurs = [keypoint_color(nom) for nom in stats["keypoint"]]
-    erreurs = stats["ecart"].to_numpy()
-    ax.bar(positions, stats["pck"], color=couleurs, edgecolor="black", linewidth=0.4,
-           yerr=erreurs if np.isfinite(erreurs).any() else None,
+    colors = [keypoint_color(name) for name in stats["keypoint"]]
+    errors = stats["spread"].to_numpy()
+    ax.bar(positions, stats["pck"], color=colors, edgecolor="black", linewidth=0.4,
+           yerr=errors if np.isfinite(errors).any() else None,
            capsize=2, error_kw={"lw": 0.8})
 
     ax.set_xticks(positions)
@@ -794,23 +795,23 @@ def fig_keypoint_pck_bars_pooled(master: pd.DataFrame, out_dir: Path, split: str
     ax.set_ylabel("PCK")
     ax.set_ylim(0, 1.02)
     ax.grid(axis="y", alpha=0.3)
-    moyenne = float((stats["produit"].sum() / stats["poids"].sum()))
-    ax.axhline(moyenne, color="grey", ls="--", lw=1)
-    ax.text(1.005, moyenne, f"mean\n{moyenne:.3f}", transform=ax.get_yaxis_transform(),
+    mean = float((stats["product"].sum() / stats["weight"].sum()))
+    ax.axhline(mean, color="grey", ls="--", lw=1)
+    ax.text(1.005, mean, f"mean\n{mean:.3f}", transform=ax.get_yaxis_transform(),
             va="center", fontsize=8, color="grey")
 
-    seuil = "" if alpha is None else f"@{alpha:g}"
-    ax.set_title(f"Keypoint PCK{seuil}, all datasets pooled ({split} split, "
+    threshold = "" if alpha is None else f"@{alpha:g}"
+    ax.set_title(f"Keypoint PCK{threshold}, all datasets pooled ({split} split, "
                  "weighted by instance count)")
     return _save(fig, out_dir / "keypoint_pck_pooled.png", dpi)
 
 
-# --- 12. squelette moyen, erreur encodee ------------------------------------
-# Gabarit anatomique schematique, en unites de demi-longueur de corps (x vers la
-# droite, y vers le bas). Il ne pretend pas a l'exactitude morphologique : son role est
-# de placer les 42 points de facon LISIBLE — aucun chevauchement, cotes gauche et droit
-# distincts — pour qu'une erreur elevee saute aux yeux a l'endroit du corps concerne.
-# Positions declarees par point dans kp_infos.yaml (cle `layout`).
+# --- 12. mean skeleton, encoded error ----------------------------------------
+# Schematic anatomical template, in half-body-length units (x to the right, y
+# downwards). It does not claim morphological accuracy: its role is to place the 42
+# points in a READABLE way — no overlap, distinct left and right sides — so that a high
+# error jumps out at the concerned place of the body.
+# Positions declared per point in kp_infos.yaml (`layout` key).
 _BODY_LAYOUT: dict[str, tuple[float, float]] = {
     kp["name"]: tuple(kp["layout"]) for kp in _KP_INFOS_KEYPOINTS if kp.get("layout")
 }
@@ -818,78 +819,78 @@ _BODY_LAYOUT: dict[str, tuple[float, float]] = {
 
 def fig_error_skeleton(master: pd.DataFrame, out_dir: Path, schema: KeypointSchema,
                        split: str = "test", dpi: int = 150) -> Path | None:
-    """Squelette schematique dont chaque point encode l'erreur mediane par sa couleur
-    et sa taille.
+    """Schematic skeleton in which each point encodes the median error by its colour
+    and its size.
 
-    Un tableau de 42 lignes ne dit pas OU se situent les difficultes sur l'animal ;
-    cette figure le montre d'un coup d'oeil. Les aretes reprennent le squelette declare
-    dans le schema de keypoints, donc elles suivent l'anatomie reelle.
+    A 42-row table does not tell WHERE the difficulties are on the animal; this figure
+    shows it at a glance. The edges follow the skeleton declared in the keypoint schema,
+    so they follow the real anatomy.
 
-    L'erreur portee est la NME — erreur normalisee par la largeur du thorax — moyennee
-    sur les datasets et ponderee par le nombre d'instances. Un point sans mesure reste
-    trace en gris clair : son absence est une information, pas un trou a masquer.
+    The error shown is the NME — error normalised by the thorax width — averaged over
+    the datasets and weighted by the number of instances. A point without a measurement
+    is still drawn in light grey: its absence is an information, not a hole to hide.
     """
     data = final_runs(master)
     data = data[data["scope"].str.startswith("keypoint:") & (data["split"] == split)
                 & (data["metric"] == "nme")]
     if data.empty:
-        log.info("Metrique 'nme' par keypoint absente : squelette d'erreur ignore.")
+        log.info("Per-keypoint 'nme' metric missing: error skeleton skipped.")
         return None
 
     data = data.copy()
     data["keypoint"] = data["scope"].map(lambda scope: str(scope).split(":")[-1])
-    data["poids"] = data["n"].fillna(1).clip(lower=1)
+    data["weight"] = data["n"].fillna(1).clip(lower=1)
     stats = data.groupby("keypoint").apply(
-        lambda g: np.average(g["value"], weights=g["poids"]), include_groups=False
-    ).rename("erreur").reset_index()
-    erreurs = dict(zip(stats["keypoint"], stats["erreur"], strict=True))
+        lambda g: np.average(g["value"], weights=g["weight"]), include_groups=False
+    ).rename("error").reset_index()
+    errors = dict(zip(stats["keypoint"], stats["error"], strict=True))
 
-    manquants = [n for n in schema.names if n not in _BODY_LAYOUT]
-    if manquants:
-        log.warning("%d keypoint(s) absent(s) du gabarit de dessin : %s. Le squelette "
-                    "sera incomplet.", len(manquants), manquants[:5])
+    missing = [n for n in schema.names if n not in _BODY_LAYOUT]
+    if missing:
+        log.warning("%d keypoint(s) missing from the drawing template: %s. The skeleton "
+                    "will be incomplete.", len(missing), missing[:5])
 
     positions = {n: _BODY_LAYOUT[n] for n in schema.names if n in _BODY_LAYOUT}
     if not positions:
         return None
 
-    valeurs = np.array([erreurs.get(n, np.nan) for n in positions])
-    finies = valeurs[np.isfinite(valeurs)]
-    if finies.size == 0:
+    values = np.array([errors.get(n, np.nan) for n in positions])
+    finite = values[np.isfinite(values)]
+    if finite.size == 0:
         return None
-    # Bornes au 5e/95e centile : une seule valeur aberrante ecraserait toute l'echelle
-    # de couleur et rendrait la figure illisible.
-    vmin, vmax = float(np.percentile(finies, 5)), float(np.percentile(finies, 95))
+    # Bounds at the 5th/95th percentile: a single outlier would crush the whole colour
+    # scale and make the figure unreadable.
+    vmin, vmax = float(np.percentile(finite, 5)), float(np.percentile(finite, 95))
     if vmin >= vmax:
-        vmin, vmax = float(finies.min()), float(finies.max() + 1e-9)
+        vmin, vmax = float(finite.min()), float(finite.max() + 1e-9)
     norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
-    cmap = plt.get_cmap("RdYlGn_r")   # vert = precis, rouge = imprecis
+    cmap = plt.get_cmap("RdYlGn_r")   # green = accurate, red = inaccurate
 
     fig, ax = plt.subplots(figsize=(9, 8))
-    index = {nom: i for i, nom in enumerate(schema.names)}
+    index = {name: i for i, name in enumerate(schema.names)}
     for a, b in schema.skeleton:
-        noms = (schema.names[a], schema.names[b])
-        if all(n in positions for n in noms):
-            xs = [positions[n][0] for n in noms]
-            ys = [positions[n][1] for n in noms]
+        names = (schema.names[a], schema.names[b])
+        if all(n in positions for n in names):
+            xs = [positions[n][0] for n in names]
+            ys = [positions[n][1] for n in names]
             ax.plot(xs, ys, color="#bbbbbb", lw=1.2, zorder=1)
 
-    for nom, (x, y) in positions.items():
-        valeur = erreurs.get(nom, np.nan)
-        if np.isfinite(valeur):
-            # Taille ET couleur portent la meme information : la redondance rend la
-            # figure lisible en niveaux de gris comme pour un daltonien.
-            taille = 90 + 420 * float(np.clip(norm(valeur), 0, 1))
-            couleur, bord = cmap(norm(valeur)), "black"
+    for name, (x, y) in positions.items():
+        value = errors.get(name, np.nan)
+        if np.isfinite(value):
+            # Size AND colour carry the same information: the redundancy keeps the
+            # figure readable in greyscale as well as for a colour-blind reader.
+            size = 90 + 420 * float(np.clip(norm(value), 0, 1))
+            color, edge = cmap(norm(value)), "black"
         else:
-            taille, couleur, bord = 60, "#eeeeee", "#999999"
-        ax.scatter(x, y, s=taille, color=couleur, edgecolors=bord, linewidths=0.8,
+            size, color, edge = 60, "#eeeeee", "#999999"
+        ax.scatter(x, y, s=size, color=color, edgecolors=edge, linewidths=0.8,
                    zorder=3)
-        ax.annotate(nom, (x, y), textcoords="offset points", xytext=(0, -13),
+        ax.annotate(name, (x, y), textcoords="offset points", xytext=(0, -13),
                     ha="center", fontsize=5.5, color="#444444")
 
     ax.set_aspect("equal")
-    ax.invert_yaxis()          # y vers le bas dans le gabarit : la tete doit rester en haut
+    ax.invert_yaxis()          # y downwards in the template: the head must stay at the top
     ax.axis("off")
     ax.margins(0.12)
     fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm, cmap=cmap), ax=ax,
@@ -900,10 +901,10 @@ def fig_error_skeleton(master: pd.DataFrame, out_dir: Path, schema: KeypointSche
     return _save(fig, out_dir / "error_skeleton.png", dpi)
 
 
-# --- point d'entree ----------------------------------------------------------
+# --- entry point -------------------------------------------------------------
 def write_figures(paths: ProjectPaths, cfg: Any, master: pd.DataFrame,
                   out_dir: Path | None = None) -> list[Path]:
-    """Produit les figures d'un jeu de runs. Effet de bord : ecrit dans `out_dir`."""
+    """Produce the figures of a set of runs. Side effect: writes into `out_dir`."""
     out_dir = out_dir or (paths.results / "figures")
     dpi = int(cfg.report.dpi)
     split = str(cfg.report.split)
@@ -915,11 +916,9 @@ def write_figures(paths: ProjectPaths, cfg: Any, master: pd.DataFrame,
 
     written.append(fig_confidence_vs_error(master, out_dir, split, dpi))
     written.append(fig_pck_curve(master, out_dir, split, dpi))
-    # Arguments NOMMES : le 4e positionnel est `dataset`, et y passer l'alpha filtrait
-    # sur un dataset nomme "0.25" — la figure sortait vide sans le moindre message.
     reference_alpha = float(cfg.eval.pck.reference_alpha)
-    # Arguments NOMMES : le 4e positionnel est `dataset`, et y passer l'alpha filtrait
-    # sur un dataset nomme "0.25" — la figure sortait vide sans le moindre message.
+    # NAMED arguments: the 4th positional one is `dataset`, and passing the alpha there
+    # filtered on a dataset named "0.25" — the figure came out empty without any message.
     written.append(fig_keypoint_pck_bars(
         master, out_dir, split=split, dpi=dpi, alpha=reference_alpha))
     written.append(fig_keypoint_pck_bars_pooled(
@@ -940,8 +939,9 @@ def write_figures(paths: ProjectPaths, cfg: Any, master: pd.DataFrame,
     if bool(cfg.eval.measurements.enabled):
         written.append(fig_symmetry_scatter(paths, master, cfg, out_dir, split, dpi))
 
-    # Cout : DEUX axes, car aucun ne suffit seul. Le temps d'entrainement separe les
-    # approches ; le nombre de parametres specialises isole le cout de la specialisation.
+    # Cost: TWO axes, because none is enough on its own. The training time separates
+    # the approaches; the number of specialised parameters isolates the cost of the
+    # specialisation.
     primary = str(cfg.eval.primary_metric)
     written.append(fig_performance_vs_training_cost(paths, master, out_dir, primary,
                                                     split, dpi))
@@ -949,16 +949,16 @@ def write_figures(paths: ProjectPaths, cfg: Any, master: pd.DataFrame,
                                                      split, dpi))
 
     produced = [p for p in written if p is not None]
-    log.info("%d figure(s) ecrite(s) dans %s", len(produced), out_dir)
+    log.info("%d figure(s) written to %s", len(produced), out_dir)
     return produced
 
 
 def write_per_run_figures(paths: ProjectPaths, cfg: Any, master: pd.DataFrame) -> list[Path]:
-    """Un dossier de figures par run, sous results/runs/<run_id>/.
+    """One figure folder per run, under results/runs/<run_id>/.
 
-    Le rapport global compare les modeles entre eux ; ces dossiers-la permettent
-    d'examiner un run isolement sans que le suivant ne l'ecrase.
-    Effet de bord : ecrit results/runs/<run_id>/.
+    The global report compares the models with each other; these folders allow a run to
+    be examined on its own without the next one overwriting it.
+    Side effect: writes results/runs/<run_id>/.
     """
     written: list[Path] = []
     for run_id in sorted(final_runs(master)["run_id"].dropna().unique()):
@@ -966,6 +966,6 @@ def write_per_run_figures(paths: ProjectPaths, cfg: Any, master: pd.DataFrame) -
         written.extend(
             write_figures(paths, cfg, subset, paths.results / "runs" / str(run_id))
         )
-    log.info("Figures par run ecrites pour %d run(s).",
+    log.info("Per-run figures written for %d run(s).",
              final_runs(master)["run_id"].nunique())
     return written

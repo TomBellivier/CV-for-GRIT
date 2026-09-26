@@ -1,8 +1,8 @@
-"""Smoke test de bout en bout (§10.3).
+"""End-to-end smoke test (§10.3).
 
-Une approche qui ne passe pas ce test n'est pas consideree comme implementee.
-Boucle sur TOUTES les approches enregistrees : ajouter une approche l'inclut
-automatiquement, sans toucher a ce fichier.
+An approach that does not pass this test is not considered implemented. Loops over ALL
+the registered approaches: adding an approach includes it automatically, without
+touching this file.
 """
 
 from __future__ import annotations
@@ -23,15 +23,15 @@ from insectpose.utils.io import read_json, read_parquet
 def test_full_pipeline_per_approach(config_factory, project, approach_name) -> None:
     available, reason = APPROACHES.get(approach_name).availability()
     if not available:
-        pytest.skip(f"{approach_name} indisponible dans cet environnement : {reason}")
-    # Recomposition du groupe Hydra : patcher `approach.name` laisserait les cles de
-    # l'approche precedente (defaut reel corrige apres coup).
+        pytest.skip(f"{approach_name} unavailable in this environment: {reason}")
+    # Recomposition of the Hydra group: patching `approach.name` would leave the keys of
+    # the previous approach (real defect fixed afterwards).
     cfg = config_factory([f"approach={approach_name}"])
     pipeline.cmd_split(cfg)
     ctx = pipeline.cmd_train(cfg)
 
-    # Artefacts obligatoires du run (§8.2)
-    assert project.manifest(ctx.run_id).exists(), "manifeste manquant : run incomplet"
+    # Mandatory artefacts of the run (§8.2)
+    assert project.manifest(ctx.run_id).exists(), "missing manifest: incomplete run"
     assert project.metrics(ctx.run_id).exists()
     assert (project.run_dir(ctx.run_id) / "config.yaml").exists()
     assert project.predictions(ctx.run_id, "test", ctx.fold).exists()
@@ -45,7 +45,7 @@ def test_full_pipeline_per_approach(config_factory, project, approach_name) -> N
 def test_run_id_is_deterministic_and_idempotent(cfg, project) -> None:  # noqa: ARG001
     pipeline.cmd_split(cfg)
     first = pipeline.cmd_train(cfg)
-    second = pipeline.cmd_train(cfg)   # doit etre saute, pas rejoue
+    second = pipeline.cmd_train(cfg)   # must be skipped, not replayed
     assert first.run_id == second.run_id
 
 
@@ -81,12 +81,12 @@ def test_manifest_records_reproducibility_fields(cfg, project) -> None:
     manifest = read_json(project.manifest(ctx.run_id))
     for field in ("run_id", "approach", "split_id", "content_hash", "seed", "config",
                   "git", "environment", "eval_version", "primary_metric"):
-        assert field in manifest, f"champ '{field}' absent du manifeste"
+        assert field in manifest, f"field '{field}' missing from the manifest"
 
 
 @pytest.mark.smoke
 def test_fit_never_sees_test_data(cfg, project, monkeypatch) -> None:  # noqa: ARG001
-    """Garde-fou anti-fuite : `fit` ne doit jamais lire data.test (§4.2)."""
+    """Anti-leakage safeguard: `fit` must never read data.test (§4.2)."""
     from insectpose.data.datamodule import ImageSet
 
     pipeline.cmd_split(cfg)
@@ -106,7 +106,7 @@ def test_fit_never_sees_test_data(cfg, project, monkeypatch) -> None:  # noqa: A
 
 @pytest.mark.smoke
 def test_qualitative_export_is_produced(cfg, project) -> None:
-    """Chaque run exporte des figures pred vs GT, dont les pires cas (§8.4)."""
+    """Each run exports pred vs GT figures, including the worst cases (§8.5)."""
     pipeline.cmd_split(cfg)
     ctx = pipeline.cmd_train(cfg)
     figures = sorted((project.run_dir(ctx.run_id) / "figures").glob("*.png"))
@@ -117,12 +117,12 @@ def test_qualitative_export_is_produced(cfg, project) -> None:
 
     scores = {r: [e["oks"] for e in index["examples"] if e["reason"] == r]
               for r in ("worst", "best", "random")}
-    # Les pires cas sont bien les moins bons, les meilleurs bien les meilleurs
+    # The worst cases are indeed the worst, the best ones indeed the best
     assert not scores["random"] or max(scores["worst"]) <= min(scores["random"])
     assert not scores["random"] or min(scores["best"]) >= max(scores["random"])
 
-    # Un meilleur cas par dataset (§8.5) : le meilleur global viendrait toujours du
-    # dataset le plus facile.
+    # One best case per dataset (§8.5): the global best would always come from the
+    # easiest dataset.
     best_datasets = [e["dataset"] for e in index["examples"] if e["reason"] == "best"]
     assert len(best_datasets) == len(set(best_datasets))
     assert set(best_datasets) == set(
@@ -131,23 +131,23 @@ def test_qualitative_export_is_produced(cfg, project) -> None:
 
 @pytest.mark.smoke
 def test_missing_images_are_refused_by_default(cfg, project) -> None:
-    """Un export qualitatif silencieusement vide masquerait un chemin d'image casse."""
+    """A silently empty qualitative export would hide a broken image path."""
     import pytest as _pytest
 
     pipeline.cmd_split(cfg)
     for image in (project.raw / "coleoptera" / "images").glob("*.png"):
         image.unlink()
-    with _pytest.raises(FileNotFoundError, match="export qualitatif"):
+    with _pytest.raises(FileNotFoundError, match="qualitative export"):
         pipeline.cmd_train(cfg)
 
 
 @pytest.mark.parametrize("approach_name", sorted(APPROACHES.available()))
 def test_approach_config_matches_its_name(config_factory, approach_name) -> None:
-    """Garde-fou : le groupe de config charge doit etre CELUI de l'approche.
+    """Safeguard: the loaded config group must be THE ONE of the approach.
 
-    Sans cette verification, un test qui patche `approach.name` sans recomposer le
-    groupe Hydra laisse les cles de l'approche precedente et echoue plus loin, sur un
-    'Missing key' incomprehensible.
+    Without this check, a test that patches `approach.name` without recomposing the Hydra
+    group leaves the keys of the previous approach and fails further on, with an
+    incomprehensible 'Missing key'.
     """
     cfg = config_factory([f"approach={approach_name}"])
     assert str(cfg.approach.name) == approach_name
@@ -158,15 +158,15 @@ def test_approach_config_matches_its_name(config_factory, approach_name) -> None
 
 @pytest.mark.smoke
 def test_best_examples_are_one_per_dataset() -> None:
-    """Les meilleurs cas sont choisis PAR dataset, pas globalement."""
+    """The best cases are chosen PER dataset, not globally."""
     from insectpose.reporting.qualitative import select_examples
 
     scores = pd.DataFrame({
         "image_id": [f"i{i}" for i in range(8)],
         "dataset": ["coleoptera"] * 4 + ["diptera"] * 4,
         "gt_row": range(8), "pred_row": range(8),
-        # Coleoptera est globalement meilleur : sans selection par dataset, les deux
-        # "best" viendraient de lui et diptera n'aurait aucune reference.
+        # Coleoptera is better overall: without a per-dataset selection, both "best"
+        # would come from it and diptera would have no reference.
         "oks": [0.90, 0.92, 0.94, 0.96, 0.30, 0.40, 0.50, 0.60],
     })
     selection = select_examples(scores, n_examples=6, n_worst=2, seed=0,
@@ -195,17 +195,17 @@ def test_best_selection_can_be_disabled() -> None:
 
 @pytest.mark.smoke
 def test_a_model_that_detects_nothing_yields_zero_metrics(cfg, project, monkeypatch) -> None:
-    """Zero prediction est un RESULTAT mesurable, pas une erreur de pipeline.
+    """Zero prediction is a measurable RESULT, not a pipeline error.
 
-    Un modele sous-entraine ou mal regle ne detecte rien. L'evaluation doit alors
-    publier des metriques nulles : interrompre le pipeline laisserait croire a un run
-    casse alors que le modele est simplement mauvais.
+    An under-trained or badly tuned model detects nothing. The evaluation must then
+    publish zero metrics: interrupting the pipeline would suggest a broken run while the
+    model is simply bad.
     """
     from insectpose.registry import APPROACHES
     from insectpose.utils.io import read_parquet
 
-    # Patcher la classe CONCRETE : chaque approche surcharge `predict_instances`,
-    # donc patcher BaseApproach serait sans effet.
+    # Patch the CONCRETE class: each approach overrides `predict_instances`, so patching
+    # BaseApproach would have no effect.
     approach_cls = APPROACHES.get(str(cfg.approach.name))
     monkeypatch.setattr(
         approach_cls, "predict_instances",
@@ -214,7 +214,7 @@ def test_a_model_that_detects_nothing_yields_zero_metrics(cfg, project, monkeypa
     pipeline.cmd_split(cfg)
     ctx = pipeline.cmd_train(cfg)
 
-    # Le run reste COMPLET : manifeste ecrit, donc agregeable et auditable
+    # The run stays COMPLETE: manifest written, hence aggregatable and auditable
     assert project.manifest(ctx.run_id).exists()
 
     predictions = read_parquet(project.predictions(ctx.run_id, "test", ctx.fold),
@@ -226,4 +226,4 @@ def test_a_model_that_detects_nothing_yields_zero_metrics(cfg, project, monkeypa
                       & (metrics["scope"] == "overall") & (metrics["split"] == "test")]
     assert len(primary) == 1
     assert primary["value"].iloc[0] == 0.0
-    assert primary["n"].iloc[0] > 0        # le denominateur reste celui des GT
+    assert primary["n"].iloc[0] > 0        # the denominator stays that of the GT

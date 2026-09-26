@@ -23,12 +23,12 @@ known to any source gets a row, and no source is required.
 
 Usage
 -----
-    # 1. conversion des exports Label Studio en CSV
+    # 1. conversion of the Label Studio exports to CSV
     python annotation_tools/labelstudio_to_csv.py \\
         --json_files annotation_data/label_studio_annotations \\
         --output annotation_data/pose/pose_annotations.csv
 
-    # 2. fusion des trois CSV
+    # 2. merge of the three CSVs
     python annotation_tools/build_annotation_data.py
 
     python annotation_tools/build_annotation_data.py \\
@@ -80,8 +80,8 @@ def load_pose(source: Path) -> pd.DataFrame:
     """
     if source.suffix.lower() != ".csv" or not source.is_file():
         raise SystemExit(
-            f"Les annotations de pose doivent etre un CSV deja converti : {source}\n"
-            f"Le produire d'abord avec :\n"
+            f"The pose annotations must be an already converted CSV: {source}\n"
+            f"Produce it first with:\n"
             f"    python annotation_tools/labelstudio_to_csv.py "
             f"--json_files annotation_data/label_studio_annotations "
             f"--output {DEFAULT_POSE.relative_to(REPO_ROOT).as_posix()}"
@@ -89,22 +89,22 @@ def load_pose(source: Path) -> pd.DataFrame:
 
     frame = pd.read_csv(source)
     if KEY not in frame.columns:
-        raise KeyError(f"Colonne '{KEY}' absente des annotations de pose ({source})")
+        raise KeyError(f"Column '{KEY}' missing from the pose annotations ({source})")
     return frame
 
 
 def load_scale(source: Path) -> pd.DataFrame:
     """Hand-written scale annotations. Missing file -> no scale columns filled."""
     if not source.is_file():
-        print(f"/!\\ pas de CSV de scale a {source} : colonnes de scale vides")
+        print(f"/!\\ no scale CSV at {source}: scale columns left empty")
         return pd.DataFrame(columns=[KEY, *SCALE_COLUMNS])
 
     frame = pd.read_csv(source)
     if KEY not in frame.columns:
-        raise KeyError(f"Colonne '{KEY}' absente du CSV de scale ({source})")
+        raise KeyError(f"Column '{KEY}' missing from the scale CSV ({source})")
     unknown = [c for c in frame.columns if c not in (KEY, *SCALE_COLUMNS)]
     if unknown:
-        print(f"/!\\ colonnes inconnues dans {source.name}, reprises telles quelles : {unknown}")
+        print(f"/!\\ unknown columns in {source.name}, kept as is: {unknown}")
     return frame
 
 
@@ -118,9 +118,9 @@ def load_measurements(sources) -> pd.DataFrame:
         elif path.is_file():
             files.append(path)
         else:
-            print(f"/!\\ ignore (introuvable) : {path}")
+            print(f"/!\\ skipped (not found): {path}")
     if not files:
-        print("/!\\ aucun export de validation des mesures : colonnes de mesure vides")
+        print("/!\\ no measurement-validation export: measurement columns left empty")
         return pd.DataFrame(columns=[KEY])
 
     frames = []
@@ -129,13 +129,13 @@ def load_measurements(sources) -> pd.DataFrame:
         # The app writes the image as a full local path, under the name 'image'.
         column = "image" if "image" in frame.columns else KEY
         if column not in frame.columns:
-            print(f"/!\\ {path.name} : ni 'image' ni '{KEY}', fichier ignore")
+            print(f"/!\\ {path.name}: neither 'image' nor '{KEY}', file skipped")
             continue
         frame[KEY] = frame[column].map(_basename)
         frame = frame.drop(columns=[c for c in (column,) if c != KEY])
         frame["measurements_source"] = path.name
         frames.append(frame)
-        print(f"  {len(frame):5} lignes  {path.name}")
+        print(f"  {len(frame):5} rows  {path.name}")
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=[KEY])
 
 
@@ -148,8 +148,8 @@ def deduplicate(frame: pd.DataFrame, label: str) -> pd.DataFrame:
     duplicated = frame[KEY].duplicated()
     if duplicated.any():
         examples = frame.loc[duplicated, KEY].unique()[:3]
-        print(f"/!\\ {label} : {int(duplicated.sum())} doublon(s) d'image, "
-              f"seule la premiere ligne est gardee (ex. {list(examples)})")
+        print(f"/!\\ {label}: {int(duplicated.sum())} duplicate image(s), "
+              f"only the first row is kept (e.g. {list(examples)})")
         frame = frame[~duplicated]
     return frame
 
@@ -162,8 +162,8 @@ def merge(pose: pd.DataFrame, scale: pd.DataFrame, measurements: pd.DataFrame) -
             continue
         overlap = [c for c in other.columns if c != KEY and c in merged.columns]
         if overlap:
-            print(f"/!\\ colonnes en double entre pose et {label}, "
-                  f"celles de {label} sont suffixees '_{label}' : {overlap}")
+            print(f"/!\\ columns duplicated between pose and {label}, "
+                  f"those of {label} get the suffix '_{label}': {overlap}")
             other = other.rename(columns={c: f"{c}_{label}" for c in overlap})
         merged = merged.merge(other, on=KEY, how="outer")
     return merged.sort_values(KEY).reset_index(drop=True)
@@ -171,27 +171,27 @@ def merge(pose: pd.DataFrame, scale: pd.DataFrame, measurements: pd.DataFrame) -
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Rassemble pose, scale et validation des mesures en un seul CSV.")
+        description="Gather pose, scale and measurement validation into a single CSV.")
     parser.add_argument("--pose", default=str(DEFAULT_POSE),
-                        help="CSV de pose, produit par labelstudio_to_csv.py "
-                             f"(defaut : {DEFAULT_POSE.relative_to(REPO_ROOT)}).")
+                        help="Pose CSV, produced by labelstudio_to_csv.py "
+                             f"(default: {DEFAULT_POSE.relative_to(REPO_ROOT)}).")
     parser.add_argument("--scale", default=str(DEFAULT_SCALE),
-                        help=f"CSV de scale (defaut : {DEFAULT_SCALE.relative_to(REPO_ROOT)}).")
+                        help=f"Scale CSV (default: {DEFAULT_SCALE.relative_to(REPO_ROOT)}).")
     parser.add_argument("--measurements", nargs="*", default=[str(DEFAULT_MEASUREMENTS)],
-                        help="CSV de validation des mesures, et/ou dossiers "
-                             f"(defaut : {DEFAULT_MEASUREMENTS.relative_to(REPO_ROOT)}).")
+                        help="Measurement-validation CSVs, and/or folders "
+                             f"(default: {DEFAULT_MEASUREMENTS.relative_to(REPO_ROOT)}).")
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT),
-                        help=f"CSV combine (defaut : {DEFAULT_OUTPUT.relative_to(REPO_ROOT)}).")
+                        help=f"Combined CSV (default: {DEFAULT_OUTPUT.relative_to(REPO_ROOT)}).")
     args = parser.parse_args()
 
-    print("pose :")
+    print("pose:")
     pose = deduplicate(load_pose(Path(args.pose)), "pose")
     print(f"  {len(pose):5} images")
-    print("scale :")
+    print("scale:")
     scale = deduplicate(load_scale(Path(args.scale)), "scale")
     print(f"  {len(scale):5} images")
-    print("mesures :")
-    measurements = deduplicate(load_measurements(args.measurements), "mesures")
+    print("measurements:")
+    measurements = deduplicate(load_measurements(args.measurements), "measurements")
     print(f"  {len(measurements):5} images")
 
     merged = merge(pose, scale, measurements)
@@ -201,11 +201,11 @@ def main() -> None:
     merged.to_csv(output, index=False)
 
     filled = merged.notna().sum()
-    print(f"\n{len(merged)} images, {len(merged.columns)} colonnes -> {output}")
+    print(f"\n{len(merged)} images, {len(merged.columns)} columns -> {output}")
     for label, column in (("pose", "task_id"), ("scale", "scale_px_per_mm"),
-                          ("mesures", "measurements_source")):
+                          ("measures", "measurements_source")):
         if column in merged.columns:
-            print(f"  {label:8} : {int(filled[column]):5} image(s) renseignee(s)")
+            print(f"  {label:8}: {int(filled[column]):5} image(s) filled in")
 
 
 if __name__ == "__main__":

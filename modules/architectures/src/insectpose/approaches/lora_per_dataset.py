@@ -1,38 +1,37 @@
-"""Approche H : adaptateurs LoRA par groupe d'insecte (ADR-0036).
+"""Approach H: LoRA adapters per insect group (ADR-0036).
 
-Categorie "poids partiels par groupe" : un tronc commun a tous les ordres, plus un jeu
-d'adaptateurs par ordre. C'est l'usage canonique de LoRA, et le pendant economique de
-l'approche B (un modele entier par groupe) — quatre jeux d'adaptateurs pesent moins de
-1 % du reseau la ou quatre modeles complets le quadruplent.
+"Partial weights per group" category: a trunk common to every order, plus one set of
+adapters per order. It is the canonical use of LoRA, and the economical counterpart of
+approach B (a whole model per group) — four sets of adapters weigh less than 1 % of the
+network where four complete models quadruple it.
 
-Entrainement en DEUX PHASES, dans un seul run :
+Training in TWO PHASES, within a single run:
 
-1. **Tronc commun** — le modele entier (backbone, cou, tetes) est entraine sur TOUT le
-   train du fold, SANS adaptateur. Budget : `epoch_split` des epoques. Cette phase
-   produit un YOLO standard, qui sert de point de depart commun.
-2. **Adaptateurs par groupe** — le tronc est recharge, des adaptateurs NEUFS y sont
-   injectes, puis tout est gele sauf eux. Pour chaque ordre d'insecte, ils sont
-   entraines sur TOUT le train de cet ordre. Budget : le reste des epoques, par groupe.
+1. **Common trunk** — the whole model (backbone, neck, heads) is trained on the WHOLE
+   train of the fold, WITHOUT adapters. Budget: `epoch_split` of the epochs. This phase
+   produces a standard YOLO, which serves as the common starting point.
+2. **Adapters per group** — the trunk is reloaded, NEW adapters are injected into it,
+   then everything but them is frozen. For each insect order, they are trained on the
+   WHOLE train of that order. Budget: the remaining epochs, per group.
 
-Point d'implementation decisif : les adaptateurs sont **injectes en phase 2, jamais en
-phase 1**. Les injecter des le depart ne servirait a rien, puisque la sauvegarde les
-fusionne dans les poids de base (ADR-0025) : le tronc recharge ne contiendrait alors
-plus aucune couche LoRA a specialiser, et le gel de phase 2 ne trouverait rien.
+Decisive implementation point: the adapters are **injected in phase 2, never in phase
+1**. Injecting them from the start would be useless, since saving merges them into the
+base weights (ADR-0025): the reloaded trunk would then no longer contain any LoRA layer
+to specialise, and the phase 2 freeze would find nothing.
 
-Trois points de protocole, tous deliberes :
+Three protocol points, all deliberate:
 
-- **Aucune donnee n'est mise de cote.** Un decoupage propre a cette approche (moitie
-  pour la phase 1, moitie pour la phase 2) violerait §6.2 et ferait mesurer le volume
-  de donnees plutot que la methode. Les adaptateurs revoient donc des images que le
-  tronc a deja vues — c'est le regime reel d'un deploiement, ou l'on specialise un
-  modele general avec les donnees dont on dispose.
-- **Les tetes sont entrainees en phase 1, gelees en phase 2.** Sur YOLO26 elles pesent
-  ~67 % des parametres : les degeler par groupe donnerait quatre modeles presque
-  entiers, et l'approche basculerait vers la categorie de B au lieu de rester une
-  specialisation legere.
-- **Le budget d'epoques total egale celui des autres approches.** `epoch_split=0.6`
-  repartit 60 % sur le tronc et 40 % sur les adaptateurs ; sans cette contrainte, H
-  gagnerait du temps de calcul et non de la methode (§6.3).
+- **No data is set aside.** A split specific to this approach (half for phase 1, half
+  for phase 2) would break §6.2 and measure the data volume rather than the method. The
+  adapters therefore see again images the trunk has already seen — it is the real regime
+  of a deployment, where a general model is specialised with the data at hand.
+- **The heads are trained in phase 1, frozen in phase 2.** On YOLO26 they weigh ~67 % of
+  the parameters: unfreezing them per group would give four almost complete models, and
+  the approach would switch to the category of B instead of staying a light
+  specialisation.
+- **The total epoch budget equals the other approaches'.** `epoch_split=0.6` puts 60 %
+  on the trunk and 40 % on the adapters; without this constraint, H would gain compute
+  time and not method (§6.3).
 """
 
 from __future__ import annotations
@@ -55,7 +54,13 @@ from insectpose.training.patching import (
     parameter_report,
     pose_trainer_class,
 )
-from insectpose.utils.device import amp_enabled, device_info, peak_vram_mb, reset_peak_vram
+from insectpose.utils.device import (
+    amp_enabled,
+    device_info,
+    peak_vram_mb,
+    reset_peak_vram,
+    resolve_num_workers,
+)
 from insectpose.utils.logging import get_logger
 
 log = get_logger("lora_per_dataset")
@@ -70,7 +75,7 @@ _TRAIN_KEYS = (
 
 @register_approach("lora_per_dataset")
 class LoraPerDatasetApproach(LoraApproach):
-    """Tronc commun partage, adaptateurs LoRA specialises par ordre d'insecte."""
+    """Shared common trunk, LoRA adapters specialised per insect order."""
 
     REQUIRED_APPROACH_KEYS = (
         "weights", "max_det", "conf", "iou", "inference_precision", "predict_chunk_size",
@@ -81,55 +86,55 @@ class LoraPerDatasetApproach(LoraApproach):
         super().__init__(cfg)
         self.namespace = namespace
         self.datasets = [str(d) for d in cfg.data.datasets]
-        # Un modele par groupe a l'inference : meme tronc, adaptateurs differents.
+        # One model per group at inference: same trunk, different adapters.
         self.models: dict[str, Any] = {}
 
     @classmethod
     def availability(cls) -> tuple[bool, str]:
         return LoraApproach.availability()
 
-    # --- repartition du budget d'epoques -----------------------------------
+    # --- split of the epoch budget ----------------------------------------------
     def _epoch_budget(self) -> tuple[int, int]:
-        """(epoques du tronc, epoques par groupe). Le total egale `train.epochs`.
+        """(trunk epochs, epochs per group). The total equals `train.epochs`.
 
-        Le budget est reparti, jamais ajoute : sinon H disposerait de plus de calcul
-        que les autres approches et gagnerait par la, pas par la methode (§6.3).
+        The budget is split, never added: otherwise H would have more compute than the
+        other approaches and would win through it, not through the method (§6.3).
         """
         total = int(self.cfg.train.epochs)
         split = float(self.cfg.approach.epoch_split)
         if not 0.0 < split < 1.0:
             raise ValueError(
-                f"approach.epoch_split doit etre dans ]0, 1[, recu {split}. "
-                "Il repartit le budget d'epoques entre tronc et adaptateurs."
+                f"approach.epoch_split must be in ]0, 1[, got {split}. "
+                "It splits the epoch budget between the trunk and the adapters."
             )
         stage1 = max(1, round(total * split))
         stage2 = max(1, total - stage1)
         return stage1, stage2
 
-    # --- gel de la phase 2 --------------------------------------------------
+    # --- phase 2 freeze ----------------------------------------------------------
     def _freeze_all_but_adapters(self, model: Any) -> None:
-        """Gele tout sauf les adaptateurs LoRA — tetes comprises.
+        """Freeze everything but the LoRA adapters — heads included.
 
-        Reapplique APRES la boucle de degel d'Ultralytics (ADR-0028), qui reactiverait
-        sinon `requires_grad` sur les parametres geles.
+        Re-applied AFTER the Ultralytics unfreeze loop (ADR-0028), which would otherwise
+        re-enable `requires_grad` on the frozen parameters.
         """
         parameters = dict(model.named_parameters())
         frozen = freeze_patterns_for(parameters, [r"lora_[AB]"])
         if len(frozen) == len(parameters):
             raise RuntimeError(
-                "Aucune couche LoRA dans le modele de phase 2 : l'injection n'a pas eu "
-                "lieu. Le tronc sauvegarde a ses adaptateurs FUSIONNES (ADR-0025), donc "
-                "la phase 2 doit en INJECTER de nouveaux, pas esperer les retrouver."
+                "No LoRA layer in the phase 2 model: the injection did not take place. "
+                "The saved trunk has its adapters MERGED (ADR-0025), so phase 2 must "
+                "INJECT new ones, not hope to find them again."
             )
         for name in frozen:
             parameters[name].requires_grad_(False)
 
-    # --- entrainement -------------------------------------------------------
+    # --- training ----------------------------------------------------------------
     def fit(self, data: FoldData, ctx: RunContext) -> None:
-        """Phase 1 (tronc commun) puis phase 2 (adaptateurs par groupe).
+        """Phase 1 (common trunk) then phase 2 (adapters per group).
 
-        Ne lit jamais data.test. Effet de bord : ecrit runs/<run_id>/weights/{trunk,
-        <dataset>}/ et runs/<run_id>/yolo_dataset/.
+        Never reads data.test. Side effect: writes runs/<run_id>/weights/{trunk,
+        <dataset>}/ and runs/<run_id>/yolo_dataset/.
         """
         from ultralytics import YOLO
 
@@ -140,12 +145,12 @@ class LoraPerDatasetApproach(LoraApproach):
         reset_peak_vram()
         started = time.perf_counter()
 
-        # --- phase 1 : tronc commun, sur TOUT le train du fold ---
-        # Aucun adaptateur ici : la sauvegarde les fusionnerait dans les poids de base,
-        # et le tronc recharge n'aurait plus rien a specialiser en phase 2.
+        # --- phase 1: common trunk, on the WHOLE train of the fold ---
+        # No adapter here: saving would merge them into the base weights, and the
+        # reloaded trunk would have nothing left to specialise in phase 2.
         trunk_data = export_fold(data, self.schema, ctx.subdir("yolo_dataset/trunk"),
                                  splits=("train", "val"))
-        ctx.logger.info("Phase 1 : tronc commun, %d epoque(s) sur %d image(s).",
+        ctx.logger.info("Phase 1: common trunk, %d epoch(s) on %d image(s).",
                         stage1_epochs, len(data.train))
         model = YOLO(str(self.cfg.approach.weights))
         model.train(
@@ -159,20 +164,20 @@ class LoraPerDatasetApproach(LoraApproach):
         stage1_time = time.perf_counter() - started
         release_model(model)
 
-        # --- phase 2 : adaptateurs specialises, un jeu par groupe ---
+        # --- phase 2: specialised adapters, one set per group ---
         per_dataset_time: dict[str, float] = {}
         for dataset in self.datasets:
             subset = data.filter_dataset(dataset)
             if len(subset.train) == 0:
                 raise ValueError(
-                    f"[{self.name}] aucune image d'entrainement pour '{dataset}' dans le "
+                    f"[{self.name}] no training image for '{dataset}' in "
                     f"fold {data.fold}."
                 )
             group_started = time.perf_counter()
             group_data = export_fold(subset, self.schema,
                                      ctx.subdir(f"yolo_dataset/{dataset}"),
                                      splits=("train", "val"))
-            ctx.logger.info("Phase 2 [%s] : adaptateurs seuls, %d epoque(s) sur %d image(s).",
+            ctx.logger.info("Phase 2 [%s]: adapters only, %d epoch(s) on %d image(s).",
                             dataset, stage2_epochs, len(subset.train))
 
             group_model = YOLO(str(trunk_weights))
@@ -182,8 +187,8 @@ class LoraPerDatasetApproach(LoraApproach):
                 name="train", exist_ok=True, seed=ctx.seed(f"adapters_{dataset}"),
                 device=device, amp=amp, deterministic=str(self.cfg.mode) == "debug",
                 verbose=False, epochs=stage2_epochs,
-                # Chaque groupe repart d'adaptateurs NEUFS injectes dans le tronc :
-                # sans cela, l'ordre de traitement des groupes influencerait le resultat.
+                # Each group starts again from NEW adapters injected into the trunk:
+                # otherwise the processing order of the groups would influence the result.
                 trainer=make_patched_trainer(
                     pose_trainer_class(), patch=self._apply_lora,
                     freeze=self._freeze_all_but_adapters, report=group_report,
@@ -197,7 +202,7 @@ class LoraPerDatasetApproach(LoraApproach):
             per_dataset_time[dataset] = time.perf_counter() - group_started
             ctx.extra[f"{dataset}_adapter_report"] = dict(group_report)
 
-        # Rechargement pour l'inference : un modele par groupe, tronc identique
+        # Reloading for inference: one model per group, identical trunk
         self.models = {d: YOLO(str(ctx.subdir(f"weights/{d}") / "best.pt"))
                        for d in self.datasets}
         for group_model in self.models.values():
@@ -221,11 +226,11 @@ class LoraPerDatasetApproach(LoraApproach):
             "lora_final_report": parameter_report(first.model),
         })
 
-    # --- inference ----------------------------------------------------------
+    # --- inference ---------------------------------------------------------------
     def predict_instances(self, images: ImageSet, ctx: RunContext) -> pd.DataFrame:
-        """Route chaque image vers le modele portant les adaptateurs de son groupe."""
+        """Route each image to the model carrying the adapters of its group."""
         if not self.models:
-            raise RuntimeError("Modeles non charges : appeler fit() ou load() d'abord.")
+            raise RuntimeError("Models not loaded: call fit() or load() first.")
         frames: list[pd.DataFrame] = []
         for dataset in self.datasets:
             subset = images.filter_dataset(dataset)
@@ -237,32 +242,32 @@ class LoraPerDatasetApproach(LoraApproach):
             return pd.DataFrame()
         return pd.concat(frames, ignore_index=True)
 
-    # --- rechargement -------------------------------------------------------
+    # --- reloading ---------------------------------------------------------------
     @classmethod
     def load(cls, run_dir: Path, cfg: Any, namespace: str = "") -> LoraPerDatasetApproach:
-        """Recharge les N modeles specialises, sans reentrainement."""
+        """Reload the N specialised models, without retraining."""
         from ultralytics import YOLO
 
         obj = cls(cfg, namespace=namespace)
         for dataset in obj.datasets:
             weights = Path(run_dir) / "weights" / dataset / "best.pt"
             if not weights.exists():
-                raise FileNotFoundError(f"Poids introuvables : {weights}")
+                raise FileNotFoundError(f"Weights not found: {weights}")
             obj.models[dataset] = YOLO(str(weights))
             obj._prepare_inference_model(obj.models[dataset])
         return obj
 
-    # --- utilitaires --------------------------------------------------------
+    # --- utilities ---------------------------------------------------------------
     def _train_kwargs(self) -> dict[str, Any]:
-        """Hyperparametres communs aux deux phases, tous issus de la config.
+        """Hyperparameters common to both phases, all coming from the config.
 
-        `epochs` est exclu : il est reparti entre les phases par `_epoch_budget`.
+        `epochs` is excluded: it is split between the phases by `_epoch_budget`.
         """
         approach_cfg = self.cfg.approach
         kwargs: dict[str, Any] = {
             "batch": int(self.cfg.train.batch_size),
             "imgsz": self._imgsz(),
-            "workers": int(self.cfg.train.num_workers),
+            "workers": resolve_num_workers(self.cfg.train.num_workers),
             "patience": int(self.cfg.train.early_stopping_patience),
             "cache": self.cfg.train.cache,
             "plots": bool(self.cfg.train.plots),

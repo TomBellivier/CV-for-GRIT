@@ -1,4 +1,4 @@
-"""Import de dependances optionnelles avec message actionnable (jamais silencieux)."""
+"""Import of optional dependencies with an actionable message (never silent)."""
 
 from __future__ import annotations
 
@@ -7,10 +7,10 @@ from types import ModuleType
 
 
 def require(module: str, extra: str) -> ModuleType:
-    """Importe `module` ou echoue en indiquant l'extra pip a installer."""
+    """Import `module` or fail, naming the pip extra to install."""
     try:
         return importlib.import_module(module)
-    except ImportError as exc:  # pragma: no cover - depend de l'environnement
+    except ImportError as exc:  # pragma: no cover - depends on the environment
         raise ImportError(
-            f"Le module '{module}' est requis ici. Installer : pip install -e \".[{extra}]\""
+            f"The module '{module}' is required here. Install: pip install -e \".[{extra}]\""
         ) from exc

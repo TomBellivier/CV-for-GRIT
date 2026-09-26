@@ -1,4 +1,4 @@
-"""Tests du tuning : l'objectif doit venir de l'evaluateur, jamais d'un framework (§6.3)."""
+"""Tuning tests: the objective must come from the evaluator, never from a framework (§6.3)."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ def test_search_space_translation() -> None:
 
 def test_unknown_space_type_is_rejected() -> None:
     study = optuna.create_study()
-    with pytest.raises(ValueError, match="inconnu"):
+    with pytest.raises(ValueError, match="Unknown"):
         suggest_from_spec(study.ask(), {"x": {"type": "gaussian"}})
 
 
@@ -38,7 +38,7 @@ def test_study_name_is_canonical(cfg) -> None:
 
 @pytest.mark.smoke
 def test_nested_tuning_never_searches_on_outer_test(cfg, project) -> None:
-    """Coeur du protocole (ADR-0012) : aucun trial ne voit une image de test externe."""
+    """Core of the protocol (ADR-0012): no trial sees an outer test image."""
 
     from insectpose.data.splits import inner_split_id, make_split_id
     from insectpose.utils.io import read_json, read_parquet
@@ -55,13 +55,13 @@ def test_nested_tuning_never_searches_on_outer_test(cfg, project) -> None:
         outer_test = set(outer.loc[(outer["fold"] == outer_fold) & (outer["role"] == "test"),
                                    "image_id"])
         assert not (set(inner["image_id"]) & outer_test), (
-            f"fuite : le decoupage interne du fold {outer_fold} contient du test externe"
+            f"leak: the inner split of fold {outer_fold} contains outer test images"
         )
 
     results = pipeline.cmd_tune(cfg)
     assert results["mode"] == "nested"
     assert len(results["final_runs"]) == int(cfg.cv.n_folds)
-    # Chaque fold externe a ses propres hyperparametres, issus de sa propre recherche
+    # Each outer fold has its own hyperparameters, from its own search
     for outer_fold, run_id in results["final_runs"].items():
         manifest = read_json(project.manifest(run_id))
         assert manifest["hpo_source_fold"] == outer_fold
@@ -86,10 +86,10 @@ def test_tune_once_reuses_one_search_for_all_folds(cfg, project) -> None:
 
 @pytest.mark.smoke
 def test_hpo_trials_are_excluded_from_results(cfg, project) -> None:
-    """Un run d'HPO a servi a CHOISIR des hyperparametres : ce n'est pas un resultat.
+    """An HPO run was used to CHOOSE hyperparameters: it is not a result.
 
-    Il tourne sur un decoupage interne ; l'agreger avec les runs finaux melangerait
-    exploration et evaluation dans le meme tableau.
+    It runs on an inner split; aggregating it with the final runs would mix exploration
+    and evaluation in the same table.
     """
     from insectpose.evaluation.aggregate import final_runs, summary_table, write_master
     from insectpose.utils.io import read_parquet
@@ -104,7 +104,7 @@ def test_hpo_trials_are_excluded_from_results(cfg, project) -> None:
     assert set(master["role_in_protocol"]) == {"final", "hpo_trial"}
     citable = final_runs(master)
     assert citable["run_id"].nunique() < master["run_id"].nunique()
-    # Les runs citables sont ceux du decoupage EXTERNE
+    # The quotable runs are those of the OUTER split
     assert citable["split_id"].nunique() == 1
     assert "__outer" not in citable["split_id"].iloc[0]
 
@@ -113,7 +113,7 @@ def test_hpo_trials_are_excluded_from_results(cfg, project) -> None:
 
 
 def test_budget_targets_a_total_not_an_increment() -> None:
-    """Regression : une etude reprise gonflait le budget d'un fold sans toucher aux autres."""
+    """Regression: a resumed study inflated the budget of one fold without touching the others."""
     import optuna
 
     from insectpose.tuning.objective import completed_trials, remaining_trials
@@ -126,12 +126,12 @@ def test_budget_targets_a_total_not_an_increment() -> None:
             params={}, distributions={}, value=float(value)))
     assert completed_trials(study) == 12
     assert remaining_trials(study, 40) == 28
-    assert remaining_trials(study, 10) == 0      # budget deja depasse : rien a ajouter
+    assert remaining_trials(study, 10) == 0      # budget already exceeded: nothing to add
 
 
 @pytest.mark.smoke
 def test_relaunching_tune_does_not_inflate_the_budget(cfg, project) -> None:
-    """Relancer `tune` complete le budget au lieu de l'additionner (§6.3)."""
+    """Relaunching `tune` completes the budget instead of adding to it (§6.3)."""
     import optuna
 
     from insectpose.tuning.objective import completed_trials
@@ -141,7 +141,7 @@ def test_relaunching_tune_does_not_inflate_the_budget(cfg, project) -> None:
     OmegaConf.update(cfg, "tuning.mode", "tune_once")
     pipeline.cmd_split(cfg)
     pipeline.cmd_tune(cfg)
-    pipeline.cmd_tune(cfg)          # second appel : ne doit rien ajouter
+    pipeline.cmd_tune(cfg)          # second call: must add nothing
 
     db = next((project.runs / "optuna").glob("*.db"))
     storage = f"sqlite:///{db}"
@@ -150,33 +150,33 @@ def test_relaunching_tune_does_not_inflate_the_budget(cfg, project) -> None:
 
 
 # ===========================================================================
-# Protocole d'HPO fige (ADR-0031, ADR-0033)
+# Frozen HPO protocol (ADR-0031, ADR-0033)
 # ===========================================================================
 @pytest.mark.parametrize("approach", ["yolo_pooled", "yolo_per_dataset", "detect_then_pose",
                                       "lora", "group_bn", "yolo_pooled_reduced"])
 def test_all_approaches_share_the_same_hpo_budget(config_factory, approach) -> None:
-    """§6.3 : comparer des approches a budgets differents mesurerait le budget."""
+    """§6.3: comparing approaches with different budgets would measure the budget."""
     cfg = config_factory([f"approach={approach}"])
     assert int(cfg.tuning.n_trials) == 20
     assert int(cfg.tuning.n_startup_trials) == 5
     assert int(cfg.tuning.inner_folds) == 3
     assert str(cfg.tuning.mode) == "tune_once"
     assert int(cfg.tuning.pruner_warmup_steps) == 1
-    # Quatre dimensions : au-dela, 20 trials ne suffisent pas a explorer l'espace
+    # Four dimensions: beyond that, 20 trials are not enough to explore the space
     assert len(dict(cfg.approach.search_space)) == 4
 
 
 def test_default_epoch_budget_is_frozen() -> None:
-    """La duree d'entrainement fait partie du protocole (ADR-0031).
+    """The training duration is part of the protocol (ADR-0031).
 
-    Lue depuis le YAML livre, car la fixture de test la reduit volontairement.
+    Read from the shipped YAML, because the test fixture deliberately reduces it.
     """
     from pathlib import Path
 
     import yaml
 
-    # Chemin deduit de CE fichier : un paquet `tests` installe dans l'environnement
-    # masquerait un import absolu `tests.conftest`.
+    # Path derived from THIS file: a `tests` package installed in the environment would
+    # shadow an absolute `tests.conftest` import.
     repo_root = Path(__file__).resolve().parents[1]
     config = yaml.safe_load((repo_root / "configs" / "config.yaml").read_text())
     assert int(config["train"]["epochs"]) == 100
@@ -185,7 +185,7 @@ def test_default_epoch_budget_is_frozen() -> None:
 @pytest.mark.parametrize("approach", ["yolo_pooled", "yolo_per_dataset", "lora",
                                       "group_bn", "yolo_pooled_reduced"])
 def test_base_weights_are_frozen_to_the_same_model(config_factory, approach) -> None:
-    """ADR-0033 : une taille de modele differente ferait porter la comparaison sur elle."""
+    """ADR-0033: a different model size would make the comparison be about it."""
     cfg = config_factory([f"approach={approach}"])
     assert str(cfg.approach.weights) == "yolo26n-pose.pt"
 
@@ -197,7 +197,7 @@ def test_detect_then_pose_uses_the_same_base_family(config_factory) -> None:
 
 
 def test_augmentation_is_not_searched(config_factory) -> None:
-    """ADR-0032 : l'augmentation est fixee, pas cherchee."""
+    """ADR-0032: the augmentation is fixed, not searched."""
     cfg = config_factory(["approach=yolo_pooled"])
     searched = set(dict(cfg.approach.search_space))
     for fixed in ("degrees", "scale", "mosaic", "fliplr", "translate", "lrf"):
@@ -205,7 +205,7 @@ def test_augmentation_is_not_searched(config_factory) -> None:
 
 
 def test_lora_alpha_is_derived_from_rank(config_factory) -> None:
-    """ADR-0031 : chercher alpha en plus de r explorerait une redondance."""
+    """ADR-0031: searching alpha on top of r would explore a redundancy."""
     from omegaconf import OmegaConf
 
     from insectpose.approaches.lora import LoraApproach
@@ -217,14 +217,14 @@ def test_lora_alpha_is_derived_from_rank(config_factory) -> None:
     OmegaConf.update(cfg, "approach.lora.r", 16)
     assert approach._alpha() == pytest.approx(32.0)      # 2 x r
     OmegaConf.update(cfg, "approach.lora.alpha", 8.0)
-    assert approach._alpha() == pytest.approx(8.0)       # valeur explicite prioritaire
+    assert approach._alpha() == pytest.approx(8.0)       # explicit value takes precedence
 
 
 # ===========================================================================
-# Hash de protocole : empeche de melanger deux espaces de recherche
+# Protocol hash: prevents mixing two search spaces
 # ===========================================================================
 def test_changing_the_search_space_creates_a_new_study(config_factory) -> None:
-    """Regression : une reprise apres modification melangeait deux protocoles."""
+    """Regression: resuming after a modification mixed two protocols."""
     from omegaconf import OmegaConf
 
     from insectpose.tuning.objective import study_name_for
@@ -240,7 +240,7 @@ def test_changing_the_search_space_creates_a_new_study(config_factory) -> None:
 @pytest.mark.parametrize("key,value", [("tuning.n_trials", 40), ("tuning.inner_folds", 2),
                                        ("tuning.mode", "nested"), ("train.epochs", 500)])
 def test_changing_the_budget_creates_a_new_study(config_factory, key, value) -> None:
-    """Le budget et la duree font partie du protocole : les changer isole l'etude."""
+    """The budget and the duration are part of the protocol: changing them isolates the study."""
     from omegaconf import OmegaConf
 
     from insectpose.tuning.objective import study_name_for

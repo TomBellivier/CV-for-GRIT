@@ -1,5 +1,5 @@
 # @package _global_
-# Experience figee (§5.3). Tout resultat cite dans le rapport passe par un fichier de ce type.
+# Frozen experiment (§5.3). Every result quoted in the report goes through such a file.
 defaults:
   - override /data: pooled
   - override /approach: mean_pose

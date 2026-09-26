@@ -1,13 +1,13 @@
-"""Tests des approches D (lora), E (group_bn) et F (yolo_pooled_reduced).
+"""Tests of approaches D (lora), E (group_bn) and F (yolo_pooled_reduced).
 
-Ces trois approches modifient le `nn.Module` construit par Ultralytics. Le patch
-lui-meme exige torch et ne peut pas etre teste sans GPU ni dependance lourde. En
-revanche, **toute la logique de decision** — quels modules recoivent un adaptateur,
-quels parametres sont geles, a quel groupe appartient une image, quels keypoints sont
-retires — est ecrite sous forme de fonctions pures, et c'est elle qui est testee ici.
+These three approaches modify the `nn.Module` built by Ultralytics. The patch itself
+requires torch and cannot be tested without a GPU or heavy dependencies. On the other
+hand, **all the decision logic** — which modules receive an adapter, which parameters
+are frozen, which group an image belongs to, which keypoints are removed — is written
+as pure functions, and that is what is tested here.
 
-C'est deliberement la partie qui casse en silence : un motif de selection errone donne
-un entrainement qui tourne normalement et n'apprend rien.
+It is deliberately the part that breaks silently: a wrong selection pattern gives a
+training that runs normally and learns nothing.
 """
 
 from __future__ import annotations
@@ -37,41 +37,41 @@ from insectpose.utils.io import read_json, read_parquet
 
 SCHEMA = "insect42_v1"
 
-# Structure typique d'un YOLO-pose : Sequential de blocs, la tete en dernier.
+# Typical structure of a YOLO-pose: Sequential of blocks, the head last.
 MODULE_NAMES = [
     "model", "model.0", "model.0.conv", "model.0.bn",
     "model.9", "model.9.conv", "model.9.bn",
     "model.20", "model.20.cv1.conv", "model.20.cv2.conv",
     "model.21", "model.21.conv", "model.22", "model.22.conv",
-    "model.23", "model.23.cv4.0.0.conv",          # tete
+    "model.23", "model.23.cv4.0.0.conv",          # head
 ]
 
 
 # ===========================================================================
-# Selection des modules (approche D)
+# Module selection (approach D)
 # ===========================================================================
 def test_head_index_is_the_last_block() -> None:
     assert head_index(MODULE_NAMES) == 23
 
 
 def test_head_index_refuses_unexpected_structure() -> None:
-    with pytest.raises(ValueError, match="structure inattendue"):
+    with pytest.raises(ValueError, match="unexpected structure"):
         head_index(["backbone.conv", "neck.conv"])
 
 
 def test_lora_targets_are_the_last_neck_blocks() -> None:
-    """Les index sont calcules depuis la structure : changer de taille de reseau ne casse rien."""
+    """The indices are computed from the structure: changing the network size breaks nothing."""
     last = head_index(MODULE_NAMES)
     blocks = "|".join(str(i) for i in range(last - 3, last))
     targets = match_module_names(MODULE_NAMES, [rf"^model\.({blocks})\..*\bconv$"])
     assert set(targets) == {"model.20.cv1.conv", "model.20.cv2.conv",
                             "model.21.conv", "model.22.conv"}
-    assert not any(t.startswith("model.23") for t in targets)   # la tete est exclue
-    assert not any(t.startswith("model.0") for t in targets)    # le backbone aussi
+    assert not any(t.startswith("model.23") for t in targets)   # the head is excluded
+    assert not any(t.startswith("model.0") for t in targets)    # so is the backbone
 
 
 def test_freeze_keeps_adapters_and_head_trainable() -> None:
-    """Le gel doit epargner les adaptateurs, sinon l'entrainement n'apprend rien."""
+    """The freezing must spare the adapters, otherwise the training learns nothing."""
     parameters = [
         "model.0.conv.weight",
         "model.20.cv1.conv.base_layer.weight",
@@ -96,7 +96,7 @@ def test_lora_declares_its_dependency() -> None:
 
 
 def test_lora_config_records_what_matters(project) -> None:
-    """Ce qui reste degele a cote des adaptateurs est LA variable cachee (ADR-0025)."""
+    """What stays unfrozen next to the adapters is THE hidden variable (ADR-0025)."""
     cfg = load_config([f"paths.root={project.root}", "approach=lora"])
     assert int(cfg.approach.lora.r) > 0
     assert bool(cfg.approach.lora.train_head) is True
@@ -104,10 +104,10 @@ def test_lora_config_records_what_matters(project) -> None:
 
 
 # ===========================================================================
-# Routage par groupe (approche E)
+# Per-group routing (approach E)
 # ===========================================================================
 def test_dataset_index_is_read_from_exported_filenames() -> None:
-    """L'export YOLO aplatit `<dataset>/<stem>` : le prefixe porte le groupe."""
+    """The YOLO export flattens `<dataset>/<stem>`: the prefix carries the group."""
     paths = ["/x/y/coleoptera__img001.jpg", "/x/y/diptera__img002.jpg",
              "hymenoptera__img003.png"]
     datasets = ["coleoptera", "diptera", "hymenoptera", "lepidoptera"]
@@ -115,14 +115,14 @@ def test_dataset_index_is_read_from_exported_filenames() -> None:
 
 
 def test_unknown_dataset_is_an_explicit_error() -> None:
-    """ADR-0014 : le groupe est toujours declare ; l'inconnu ne se devine pas."""
-    with pytest.raises(RuntimeError, match="Dataset indeterminable"):
+    """ADR-0014: the group is always declared; the unknown is not guessed."""
+    with pytest.raises(RuntimeError, match="Cannot determine the dataset"):
         dataset_indices_from_paths(["/x/orthoptera__img001.jpg"], ["coleoptera"])
 
 
 def test_missing_group_context_is_an_explicit_error() -> None:
     CONTEXT.clear()
-    with pytest.raises(RuntimeError, match="Aucun groupe"):
+    with pytest.raises(RuntimeError, match="No insect group"):
         CONTEXT.require(4)
 
 
@@ -133,18 +133,18 @@ def test_single_group_is_broadcast_to_the_batch() -> None:
 
 
 def test_group_context_size_mismatch_is_refused() -> None:
-    with active_group(np.array([0, 1])), pytest.raises(RuntimeError, match="lot de 5"):
+    with active_group(np.array([0, 1])), pytest.raises(RuntimeError, match="batch of 5"):
         CONTEXT.require(5)
 
 
 def test_group_order_follows_the_frozen_dataset_order(cfg) -> None:
-    """L'ordre des groupes doit etre stable : il indexe des poids sauvegardes."""
+    """The group order must be stable: it indexes saved weights."""
     OmegaConf.update(cfg, "data.datasets", ["diptera", "coleoptera"])
     assert default_datasets(cfg) == ["coleoptera", "diptera"]
 
 
 # ===========================================================================
-# Retrait de keypoints (approche F)
+# Keypoint removal (approach F)
 # ===========================================================================
 def test_dropped_keypoints_cover_legs_and_hindwings(project) -> None:
     schema = load_schema(SCHEMA, project.configs)
@@ -157,18 +157,18 @@ def test_dropped_keypoints_cover_legs_and_hindwings(project) -> None:
 
 
 def test_masking_sets_visibility_to_zero_without_moving_points() -> None:
-    """Un point masque n'est pas appris ; ses coordonnees restent intactes."""
+    """A masked point is not learned; its coordinates stay intact."""
     annotations = pd.DataFrame([{"kpts_vis": [2, 2, 1, 2], "kpts_xy": [1.0, 2.0] * 4}])
     masked = mask_keypoints(annotations, [1, 3])
     assert masked["kpts_vis"].iloc[0] == [2, 0, 1, 0]
     assert masked["kpts_xy"].iloc[0] == annotations["kpts_xy"].iloc[0]
-    assert annotations["kpts_vis"].iloc[0] == [2, 2, 1, 2]   # original non modifie
+    assert annotations["kpts_vis"].iloc[0] == [2, 2, 1, 2]   # original not modified
 
 
 def test_reduced_approach_masks_train_and_val_but_not_test(
     fake_ultralytics, config_factory, project  # noqa: ARG001
 ) -> None:
-    """Le test reste intact : c'est la verite terrain commune a toutes les approches."""
+    """The test stays intact: it is the ground truth shared by every approach."""
     cfg = config_factory(["approach=yolo_pooled_reduced", "train.device=cpu"])
     pipeline.cmd_split(cfg)
     ctx, data, approach = pipeline._prepare_run(cfg)
@@ -181,7 +181,7 @@ def test_reduced_approach_masks_train_and_val_but_not_test(
         vis = np.stack(prepared.role(role).annotations["kpts_vis"].map(np.asarray).to_numpy())
         assert (vis[:, dropped] == 0).all()
     vis_test = np.stack(prepared.test.annotations["kpts_vis"].map(np.asarray).to_numpy())
-    assert (vis_test[:, dropped] > 0).any(), "le test ne doit pas etre masque"
+    assert (vis_test[:, dropped] > 0).any(), "the test must not be masked"
 
 
 def test_reduced_approach_records_what_was_dropped(
@@ -194,26 +194,26 @@ def test_reduced_approach_records_what_was_dropped(
     assert manifest["n_supervised_keypoints"] == 26
     assert len(manifest["dropped_keypoints"]) == 16
 
-    # Les predictions restent au schema complet : le contrat 3 l'exige (§3.4)
+    # The predictions stay in the full schema: contract 3 requires it (§3.4)
     predictions = read_parquet(project.predictions(ctx.run_id, "test", ctx.fold),
                                artifact="predictions", validate=True)
     assert len(predictions["kpts_xy"].iloc[0]) == 84
 
 
 def test_unmatched_drop_pattern_is_refused(fake_ultralytics, config_factory) -> None:  # noqa: ARG001
-    """Un motif qui ne correspond a rien rendrait F identique a A, en silence."""
+    """A pattern matching nothing would make F identical to A, silently."""
     cfg = config_factory(["approach=yolo_pooled_reduced", "train.device=cpu"])
-    OmegaConf.update(cfg, "approach.drop_keypoints", ["inexistant"])
+    OmegaConf.update(cfg, "approach.drop_keypoints", ["nonexistent"])
     pipeline.cmd_split(cfg)
-    with pytest.raises(ValueError, match="Aucun keypoint ne correspond"):
+    with pytest.raises(ValueError, match="No keypoint matches"):
         pipeline.cmd_train(cfg)
 
 
 # ===========================================================================
-# Comparaison equitable de F (ADR-0027)
+# Fair comparison of F (ADR-0027)
 # ===========================================================================
 def test_excluded_keypoints_produce_a_retained_mean(reported) -> None:
-    """La comparaison valide de F porte sur les points CONSERVES."""
+    """The valid comparison of F is on the KEPT points."""
     from insectpose.reporting.compare import CompareFilter, write_comparison
 
     _, project, _ = reported
@@ -232,10 +232,10 @@ def reported(cfg, project):
 
 
 # ===========================================================================
-# Remplacement des modules (approche E) - testable sans torch
+# Module replacement (approach E) - testable without torch
 # ===========================================================================
 class _FakeModule:
-    """Arbre de modules minimal, imitant l'interface `named_children` de torch."""
+    """Minimal module tree, mimicking the `named_children` interface of torch."""
 
     def __init__(self, **children: object) -> None:
         for name, child in children.items():
@@ -251,7 +251,7 @@ class _FakeBN:
 
 
 class _FakeGroupBN:
-    """Remplacant contenant lui-meme des BN : c'est ce qui provoquait la recursion."""
+    """Replacement itself containing BNs: this is what caused the recursion."""
 
     def __init__(self, source: object, n: int = 4) -> None:
         self.source = source
@@ -274,30 +274,30 @@ def _replace(root):
 
 
 def test_replacement_does_not_recurse_into_its_own_output() -> None:
-    """Regression : le remplacant contient des BN ; les remplacer donnerait une recursion."""
+    """Regression: the replacement contains BNs; replacing them would give a recursion."""
     root = _FakeModule(a=_FakeBN(), b=_FakeModule(c=_FakeBN(), d=_FakeModule(e=_FakeBN())))
     assert _replace(root) == 3
     assert isinstance(root.a, _FakeGroupBN)
     assert isinstance(root.b.c, _FakeGroupBN)
     assert isinstance(root.b.d.e, _FakeGroupBN)
-    # Les BN internes du remplacant restent intactes
+    # The inner BNs of the replacement stay intact
     assert isinstance(root.a.branches.b0, _FakeBN)
 
 
 def test_replacement_is_idempotent() -> None:
-    """Un second passage ne doit rien remplacer : sinon l'imbrication recommence."""
+    """A second pass must replace nothing: otherwise the nesting starts again."""
     root = _FakeModule(a=_FakeBN(), b=_FakeModule(c=_FakeBN()))
     assert _replace(root) == 2
     assert _replace(root) == 0
 
 
 def test_replacement_counts_zero_on_a_model_without_batchnorm() -> None:
-    """Zero remplacement = approche sans effet : l'appelant doit lever une erreur."""
+    """Zero replacement = approach without effect: the caller must raise an error."""
     assert _replace(_FakeModule(a=_FakeModule(), b=_FakeModule())) == 0
 
 
 # ===========================================================================
-# Trainer patche : validateur, evaluation finale (testable sans torch)
+# Patched trainer: validator, final evaluation (testable without torch)
 # ===========================================================================
 class _FakeValidator:
     def __init__(self) -> None:
@@ -309,7 +309,7 @@ class _FakeValidator:
 
 
 class _FakeTrainerBase:
-    """Base minimale imitant l'interface du trainer Ultralytics utilisee par le patch."""
+    """Minimal base mimicking the Ultralytics trainer interface used by the patch."""
 
     def __init__(self) -> None:
         self.model = _FakeModule()
@@ -334,7 +334,7 @@ class _FakeTrainerBase:
 
 
 def test_validator_batches_also_update_the_context() -> None:
-    """Le validateur a son propre preprocess : sans relais, le contexte reste perime."""
+    """The validator has its own preprocess: without a relay, the context stays stale."""
     from insectpose.training.patching import make_patched_trainer
 
     seen: list[object] = []
@@ -347,7 +347,7 @@ def test_validator_batches_also_update_the_context() -> None:
 
 
 def test_final_eval_can_be_skipped() -> None:
-    """Sur un modele patche, l'evaluation finale rechargerait et fusionnerait le modele."""
+    """On a patched model, the final evaluation would reload and fuse the model."""
     from insectpose.training.patching import make_patched_trainer
 
     skipping = make_patched_trainer(_FakeTrainerBase, skip_final_eval=True)()
@@ -369,7 +369,7 @@ def test_patch_is_applied_at_model_construction() -> None:
 
 
 def test_lora_merge_replaces_wrappers_by_plain_convolutions() -> None:
-    """Apres fusion, le checkpoint ne depend plus de peft et redevient fusionnable."""
+    """After merging, the checkpoint no longer depends on peft and becomes fusable again."""
     from insectpose.models.group_norm import replace_modules
 
     class _FakeLora:
@@ -401,10 +401,10 @@ def test_lora_merge_replaces_wrappers_by_plain_convolutions() -> None:
 
 
 # ===========================================================================
-# Serialisation des classes construites dynamiquement (approche E)
+# Serialisation of dynamically built classes (approach E)
 # ===========================================================================
 def _make_local_class():
-    """Classe definie dans une fonction : introuvable par pickle en l'etat."""
+    """Class defined in a function: not findable by pickle as is."""
 
     class Dynamic:
         def __init__(self, value: int = 1) -> None:
@@ -414,7 +414,7 @@ def _make_local_class():
 
 
 def test_dynamic_class_is_not_picklable_without_registration() -> None:
-    """Regression : Ultralytics serialise le modele a chaque sauvegarde de checkpoint."""
+    """Regression: Ultralytics serialises the model at each checkpoint save."""
     import pickle
 
     with pytest.raises((AttributeError, pickle.PicklingError)):
@@ -434,12 +434,12 @@ def test_registration_makes_a_dynamic_class_picklable() -> None:
 
 
 def test_group_batchnorm_is_exposed_at_module_level() -> None:
-    """Pickle resout `module.GroupBatchNorm2d` : l'attribut doit exister ou echouer clairement."""
+    """Pickle resolves `module.GroupBatchNorm2d`: the attribute must exist or fail clearly."""
     import insectpose.models.group_norm as module
 
     try:
         cls = module.GroupBatchNorm2d
-    except ImportError as exc:          # torch absent : message actionnable attendu
+    except ImportError as exc:          # torch missing: actionable message expected
         assert "torch" in str(exc)
         return
     assert cls.__qualname__ == "GroupBatchNorm2d"
@@ -449,37 +449,37 @@ def test_group_batchnorm_is_exposed_at_module_level() -> None:
 def test_unknown_module_attribute_still_raises() -> None:
     import insectpose.models.group_norm as module
 
-    attribute = "inexistant"   # nom variable : sinon ruff exige l'acces direct
-    with pytest.raises(AttributeError, match="inexistant"):
+    attribute = "nonexistent"   # variable name: otherwise ruff demands direct access
+    with pytest.raises(AttributeError, match="nonexistent"):
         getattr(module, attribute)
 
 
 # ===========================================================================
-# Convolutions groupees (approche D)
+# Grouped convolutions (approach D)
 # ===========================================================================
 CONVOLUTIONS = [
     ("model.0.conv", 1),
     ("model.20.cv1.conv", 1),
-    ("model.20.cv2.conv", 128),      # depthwise : peft exige rang % groups == 0
+    ("model.20.cv2.conv", 128),      # depthwise: peft requires rank % groups == 0
     ("model.21.conv", 1),
     ("model.22.conv", 256),          # depthwise
-    ("model.23.cv4.0.0.conv", 1),    # tete
+    ("model.23.cv4.0.0.conv", 1),    # head
 ]
 
 
 def test_grouped_convolutions_are_excluded_from_lora_targets() -> None:
-    """Regression : peft refuse une depthwise si le rang n'est pas divisible par groups."""
+    """Regression: peft refuses a depthwise conv if the rank is not divisible by groups."""
     from insectpose.training.patching import match_conv_targets
 
     kept, skipped = match_conv_targets(CONVOLUTIONS, [r"^model\.(20|21|22)\..*\bconv$"])
     assert kept == ["model.20.cv1.conv", "model.21.conv"]
     assert skipped == ["model.20.cv2.conv", "model.22.conv"]
-    assert "model.0.conv" not in kept + skipped        # hors motif
-    assert "model.23.cv4.0.0.conv" not in kept         # la tete n'est pas adaptee
+    assert "model.0.conv" not in kept + skipped        # outside the pattern
+    assert "model.23.cv4.0.0.conv" not in kept         # the head is not adapted
 
 
 def test_all_grouped_targets_leaves_nothing_to_adapt() -> None:
-    """Le cas doit etre detectable : sinon l'entrainement n'adapterait rien."""
+    """The case must be detectable: otherwise the training would adapt nothing."""
     from insectpose.training.patching import match_conv_targets
 
     kept, skipped = match_conv_targets([("model.22.conv", 256)], [r"^model\.22\."])

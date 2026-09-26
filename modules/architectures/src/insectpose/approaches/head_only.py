@@ -1,19 +1,19 @@
-"""Approche G : entrainement des tetes seules (ADR-0035).
+"""Approach G: training the heads only (ADR-0035).
 
-Backbone et cou entierement geles, seules les tetes de detection/pose sont entrainees.
-Aucun adaptateur.
+Backbone and neck entirely frozen, only the detection/pose heads are trained. No
+adapter.
 
-Cette approche est le **temoin indispensable de LoRA** (approche D). Sur YOLO26, les
-tetes representent environ les deux tiers des parametres a l'entrainement : une variante
-LoRA qui les laisse entrainables entraine donc ~67 % du reseau, et ses adaptateurs n'en
-pesent que ~1,3 %. Sans ce temoin, on ne peut pas savoir si le gain observe vient des
-adaptateurs ou simplement du reentrainement des tetes.
+This approach is the **essential control of LoRA** (approach D). On YOLO26, the heads
+represent about two thirds of the parameters at training time: a LoRA variant that
+keeps them trainable therefore trains ~67 % of the network, its adapters weighing only
+~1.3 %. Without this control, one cannot tell whether the observed gain comes from the
+adapters or simply from retraining the heads.
 
-Trois lectures deviennent possibles en comparant D et G :
-- G proche de D  -> les adaptateurs n'apportent rien, seul le reentrainement des tetes compte ;
-- D nettement au-dessus de G -> les adaptateurs apportent bien quelque chose ;
-- G proche de A (entrainement complet) -> le backbone COCO transfere bien, et geler
-  l'essentiel du reseau suffit.
+Three readings become possible when comparing D and G:
+- G close to D  -> the adapters bring nothing, only the head retraining counts;
+- D clearly above G -> the adapters do bring something;
+- G close to A (full training) -> the COCO backbone transfers well, and freezing most of
+  the network is enough.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ log = get_logger("head_only")
 
 @register_approach("head_only")
 class HeadOnlyApproach(YoloPooledApproach):
-    """YOLO-pose dont seules les tetes sont entrainees."""
+    """YOLO-pose whose heads only are trained."""
 
     REQUIRED_APPROACH_KEYS = (
         "weights", "max_det", "conf", "iou", "inference_precision", "predict_chunk_size",
@@ -45,10 +45,10 @@ class HeadOnlyApproach(YoloPooledApproach):
     )
 
     def _trainable_patterns(self, model: Any) -> list[str]:
-        """Motifs des parametres a laisser entrainables.
+        """Patterns of the parameters to leave trainable.
 
-        Le nombre de blocs est calcule depuis la STRUCTURE du modele : l'index de la
-        tete varie avec la taille du reseau (n/s/m/l) et avec la version de YOLO.
+        The number of blocks is computed from the STRUCTURE of the model: the index of the
+        head varies with the network size (n/s/m/l) and with the YOLO version.
         """
         names = [name for name, _ in model.named_modules()]
         last = head_index(names)
@@ -57,10 +57,10 @@ class HeadOnlyApproach(YoloPooledApproach):
         return [rf"^model\.({blocks})\."]
 
     def _freeze(self, model: Any) -> None:
-        """Gele tout sauf les derniers blocs.
+        """Freeze everything but the last blocks.
 
-        Reapplique APRES la boucle de degel d'Ultralytics (ADR-0028), qui reactiverait
-        sinon `requires_grad` sur les parametres geles.
+        Re-applied AFTER the Ultralytics unfreeze loop (ADR-0028), which would otherwise
+        re-enable `requires_grad` on the frozen parameters.
         """
         patterns = self._trainable_patterns(model)
         parameters = dict(model.named_parameters())
@@ -69,18 +69,18 @@ class HeadOnlyApproach(YoloPooledApproach):
         self._patterns = patterns
 
     def _trainer_class(self, ctx: RunContext) -> Any:
-        """Trainer applicant le gel au bon moment du cycle Ultralytics."""
+        """Trainer applying the freeze at the right moment of the Ultralytics cycle."""
         report: dict[str, Any] = {}
         ctx.extra["head_report"] = report
         return make_patched_trainer(
             pose_trainer_class(), freeze=self._freeze, report=report,
-            # L'evaluation finale recharge et fusionne le checkpoint : inutile ici, et
-            # ses metriques ne servent de toute facon qu'au monitoring (§7.1).
+            # The final evaluation reloads and fuses the checkpoint: useless here, and its
+            # metrics are only used for monitoring anyway (§7.1).
             skip_final_eval=True,
         )
 
     def fit(self, data: Any, ctx: RunContext) -> None:
-        """Entraine puis enregistre la part reellement entrainee (§7.2)."""
+        """Train then record the share actually trained (§7.2)."""
         super().fit(data, ctx)
         report = ctx.extra.pop("head_report", {})
         ctx.extra.update({f"head_{k}": v for k, v in report.items()})

@@ -1,15 +1,17 @@
-"""Approche A : YOLO-pose entraine sur l'ensemble des datasets (CONVENTIONS.md §9.1).
+"""Approach A: YOLO-pose trained on all the datasets (CONVENTIONS.md §9.1).
 
-Une seule classe "insecte", un seul modele, les 42 keypoints du schema commun
-(ADR-0006). Comme le schema est partage par les 4 ordres, aucune reprojection
-union -> local n'est necessaire : les predictions sortent deja dans le schema attendu.
+A single "insect" class, a single model, the 42 keypoints of the common schema
+(ADR-0006). Since the schema is shared by the 4 orders, no union -> local reprojection
+is needed: the predictions already come out in the expected schema.
 
-Les keypoints absents d'un dataset (ADR-0016) sont ecrits `vis = 0` dans les labels :
-Ultralytics les masque dans la loss de pose, il ne les apprend pas comme des zeros.
+The keypoints absent from a dataset (ADR-0016) are written `vis = 0` in the labels:
+Ultralytics masks them in the pose loss, it does not learn them as zeros.
 
-Ce module est une COUCHE MINCE au-dessus d'Ultralytics. Toute la logique risquee
-(conversion de coordonnees, format des labels) vit dans `data/yolo_export.py`, qui est
-testable sans GPU par aller-retour.
+This module is a THIN LAYER on top of Ultralytics. All the risky logic (coordinate
+conversion, label format) lives in `data/yolo_export.py`, which is testable without a
+GPU by a round trip.
+
+It is the approach whose runs are retained for the pipeline (retain.approaches).
 """
 
 from __future__ import annotations
@@ -33,6 +35,7 @@ from insectpose.utils.device import (
     peak_vram_mb,
     reset_peak_vram,
     resolve_device,
+    resolve_num_workers,
 )
 
 _TRAIN_KEYS = (
@@ -45,12 +48,12 @@ _TRAIN_KEYS = (
 
 
 def precision_kwargs(device: str, precision: str = "fp16") -> dict[str, Any]:
-    """Argument de precision d'inference, compatible entre versions d'Ultralytics.
+    """Inference precision argument, compatible across Ultralytics versions.
 
-    `half` est deprecie depuis Ultralytics 8.4 au profit de `quantize` (16 = FP16,
-    None = FP32). On interroge la config par defaut installee plutot que de comparer
-    des numeros de version, et on ne passe RIEN en FP32 : c'est deja le defaut, et
-    cela evite un avertissement de depreciation a chaque appel.
+    `half` is deprecated since Ultralytics 8.4 in favour of `quantize` (16 = FP16,
+    None = FP32). The installed default config is queried rather than comparing version
+    numbers, and NOTHING is passed in FP32: it is already the default, and it avoids a
+    deprecation warning at every call.
     """
     if str(precision) != "fp16" or device == "cpu":
         return {}
@@ -62,10 +65,10 @@ def precision_kwargs(device: str, precision: str = "fp16") -> dict[str, Any]:
 
 
 def release_model(model: Any) -> None:
-    """Libere un modele Ultralytics et la memoire de son trainer.
+    """Release an Ultralytics model and the memory of its trainer.
 
-    Sans cela, l'inference demarre avec plusieurs Go deja occupes par les
-    dataloaders, workers et buffers d'augmentation de l'entrainement (ADR-0019).
+    Without it, inference starts with several GB already taken by the dataloaders,
+    workers and augmentation buffers of the training (ADR-0019).
     """
     trainer = getattr(model, "trainer", None)
     for attribute in ("train_loader", "test_loader", "validator", "ema", "optimizer"):
@@ -83,11 +86,11 @@ def release_model(model: Any) -> None:
 
 @register_approach("yolo_pooled")
 class YoloPooledApproach(BaseApproach):
-    """YOLO-pose unique, entraine sur les 4 datasets confondus."""
+    """A single YOLO-pose, trained on the 4 datasets pooled."""
 
-    #: Cles que l'approche lit dans sa config. Aucune valeur par defaut cachee cote code
-    #: (CONVENTIONS.md §5.2) : la config doit les declarer, mais l'absence doit produire
-    #: un message actionnable plutot qu'une erreur OmegaConf brute.
+    #: Keys the approach reads in its config. No default value hidden in the code
+    #: (CONVENTIONS.md §5.2): the config must declare them, but their absence must produce
+    #: an actionable message rather than a raw OmegaConf error.
     REQUIRED_APPROACH_KEYS = (
         "weights", "max_det", "conf", "iou", "inference_precision", "predict_chunk_size",
     )
@@ -100,47 +103,47 @@ class YoloPooledApproach(BaseApproach):
         super().__init__(cfg)
         self.model: Any = None
         self.schema: KeypointSchema | None = None
-        # Un `namespace` non vide isole les artefacts de ce modele dans le run, ce qui
-        # permet a une approche composite (§9.2) d'en heberger plusieurs sans collision.
+        # A non-empty `namespace` isolates the artefacts of this model in the run, which
+        # lets a composite approach (§9.2) host several of them without collision.
         self.namespace = namespace
         self._check_config()
 
     def _artifact_dir(self, ctx: RunContext, kind: str) -> Path:
-        """Sous-repertoire du run pour ce modele ('weights', 'yolo_dataset'...)."""
+        """Sub-folder of the run for this model ('weights', 'yolo_dataset'...)."""
         return ctx.subdir(f"{kind}/{self.namespace}" if self.namespace else kind)
 
     def _check_config(self) -> None:
-        """Verifie la presence des cles attendues et nomme celles qui manquent."""
+        """Check the presence of the expected keys and name the missing ones."""
         missing = [f"approach.{k}" for k in self.REQUIRED_APPROACH_KEYS
                    if k not in self.cfg.approach]
         missing += [f"train.{k}" for k in self.REQUIRED_TRAIN_KEYS if k not in self.cfg.train]
         if missing:
             raise KeyError(
-                f"[{self.name}] cles de configuration absentes : {missing}. "
-                "Votre configs/approach/yolo_pooled.yaml ou configs/config.yaml est plus "
-                "ancien que le code. Comparer avec la version du depot."
+                f"[{self.name}] missing configuration keys: {missing}. "
+                "Your configs/approach/yolo_pooled.yaml or configs/config.yaml is older "
+                "than the code. Compare with the version of the repository."
             )
 
-    # --- disponibilite -----------------------------------------------------
+    # --- availability -----------------------------------------------------------
     @classmethod
     def availability(cls) -> tuple[bool, str]:
-        """Ultralytics et torch sont des dependances de premier rang (ADR-0019).
+        """Ultralytics and torch are first-rank dependencies (ADR-0019).
 
-        Le mecanisme reste en place : il permet a une machine sans GPU ou a une CI
-        legere d'ignorer proprement l'approche au lieu d'echouer.
+        The mechanism stays in place: it lets a machine without a GPU or a light CI
+        cleanly skip the approach instead of failing.
         """
         try:
             import torch  # noqa: F401
             import ultralytics  # noqa: F401
         except ImportError as exc:
-            return False, f"{exc.name} absent : pip install -e \".[dev]\""
+            return False, f"{exc.name} missing: pip install -e \".[dev]\""
         return True, ""
 
-    # --- entrainement ------------------------------------------------------
+    # --- training ---------------------------------------------------------------
     def fit(self, data: FoldData, ctx: RunContext) -> None:
-        """Exporte le fold au format YOLO puis entraine. Ne lit jamais data.test.
+        """Export the fold in the YOLO format then train. Never reads data.test.
 
-        Effet de bord : ecrit runs/<run_id>/yolo_dataset/ et runs/<run_id>/weights/.
+        Side effect: writes runs/<run_id>/yolo_dataset/ and runs/<run_id>/weights/.
         """
         from ultralytics import YOLO
 
@@ -153,7 +156,7 @@ class YoloPooledApproach(BaseApproach):
         device = self._device()
         amp = amp_enabled(bool(self.cfg.train.amp), str(self.cfg.mode), device)
         reset_peak_vram()
-        ctx.logger.info("Entrainement YOLO sur '%s' (AMP=%s) | %s",
+        ctx.logger.info("YOLO training on '%s' (AMP=%s) | %s",
                         device, amp, device_info(device).get("devices", "cpu"))
 
         started = time.perf_counter()
@@ -178,8 +181,8 @@ class YoloPooledApproach(BaseApproach):
         target = self._artifact_dir(ctx, "weights") / "best.pt"
         self._write_checkpoint(best, target)
 
-        # Le trainer retient dataloaders, workers et buffers d'augmentation : sans
-        # liberation explicite, la prediction demarre avec plusieurs Go deja occupes.
+        # The trainer holds dataloaders, workers and augmentation buffers: without an
+        # explicit release, the prediction starts with several GB already taken.
         self._release_trainer()
         self.model = YOLO(str(target))
         self._prepare_inference_model(self.model)
@@ -194,38 +197,38 @@ class YoloPooledApproach(BaseApproach):
             f"{prefix}device": device_info(device),
         })
 
-    # --- points d'extension pour les approches derivees --------------------
+    # --- extension points for the derived approaches ------------------------------
     def _prepare_data(self, data: FoldData, ctx: RunContext) -> FoldData:  # noqa: ARG002
-        """Transformation du fold avant export. Par defaut : aucune."""
+        """Transformation of the fold before the export. By default: none."""
         return data
 
     def _trainer_class(self, ctx: RunContext) -> Any:  # noqa: ARG002
-        """Trainer Ultralytics personnalise, ou None pour le trainer standard."""
+        """Custom Ultralytics trainer, or None for the standard trainer."""
         return None
 
     def _write_checkpoint(self, best: Path, target: Path) -> None:
-        """Ecrit les poids du run. Par defaut : copie brute du meilleur checkpoint."""
+        """Write the weights of the run. By default: raw copy of the best checkpoint."""
         target.write_bytes(best.read_bytes())
 
     def _prepare_inference_model(self, model: Any) -> None:
-        """Ajustements du modele juste apres chargement pour l'inference. Aucun par defaut."""
+        """Adjustments of the model right after loading it for inference. None by default."""
 
     def _release_trainer(self) -> None:
-        """Libere le trainer et la memoire associee entre entrainement et inference."""
+        """Release the trainer and its memory between training and inference."""
         release_model(self.model)
         self.model = None
 
-    # --- inference ---------------------------------------------------------
+    # --- inference --------------------------------------------------------------
     def predict_instances(self, images: ImageSet, ctx: RunContext) -> pd.DataFrame:  # noqa: ARG002
-        """Predit puis remet tout dans le repere de l'image d'origine (§3.4).
+        """Predict then put everything back into the frame of the original image (§3.4).
 
-        Ultralytics renvoie deja des coordonnees absolues dans l'image source, mais en
-        bbox CENTREE : la conversion vers le coin haut-gauche du contrat 3 se fait ici.
-        Aucun seuil de score fort n'est applique : le seuillage est une operation
-        d'evaluation (§3.4).
+        Ultralytics already returns absolute coordinates in the source image, but as a
+        CENTRED bbox: the conversion to the top-left corner of contract 3 happens here.
+        No strong score threshold is applied: thresholding is an evaluation operation
+        (§3.4).
         """
         if self.model is None:
-            raise RuntimeError("Modele non charge : appeler fit() ou load() d'abord.")
+            raise RuntimeError("Model not loaded: call fit() or load() first.")
         schema = self.schema or self._schema(images)
         approach_cfg = self.cfg.approach
 
@@ -235,12 +238,12 @@ class YoloPooledApproach(BaseApproach):
 
         device = self._device()
         started = time.perf_counter()
-        # DECOUPAGE EN LOTS OBLIGATOIRE (ADR-0021). Passer la liste complete des images
-        # a predict() fait construire par Ultralytics un chargeur qui materialise TOUTES
-        # les images d'un coup (`self.im0 = [...]`, `bs = len(im0)`). `stream=True` n'y
-        # change rien : l'accumulation a lieu a la construction du chargeur, avant toute
-        # inference. Sur un fold de plusieurs milliers d'images, la RAM sature et le
-        # processus est tue par l'OOM killer.
+        # SPLITTING INTO CHUNKS IS MANDATORY (ADR-0021). Passing the whole list of images
+        # to predict() makes Ultralytics build a loader that materialises ALL the images
+        # at once (`self.im0 = [...]`, `bs = len(im0)`). `stream=True` changes nothing:
+        # the accumulation happens when the loader is built, before any inference. On a
+        # fold of several thousand images, the RAM saturates and the process is killed by
+        # the OOM killer.
         chunk_size = max(1, int(approach_cfg.predict_chunk_size))
         precision = self._precision_kwargs(device, str(approach_cfg.inference_precision))
 
@@ -271,10 +274,10 @@ class YoloPooledApproach(BaseApproach):
     @staticmethod
     def _rows_from_results(image_ids: list[str], results: Any, table: pd.DataFrame,
                            schema: KeypointSchema) -> list[dict[str, Any]]:
-        """Convertit un lot de Results en lignes du contrat 3.
+        """Convert a chunk of Results into rows of contract 3.
 
-        Isole du parcours par lots pour qu'aucun objet Results ne survive au lot :
-        chacun porte l'image d'origine, et c'est cette retention qui saturait la RAM.
+        Isolated from the chunk loop so that no Results object outlives its chunk: each
+        one carries the original image, and it is this retention that saturated the RAM.
         """
         rows: list[dict[str, Any]] = []
         for image_id, result in zip(image_ids, results, strict=True):
@@ -282,9 +285,9 @@ class YoloPooledApproach(BaseApproach):
             boxes = result.boxes
             if boxes is None or len(boxes) == 0:
                 continue
-            xywh = boxes.xywh.cpu().numpy()          # centre + taille, pixels image source
+            xywh = boxes.xywh.cpu().numpy()          # centre + size, source image pixels
             scores = boxes.conf.cpu().numpy()
-            kpts = result.keypoints.data.cpu().numpy()   # (n, K, 3) : x, y, score
+            kpts = result.keypoints.data.cpu().numpy()   # (n, K, 3): x, y, score
             for i in range(len(boxes)):
                 cx, cy, w, h = xywh[i]
                 rows.append({
@@ -299,73 +302,72 @@ class YoloPooledApproach(BaseApproach):
                 })
         return rows
 
-    # --- rechargement ------------------------------------------------------
+    # --- reloading --------------------------------------------------------------
     @classmethod
     def load(cls, run_dir: Path, cfg: Any, namespace: str = "") -> YoloPooledApproach:
-        """Recharge les poids du run, sans reentrainement."""
+        """Reload the weights of the run, without retraining."""
         from ultralytics import YOLO
 
         weights = Path(run_dir) / "weights" / namespace / "best.pt" if namespace \
             else Path(run_dir) / "weights" / "best.pt"
         if not weights.exists():
-            raise FileNotFoundError(f"Poids introuvables : {weights}")
+            raise FileNotFoundError(f"Weights not found: {weights}")
         obj = cls(cfg, namespace=namespace)
         obj.model = YOLO(str(weights))
         obj._prepare_inference_model(obj.model)
         return obj
 
-    # --- utilitaires internes ---------------------------------------------
+    # --- internal utilities -----------------------------------------------------
     @staticmethod
     def _schema(source: Any) -> KeypointSchema:
-        """Schema commun du perimetre courant ; refuse un perimetre heterogene."""
+        """Common schema of the current scope; refuses a heterogeneous scope."""
         schemas = source.schemas
         dataset_schemas = {
             name: schema for name, schema in schemas.items() if schema.kind == "dataset_schema"
         }
         if len(dataset_schemas) != 1:
             raise ValueError(
-                f"yolo_pooled exige un schema de keypoints unique, trouve "
-                f"{sorted(dataset_schemas)}. Avec des schemas divergents, il faudrait passer "
-                "par l'espace union et reprojeter a l'ecriture (§3.1)."
+                f"yolo_pooled requires a single keypoint schema, found "
+                f"{sorted(dataset_schemas)}. With diverging schemas, it would have to go "
+                "through the union space and reproject when writing (§3.1)."
             )
         return next(iter(dataset_schemas.values()))
 
     def _check_augmentation(self) -> None:
-        """Un miroir sans table de symetrie apprend une anatomie fausse (§3.1)."""
+        """A mirror without a symmetry table learns a wrong anatomy (§3.1)."""
         if float(self.cfg.approach.get("fliplr", 0.0)) > 0 and self.schema is not None:
             identity = list(self.schema.flip_index) == list(range(self.schema.n_keypoints))
             if identity:
                 raise ValueError(
-                    "fliplr > 0 alors que le schema n'a aucune paire de symetrie : "
-                    "l'augmentation par miroir echangerait gauche et droite sans permuter "
-                    "les labels."
+                    "fliplr > 0 whereas the schema has no symmetry pair: the mirror "
+                    "augmentation would swap left and right without permuting the labels."
                 )
 
     def _imgsz(self) -> int:
-        """Resolution commune du protocole (ADR-0013). Ultralytics veut un entier."""
+        """Common resolution of the protocol (ADR-0013). Ultralytics wants an integer."""
         size = self.cfg.train.image_size
         values = [int(size), int(size)] if isinstance(size, int) else [int(v) for v in size]
         if values[0] != values[1]:
-            raise ValueError(f"Ultralytics exige une resolution carree, recu {values}.")
+            raise ValueError(f"Ultralytics requires a square resolution, got {values}.")
         return values[0]
 
     @staticmethod
     def _precision_kwargs(device: str, precision: str = "fp16") -> dict[str, Any]:
-        """Delegue au helper module, reutilise par les autres approches YOLO."""
+        """Delegate to the module helper, reused by the other YOLO approaches."""
         return precision_kwargs(device, precision)
 
     def _device(self) -> str:
-        """Peripherique resolu (ADR-0019) : 'auto' -> GPU 0 si CUDA, sinon 'cpu'."""
+        """Resolved device (ADR-0019): 'auto' -> GPU 0 if CUDA, else the Apple GPU, else 'cpu'."""
         return resolve_device(self.cfg.train.device)
 
     def _train_kwargs(self) -> dict[str, Any]:
-        """Hyperparametres passes a Ultralytics, tous issus de la config."""
+        """Hyperparameters passed to Ultralytics, all coming from the config."""
         approach_cfg = self.cfg.approach
         kwargs: dict[str, Any] = {
             "epochs": int(self.cfg.train.epochs),
             "batch": int(self.cfg.train.batch_size),
             "imgsz": self._imgsz(),
-            "workers": int(self.cfg.train.num_workers),
+            "workers": resolve_num_workers(self.cfg.train.num_workers),
             "patience": int(self.cfg.train.early_stopping_patience),
         }
         for key in _TRAIN_KEYS:
@@ -376,9 +378,9 @@ class YoloPooledApproach(BaseApproach):
 
 def export_prediction_set(images: ImageSet, schema: KeypointSchema, root: Path,
                           split: str = "test") -> Path:
-    """Exporte un ImageSet au format YOLO (diagnostic : inspection manuelle d'un fold).
+    """Export an ImageSet in the YOLO format (diagnostic: manual inspection of a fold).
 
-    Effet de bord : ecrit sous `root`. N'est pas utilise par le pipeline.
+    Side effect: writes under `root`. Not used by the pipeline.
     """
     export_split(images, schema, root, split)
     return write_data_yaml(root, schema, {split: split})

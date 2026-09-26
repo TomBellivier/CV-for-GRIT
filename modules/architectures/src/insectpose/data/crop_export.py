@@ -1,13 +1,13 @@
-"""Export d'instances recadrees au format YOLO-pose (CONVENTIONS.md §9.3).
+"""Export of cropped instances in the YOLO-pose format (CONVENTIONS.md §9.3).
 
-Le modele de pose de l'approche C ne voit jamais l'image entiere : il travaille sur des
-crops normalises. Deux precautions decident de la validite de l'approche :
+The pose model of approach C never sees the whole image: it works on normalised
+crops. Two precautions decide the validity of the approach:
 
-1. les crops d'ENTRAINEMENT sont issus de bboxes GT **bruitees**. Sans ce bruit, le
-   modele apprend sur des cadrages parfaits qu'il ne reverra jamais a l'inference,
-   ou les bboxes viennent d'un detecteur ;
-2. la transformation crop -> image est conservee, car toute prediction doit etre
-   retro-projetee dans le repere de l'image d'origine avant ecriture (contrat 3).
+1. the TRAINING crops come from **noisy** GT bboxes. Without this noise, the model
+   learns on perfect framings it will never see again at inference, where the bboxes
+   come from a detector;
+2. the crop -> image transform is kept, since every prediction must be back-projected
+   to the frame of the original image before writing (contract 3).
 """
 
 from __future__ import annotations
@@ -26,10 +26,10 @@ log = get_logger("crop_export")
 
 
 def expand_bbox(bbox_xywh: np.ndarray, padding: float) -> np.ndarray:
-    """Elargit une bbox d'un facteur relatif, en gardant son centre.
+    """Widen a bbox by a relative factor, keeping its centre.
 
-    La marge evite que les extremites (tarses, antennes) tombent hors du crop : un
-    keypoint hors cadre est irrecuperable, quelle que soit la qualite du modele.
+    The margin keeps the extremities (tarsi, antennae) from falling outside the crop: a
+    keypoint outside the frame is unrecoverable, whatever the quality of the model.
     """
     x, y, w, h = np.asarray(bbox_xywh, dtype=float)
     cx, cy = x + w / 2, y + h / 2
@@ -39,7 +39,7 @@ def expand_bbox(bbox_xywh: np.ndarray, padding: float) -> np.ndarray:
 
 def crop_image(image: Any, bbox_xywh: np.ndarray,
                out_size: tuple[int, int]) -> tuple[Any, np.ndarray]:
-    """Recadre une image PIL selon une bbox et retourne (crop, matrice image->crop)."""
+    """Crop a PIL image along a bbox and return (crop, image->crop matrix)."""
     from PIL import Image
 
     matrix = crop_affine(bbox_xywh, out_size)
@@ -52,11 +52,11 @@ def crop_image(image: Any, bbox_xywh: np.ndarray,
 
 def crop_label_line(kpts_xy: np.ndarray, kpts_vis: np.ndarray, matrix: np.ndarray,
                     out_size: tuple[int, int], margin: float = 0.02) -> str:
-    """Ligne de label YOLO-pose d'une instance dans le repere du crop.
+    """YOLO-pose label line of an instance in the frame of the crop.
 
-    La bbox du label est l'enveloppe des keypoints visibles DANS le crop, et non le
-    crop entier : sinon le modele apprendrait que la boite couvre toujours l'image,
-    ce qui rendrait sa sortie de detection inutilisable.
+    The bbox of the label is the envelope of the keypoints visible INSIDE the crop, not
+    the whole crop: otherwise the model would learn that the box always covers the
+    image, which would make its detection output unusable.
     """
     width, height = out_size
     points = apply_affine(matrix, np.asarray(kpts_xy, dtype=float).reshape(-1, 2))
@@ -74,8 +74,8 @@ def crop_label_line(kpts_xy: np.ndarray, kpts_vis: np.ndarray, matrix: np.ndarra
 
     box = np.clip([cx / width, cy / height, bw / width, bh / height], 0.0, 1.0)
     norm = np.clip(points / np.array([width, height]), 0.0, 1.0)
-    # Un point non annote ou tombe hors du crop est marque non supervise (vis = 0) :
-    # il ne doit ni etre appris comme un zero, ni compte comme une erreur.
+    # A point not annotated or falling outside the crop is marked unsupervised (vis = 0):
+    # it must neither be learnt as a zero nor counted as an error.
     flags = np.where(inside, np.asarray(kpts_vis, dtype=int), 0)
     norm[flags == 0] = 0.0
 
@@ -89,11 +89,11 @@ def export_crops(image_set: Any, schema: KeypointSchema, root: Path, split: str,
                  out_size: tuple[int, int], padding: float = 0.15,
                  jitter_scale: float = 0.0, jitter_shift: float = 0.0,
                  seed: int = 0) -> dict[str, int]:
-    """Ecrit un crop et son label par instance. Effet de bord : cree `root`.
+    """Write one crop and its label per instance. Side effect: creates `root`.
 
-    `jitter_scale`/`jitter_shift` doivent etre > 0 pour le split d'entrainement et
-    nuls pour la validation : on valide sur des cadrages non bruites, sinon la metrique
-    de validation devient elle-meme bruitee (§9.3).
+    `jitter_scale`/`jitter_shift` must be > 0 for the training split and zero for the
+    validation: validation is done on clean framings, otherwise the validation metric
+    becomes noisy itself (§9.3).
     """
     from PIL import Image
 
@@ -109,7 +109,7 @@ def export_crops(image_set: Any, schema: KeypointSchema, root: Path, split: str,
         meta = image_set.images.set_index("image_id").loc[image_id]
         source = image_set.absolute_path(meta.image_path)
         if not source.exists():
-            raise FileNotFoundError(f"Image absente : {source}")
+            raise FileNotFoundError(f"Image missing: {source}")
         with Image.open(source) as handle:
             image = handle.convert("RGB")
             counts["images"] += 1
@@ -129,7 +129,7 @@ def export_crops(image_set: Any, schema: KeypointSchema, root: Path, split: str,
                     - sum(1 for v in line.split()[5::3] if float(v) > 0)
                 )
 
-    log.info("Export crops [%s] : %d instance(s) depuis %d image(s) -> %s",
+    log.info("Crop export [%s]: %d instance(s) from %d image(s) -> %s",
              split, counts["instances"], counts["images"], img_dir)
     return counts
 
@@ -137,7 +137,7 @@ def export_crops(image_set: Any, schema: KeypointSchema, root: Path, split: str,
 def export_crop_fold(data: Any, schema: KeypointSchema, root: Path, out_size: tuple[int, int],
                      padding: float, jitter_scale: float, jitter_shift: float,
                      seed: int = 0) -> Path:
-    """Exporte train (avec bruit de cadrage) et val (sans) puis ecrit data.yaml."""
+    """Export train (with framing noise) and val (without) then write data.yaml."""
     root.mkdir(parents=True, exist_ok=True)
     export_crops(data.train, schema, root, "train", out_size, padding,
                  jitter_scale, jitter_shift, seed)
@@ -147,10 +147,10 @@ def export_crop_fold(data: Any, schema: KeypointSchema, root: Path, out_size: tu
 
 def crops_from_boxes(image: Any, boxes: np.ndarray, out_size: tuple[int, int],
                      padding: float) -> tuple[list[Any], list[np.ndarray]]:
-    """Crops et matrices image->crop pour des bboxes PREDITES (inference).
+    """Crops and image->crop matrices for PREDICTED bboxes (inference).
 
-    Aucun bruit de cadrage ici : a l'inference, le cadrage est celui que produit le
-    detecteur, et c'est precisement ce que l'on veut mesurer.
+    No framing noise here: at inference, the framing is the one the detector produces,
+    and it is precisely what is to be measured.
     """
     crops, matrices = [], []
     for bbox in np.atleast_2d(np.asarray(boxes, dtype=float)):

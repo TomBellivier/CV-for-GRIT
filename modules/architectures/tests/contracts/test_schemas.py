@@ -1,4 +1,4 @@
-"""Tests de contrat : un artefact non conforme ne doit jamais s'ecrire (§10.1)."""
+"""Contract tests: a non-compliant artefact must never be written (§10.1)."""
 
 from __future__ import annotations
 
@@ -18,21 +18,21 @@ def test_annotations_respect_contract(project) -> None:
 
 def test_missing_column_is_rejected() -> None:
     df = pd.DataFrame({"schema_version": [1], "dataset": ["coleoptera"]})
-    with pytest.raises(ContractError, match="colonnes obligatoires manquantes"):
+    with pytest.raises(ContractError, match="missing mandatory columns"):
         validate_frame(df, "annotations")
 
 
 def test_keypoint_length_mismatch_is_rejected(project) -> None:
     df = read_parquet(project.annotations("coleoptera"))
-    df.at[0, "kpts_vis"] = [1, 1, 1]   # incoherent avec kpts_xy
-    with pytest.raises(ContractError, match="incoherente"):
+    df.at[0, "kpts_vis"] = [1, 1, 1]   # inconsistent with kpts_xy
+    with pytest.raises(ContractError, match="inconsistent"):
         validate_frame(df, "annotations")
 
 
 def test_unknown_dataset_is_rejected(project) -> None:
     df = read_parquet(project.annotations("coleoptera"))
     df["dataset"] = "orthoptera"
-    with pytest.raises(ContractError, match="datasets inconnus"):
+    with pytest.raises(ContractError, match="unknown datasets"):
         validate_frame(df, "annotations")
 
 
@@ -58,12 +58,12 @@ def test_ensure_columns_fills_optional_fields() -> None:
 
 
 def test_multiple_instances_per_image_are_refused(project) -> None:
-    """ADR-0017 : une image = un insecte. Sinon la detection top-1 ment en silence."""
+    """ADR-0017: one image = one insect. Otherwise the top-1 detection lies silently."""
     from insectpose.data.schema import validate_single_instance
 
     df = read_parquet(project.annotations("coleoptera"))
-    duplicated = pd.concat([df, df.head(1).assign(instance_id="doublon")], ignore_index=True)
-    with pytest.raises(ContractError, match="plusieurs instances"):
+    duplicated = pd.concat([df, df.head(1).assign(instance_id="duplicate")], ignore_index=True)
+    with pytest.raises(ContractError, match="several instances"):
         validate_single_instance(duplicated)
 
 
@@ -74,14 +74,14 @@ def test_single_instance_dataset_passes(project) -> None:
 
 
 def test_keypoint_count_mismatch_names_the_offending_files(project) -> None:
-    """Un message qui ne nomme pas les coupables oblige a une enquete manuelle."""
+    """A message that does not name the culprits forces a manual investigation."""
     df = read_parquet(project.annotations("coleoptera"))
-    df.at[0, "kpts_xy"] = [0.0] * 256          # 128 keypoints au lieu de 42
+    df.at[0, "kpts_xy"] = [0.0] * 256          # 128 keypoints instead of 42
     with pytest.raises(ContractError) as excinfo:
         validate_frame(df, "annotations")
 
     message = str(excinfo.value)
     assert "42 points" in message
-    assert "1 instance(s) divergente(s)" in message
+    assert "1 diverging instance(s)" in message
     assert str(df.at[0, "image_path"]) in message
     assert "128 keypoints" in message

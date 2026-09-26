@@ -1,11 +1,10 @@
-"""Fonctions reutilisees par ``train_measure_validity.py`` (production) et
-``compare_measure_validity_approaches.py`` (comparaison, recherche).
+"""Functions reused by ``train_measure_validity.py`` (production) and
+``compare_measure_validity_approaches.py`` (comparison, research).
 
-Extrait de ``measure_validity_classifiers.ipynb`` (partie 3 a 5 : jeux de
-features, approches, score/seuil/validation croisee, metriques et figures),
-sans rien changer au comportement. Ne duplique pas ``evaluation.py`` /
-``features.py``, qui appartiennent a l'ancien script de comparaison
-``conf_classifier.py`` et ne sont pas utilises par ce notebook.
+Extracted from ``measure_validity_classifiers.ipynb`` (parts 3 to 5: feature sets,
+approaches, score/threshold/cross-validation, metrics and figures), without changing
+the behaviour. Does not duplicate ``evaluation.py`` / ``features.py``, which belong to
+the old comparison script ``conf_classifier.py`` and are not used by this notebook.
 """
 
 from __future__ import annotations
@@ -37,39 +36,39 @@ def slug(name: str) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# 3. Jeux de features et approches
+# 3. Feature sets and approaches
 # --------------------------------------------------------------------------- #
-# Les modeles de production travaillent sur la GEOMETRIE des keypoints, pas sur
-# les confiances du modele de pose : deux points empiles ou un point envoye hors
-# du corps se lisent dans les coordonnees, pas dans un score.
+# The production models work on the GEOMETRY of the keypoints, not on the
+# confidences of the pose model: two stacked points or a point sent outside the body
+# show in the coordinates, not in a score.
 #
-# Les coordonnees brutes seraient inutilisables telles quelles (une base en
-# 278x679 et une base en 4000x3000 n'auraient rien en commun) : chaque point est
-# donc ramene dans la boite englobante des keypoints de SON image,
+# Raw coordinates would be unusable as is (a 278x679 database and a 4000x3000 one
+# would have nothing in common): each point is therefore brought back into the
+# bounding box of the keypoints of ITS image,
 #     x_rel = (x - cx) / w        y_rel = (y - cy) / h
-# ce qui rend les features invariantes a la resolution comme au cadrage. Les
-# valeurs vivent alors autour de [-0.5, 0.5].
+# which makes the features invariant to the resolution as well as to the framing. The
+# values then live around [-0.5, 0.5].
 #
-# /!\ Cette transformation est rejouee a l'identique a l'inference, dans
-# pipeline/processing/measurement_classifier.py (relative_keypoints). Toute
-# modification ici DOIT y etre reportee, sinon les modeles recoivent des
-# features qui n'ont plus le sens de celles vues a l'entrainement.
+# /!\ This transformation is replayed identically at inference, in
+# pipeline/processing/measurement_classifier.py (relative_keypoints). Any change here
+# MUST be carried over there, otherwise the models receive features that no longer
+# mean what they meant at training time.
 REL_X_SUFFIX = " kp_x_rel"
 REL_Y_SUFFIX = " kp_y_rel"
 
 
 def add_relative_coordinates(frame: pd.DataFrame, columns) -> dict:
-    """Ajoute a ``frame`` les coordonnees relatives de chaque keypoint resolu.
+    """Add to ``frame`` the relative coordinates of each resolved keypoint.
 
-    Retourne {point: (colonne_x, colonne_y)}. Un keypoint absent (NaN) ou pose
-    exactement en (0, 0) -- la sortie d'un point non detecte -- n'entre pas dans
-    la boite et sort en NaN, que la foret traite comme la sentinelle d'absence.
+    Returns {point: (x_column, y_column)}. A missing keypoint (NaN) or one placed
+    exactly at (0, 0) -- the output of an undetected point -- does not enter the box
+    and comes out as NaN, which the forest handles as the absence sentinel.
     """
     points = [p for p in POINTS if p in columns.x and p in columns.y]
     if not points:
         raise KeyError(
-            "Aucune colonne de coordonnees (kp_x / kp_y) dans les sorties de pose : "
-            "verifier que le pipeline a tourne avec config.EXPORT_KEYPOINTS = True."
+            "No coordinate column (kp_x / kp_y) in the pose outputs: "
+            "check that the pipeline ran with config.EXPORT_KEYPOINTS = True."
         )
 
     xs = frame[[columns.x[p] for p in points]].to_numpy(dtype=float)
@@ -80,7 +79,7 @@ def add_relative_coordinates(frame: pd.DataFrame, columns) -> dict:
     ys = np.where(missing, np.nan, ys)
 
     with np.errstate(invalid="ignore"):
-        # all-NaN sur une ligne (aucun keypoint) : nanmin previent, on veut du NaN.
+        # all-NaN on a row (no keypoint): nanmin warns, NaN is wanted.
         empty = np.isnan(xs).all(axis=1)
         x_min, x_max = np.nanmin(np.where(empty[:, None], 0.0, xs), axis=1), \
             np.nanmax(np.where(empty[:, None], 0.0, xs), axis=1)
@@ -88,7 +87,7 @@ def add_relative_coordinates(frame: pd.DataFrame, columns) -> dict:
             np.nanmax(np.where(empty[:, None], 0.0, ys), axis=1)
 
     width, height = x_max - x_min, y_max - y_min
-    degenerate = empty | ~(width > 0) | ~(height > 0)   # 0 ou 1 point, ou tous alignes
+    degenerate = empty | ~(width > 0) | ~(height > 0)   # 0 or 1 point, or all aligned
     width = np.where(degenerate, np.nan, width)
     height = np.where(degenerate, np.nan, height)
     cx, cy = x_min + width / 2.0, y_min + height / 2.0
@@ -102,26 +101,26 @@ def add_relative_coordinates(frame: pd.DataFrame, columns) -> dict:
 
     n_degenerate = int(degenerate.sum())
     if n_degenerate:
-        print(f"  /!\\ {n_degenerate} image(s) sans boite de keypoints exploitable : "
-              f"features geometriques a NaN")
+        print(f"  /!\\ {n_degenerate} image(s) without a usable keypoint box: "
+              f"geometric features set to NaN")
     return coords
 
 
 def make_coord_columns(coords: dict, points) -> list:
-    """Colonnes de coordonnees relatives (x puis y) pour une liste de keypoints."""
+    """Relative coordinate columns (x then y) for a list of keypoints."""
     return [column for p in points if p in coords for column in coords[p]]
 
 
 def make_conf_columns(columns, points) -> list:
-    """Colonnes de confiance existantes pour une liste de keypoints."""
+    """Existing confidence columns for a list of keypoints."""
     return [columns.conf[p] for p in points if p in columns.conf]
 
 
 def make_feature_sets(columns, coords: dict, all_coords: list, measure: str) -> dict:
-    """Jeux de features d'une mesure : ses keypoints, son voisinage, ou tous.
+    """Feature sets of a measurement: its keypoints, its neighbourhood, or all of them.
 
-    ``*_conf`` reste disponible pour les approches "regle" (seuil sur la
-    confiance), qui n'ont de sens que sur des confiances.
+    ``*_conf`` stays available for the "rule" approaches (threshold on the
+    confidence), which only make sense on confidences.
     """
     return {
         "direct": make_coord_columns(coords, MEAS_TO_KP[measure]),
@@ -133,7 +132,7 @@ def make_feature_sets(columns, coords: dict, all_coords: list, measure: str) -> 
 
 
 def make_target(frame: pd.DataFrame, status_suffix: str, measure: str) -> np.ndarray:
-    """1 = non mesurable (classe positive, minoritaire)."""
+    """1 = non measurable (positive, minority class)."""
     return 1 - frame[f"{measure}{status_suffix}"].astype(int).to_numpy()
 
 
@@ -143,7 +142,7 @@ def make_xgb(y_train: np.ndarray, random_state: int) -> XGBClassifier:
     return XGBClassifier(
         n_estimators=200, max_depth=3, learning_rate=0.1,
         subsample=0.9, colsample_bytree=0.9,
-        scale_pos_weight=n_neg / n_pos,          # desequilibre
+        scale_pos_weight=n_neg / n_pos,          # imbalance
         eval_metric="logloss", tree_method="hist",
         n_jobs=-1, random_state=random_state,
     )
@@ -152,27 +151,25 @@ def make_xgb(y_train: np.ndarray, random_state: int) -> XGBClassifier:
 def make_rf(y_train: np.ndarray, random_state: int) -> RandomForestClassifier:
     return RandomForestClassifier(
         n_estimators=200, min_samples_leaf=2,
-        class_weight="balanced",                  # desequilibre
+        class_weight="balanced",                  # imbalance
         n_jobs=-1, random_state=random_state,
     )
 
 
-# (cle, type, jeu de features, fabrique de modele)
+# (key, type, feature set, model factory)
 #
-# PRODUCTION_APPROACHES : seule "rf_related" -- c'est le jeu de modeles
-# sauvegarde et consomme par pipeline/processing/measurement_classifier.py.
-# Utilise par train_measure_validity.py.
+# PRODUCTION_APPROACHES: only "rf_related" -- the set of models saved and consumed by
+# pipeline/processing/measurement_classifier.py. Used by train_measure_validity.py.
 PRODUCTION_APPROACHES = [
     ("rf_related", "model", "related", make_rf),
 ]
 
-# ALL_APPROACHES : les 8 approches comparees dans measure_validity_classifiers.ipynb
-# (seuils, XGBoost et Random Forest sur 3 jeux de features). Recherche /
-# comparaison uniquement -- utilise par compare_measure_validity_approaches.py,
-# ne produit aucun modele de production.
+# ALL_APPROACHES: the 8 approaches compared in measure_validity_classifiers.ipynb
+# (thresholds, XGBoost and Random Forest on 3 feature sets). Research / comparison
+# only -- used by compare_measure_validity_approaches.py, produces no production model.
 ALL_APPROACHES = [
-    ("seuil_conf_moy", "rule", "direct", None),
-    ("seuil_conf_min", "rule", "direct", None),
+    ("rule_conf_mean", "rule", "direct", None),
+    ("rule_conf_min", "rule", "direct", None),
     ("xgb_direct", "model", "direct", make_xgb),
     ("rf_direct", "model", "direct", make_rf),
     ("xgb_related", "model", "related", make_xgb),
@@ -187,16 +184,16 @@ def names_of(approaches: list) -> list:
 
 
 # --------------------------------------------------------------------------- #
-# 4. Score, seuil et validation croisee
+# 4. Score, threshold and cross-validation
 # --------------------------------------------------------------------------- #
 def rule_score(values: pd.DataFrame, how: str) -> np.ndarray:
-    data = np.nan_to_num(values.to_numpy(dtype=float), nan=0.0)  # kp manquant -> conf 0
+    data = np.nan_to_num(values.to_numpy(dtype=float), nan=0.0)  # missing kp -> conf 0
     agg = data.mean(axis=1) if how == "mean" else data.min(axis=1)
-    return -agg   # confiance basse -> score eleve -> non mesurable
+    return -agg   # low confidence -> high score -> non measurable
 
 
 def best_threshold(y: np.ndarray, score: np.ndarray) -> float:
-    """Seuil maximisant le MCC, cherche sur des donnees non vues a l'entrainement."""
+    """Threshold maximising the MCC, searched on data not seen during training."""
     candidates = np.unique(np.quantile(score, np.linspace(0.0, 1.0, 201)))
     best_t, best_m = candidates[0], -np.inf
     for t in candidates:
@@ -220,13 +217,12 @@ def evaluate_measure(
     approaches: list,
     models_dir: Path | None = None,
 ) -> dict:
-    """Predictions out-of-fold des ``approaches`` pour une mesure.
+    """Out-of-fold predictions of the ``approaches`` for one measurement.
 
-    Si ``models_dir`` est fourni, sauvegarde le modele "rf_related" (s'il fait
-    partie de ``approaches``) entraine sur la partition interne
-    (``inner_fit``) de CHAQUE fold externe sous
-    ``models_dir/rf_related_<measure>.joblib`` : le fichier final est donc
-    celui du dernier fold externe traite (comportement identique au notebook).
+    If ``models_dir`` is given, saves the "rf_related" model (if it is part of
+    ``approaches``) trained on the inner partition (``inner_fit``) of EACH outer fold
+    as ``models_dir/rf_related_<measure>.joblib``: the final file is therefore that of
+    the last outer fold processed (same behaviour as the notebook).
     """
     names = names_of(approaches)
     y = make_target(frame, status_suffix, measure)
@@ -238,23 +234,23 @@ def evaluate_measure(
     thresholds = {name: [] for name in names}
 
     for train_idx, test_idx in splitter.split(np.zeros(len(y)), y):
-        # partition interne : sert uniquement a fixer le seuil de decision
+        # inner partition: only used to set the decision threshold
         inner_fit, inner_val = train_test_split(
             train_idx, test_size=0.25, stratify=y[train_idx], random_state=random_state
         )
         for name, kind, which, factory in approaches:
-            # Un seuil se pose sur une confiance, pas sur une coordonnee.
+            # A threshold applies to a confidence, not to a coordinate.
             cols = sets[f"{which}_conf"] if kind == "rule" else sets[which]
             if not cols:
                 continue
             if kind == "rule":
-                how = "mean" if name.endswith("moy") else "min"
+                how = "mean" if name.endswith("mean") else "min"
                 val_score = rule_score(frame.iloc[inner_val][cols], how)
                 test_score = rule_score(frame.iloc[test_idx][cols], how)
             else:
                 data = frame[cols + group_cols]
                 if name.startswith("rf"):
-                    data = data.fillna(na_fill)   # la RF ne gere pas les NaN
+                    data = data.fillna(na_fill)   # the RF does not handle NaN
                 model = factory(y[inner_fit], random_state)
                 model.fit(data.iloc[inner_fit], y[inner_fit])
                 if name == "rf_related" and models_dir is not None:
@@ -277,7 +273,7 @@ def evaluate_measure(
 
 
 # --------------------------------------------------------------------------- #
-# 5. Metriques et figures
+# 5. Metrics and figures
 # --------------------------------------------------------------------------- #
 def metric_rows(measure: str, result: dict, approaches: list) -> list:
     y = result["y"]
@@ -314,10 +310,10 @@ def plot_pr(out_dir: Path, measure: str, result: dict, approaches: list) -> None
         precision, recall, _ = precision_recall_curve(y, score)
         ap = average_precision_score(y, score)
         ax.plot(recall, precision, lw=1.6, label=f"{name} (AP={ap:.3f})")
-    ax.axhline(y.mean(), color="grey", ls="--", lw=1, label=f"hasard ({y.mean():.3f})")
-    ax.set_xlabel("Rappel (non mesurable)")
-    ax.set_ylabel("Precision (non mesurable)")
-    ax.set_title(f"Courbe precision-rappel : {measure}")
+    ax.axhline(y.mean(), color="grey", ls="--", lw=1, label=f"chance ({y.mean():.3f})")
+    ax.set_xlabel("Recall (non measurable)")
+    ax.set_ylabel("Precision (non measurable)")
+    ax.set_title(f"Precision-recall curve: {measure}")
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1.02)
     ax.legend(fontsize=7, loc="lower left")
@@ -329,7 +325,7 @@ def plot_pr(out_dir: Path, measure: str, result: dict, approaches: list) -> None
 def plot_confusion(out_dir: Path, measure: str, result: dict, approaches: list) -> None:
     y = result["y"]
     names = names_of(approaches)
-    labels = ["mesurable", "non mes."]
+    labels = ["measurable", "non meas."]
     n_cols = min(len(names), 4) or 1
     n_rows = -(-len(names) // n_cols)  # ceil
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(3.25 * n_cols, 3.5 * n_rows), squeeze=False)
@@ -347,11 +343,11 @@ def plot_confusion(out_dir: Path, measure: str, result: dict, approaches: list) 
         ax.set_xticklabels(labels, fontsize=8)
         ax.set_yticklabels(labels, fontsize=8)
         ax.set_title(f"{name}\nMCC={matthews_corrcoef(y, result['preds'][name]):.3f}", fontsize=9)
-        ax.set_xlabel("predit", fontsize=8)
-        ax.set_ylabel("reel", fontsize=8)
+        ax.set_xlabel("predicted", fontsize=8)
+        ax.set_ylabel("actual", fontsize=8)
     for ax in axes.ravel()[len(names):]:
         ax.axis("off")
-    fig.suptitle(f"Matrices de confusion (out-of-fold) : {measure}")
+    fig.suptitle(f"Confusion matrices (out-of-fold): {measure}")
     fig.tight_layout()
     fig.savefig(out_dir / "confusion" / f"{slug(measure)}.png", dpi=140)
     plt.close(fig)

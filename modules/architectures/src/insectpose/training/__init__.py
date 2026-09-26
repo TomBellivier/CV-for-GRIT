@@ -1,1 +1,1 @@
-"""Briques d'entrainement transverses. Aucune logique specifique a une approche."""
+"""Cross-cutting training building blocks. No logic specific to an approach."""

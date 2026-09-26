@@ -1,10 +1,10 @@
 # insectpose
 
-Socle experimental pour comparer plusieurs approches d'estimation de pose sur 4 datasets
-d'insectes (Coleoptera, Diptera, Hymenoptera, Lepidoptera).
+Experimental framework to compare several pose-estimation approaches on 4 insect datasets
+(Coleoptera, Diptera, Hymenoptera, Lepidoptera).
 
-**Lire `CONVENTIONS.md` avant toute contribution.** Ce fichier-ci ne contient que le demarrage
-rapide ; toute la doctrine (contrats, regles, protocole) est dans `CONVENTIONS.md`, qui fait foi.
+**Read `CONVENTIONS.md` before any contribution.** This file only holds the quick start; the
+whole doctrine (contracts, rules, protocol) is in `CONVENTIONS.md`, which is authoritative.
 
 ## Installation
 
@@ -12,148 +12,155 @@ rapide ; toute la doctrine (contrats, regles, protocole) est dans `CONVENTIONS.m
 pip install -e ".[dev]"
 ```
 
-torch et ultralytics sont des dependances de premier rang (ADR-0019). `train.device: auto`
-utilise le GPU 0 s'il est disponible, la precision mixte est active par defaut et desactivee
-en `mode: debug`. Le materiel resolu est enregistre dans chaque manifeste, et l'agregation
-alerte si des runs compares proviennent de materiels differents.
+torch and ultralytics are first-rank dependencies (ADR-0019). Everything adapts to the
+machine: `train.device: auto` uses GPU 0 if there is one, else the Apple GPU (`mps`), else
+the CPU; `train.num_workers: auto` takes one data-loading worker per CPU minus one (capped at
+8, 0 on a single-CPU machine); mixed precision is on on GPU, off on CPU and in `mode: debug`.
+`train.batch_size` stays fixed at 16: two runs only compare at an equal batch size. The
+resolved hardware (GPU, number of CPUs) is recorded in every manifest, and the aggregation
+warns if compared runs come from different hardware.
 
-## Source des donnees
+## Data source
 
-`prepare` lit la table d'annotation unique du depot,
-`../../annotation_data/annotation_data.csv` (adaptateur `annotation_csv`), et en
-tire les annotations canoniques du contrat 1 : une ligne par image, filtree sur
-la colonne `group`. Les colonnes de scale et de validite des mesures de cette
-table ne concernent pas la pose et sont ignorees.
+`prepare` reads the single annotation table of the repository,
+`../../annotation_data/annotation_data.csv` (`annotation_csv` adapter), and derives the
+canonical annotations of contract 1 from it: one row per image, filtered on the `group`
+column. The scale and measurement-validity columns of that table do not concern the pose and
+are ignored.
 
-Reconstruire la table apres une campagne d'annotation :
-`python annotation_tools/build_annotation_data.py` a la racine du depot. Les
-adaptateurs `coco` et `yolo` restent disponibles (`data.adapter=yolo`) pour
-relire un corpus au format brut.
+Rebuild the table after an annotation campaign:
+`python annotation_tools/build_annotation_data.py` at the repository root. The `coco` and
+`yolo` adapters remain available (`data.adapter=yolo`) to read a corpus in its raw format.
 
-## Chaine complete
+## Full chain
 
 ```bash
-# 1. raw -> format canonique (contrat 1)
-python -m insectpose.cli prepare data=coleoptera
+# 1. annotation_data.csv -> canonical format of the 4 orders (contract 1)
+#    (data=coleoptera etc. prepares a single order)
+python -m insectpose.cli prepare
 
-# 2. folds partages par TOUTES les approches (contrat 2)
-python -m insectpose.cli split cv=kfold5_grouped
+# 2. folds shared by ALL the approaches (contract 2)
+python -m insectpose.cli split
 
-# 3. entrainement + prediction + evaluation d'un fold
-#    experiences disponibles : exp_a_yolo_pooled, exp_b_yolo_per_dataset,
-#    exp_c_detect_then_pose, exp_ref_mean_pose
+# 3. training + prediction + evaluation of one fold, or of several (ADR-0039)
+#    experiments: configs/experiment/ (exp_a_yolo_pooled ... exp_h_lora_per_dataset,
+#    exp_ref_mean_pose)
 python -m insectpose.cli train experiment=exp_a_yolo_pooled cv.fold=0
+python -m insectpose.cli train experiment=exp_a_yolo_pooled folds=[0,1,2]
 
-# 4. optimisation Optuna (metrique primaire de configs/eval/default.yaml)
+# 4. Optuna optimisation (primary metric of configs/eval/default.yaml), then one
+#    training per outer fold: every fold, or those of `folds`
 python -m insectpose.cli tune experiment=exp_a_yolo_pooled
+python -m insectpose.cli tune experiment=exp_a_yolo_pooled folds=[0,1]
 
-# 5. agregation de tous les runs + tableaux
+# 5. aggregation of every run + tables
 python -m insectpose.cli report
 ```
 
-## Modeles retenus : un ensemble, consomme par `pipeline/`
+The repository root also runs this chain, among the other steps of the project:
+`run_all.py` with `run_config.yaml` (see the root README).
 
-`<depot>/retained_models/pose/` contient un **ensemble** de modeles `yolo_pooled`
-(`retain.approaches`), un sous-dossier par modele avec son `model_card.json`
-(approche, fold, metrique primaire, schema de keypoints, commit). Le pipeline les
-infere TOUS sur chaque image et ecrit, pour chaque coordonnee de point, la moyenne et
-l'ecart-type sur l'ensemble ; mesures et classifieurs de validite partent de la moyenne.
-Chaque commande REMPLACE l'ensemble precedent, pour ne jamais melanger deux entrainements :
+## Retained models: an ensemble, used by `pipeline/`
+
+`<repo>/retained_models/pose/` holds an **ensemble** of `yolo_pooled` models
+(`retain.approaches`), one sub-folder per model with its `model_card.json` (approach, fold,
+primary metric, keypoint schema, commit). The pipeline runs ALL of them on every image and
+writes, for every keypoint coordinate, the mean and the standard deviation over the ensemble;
+measurements and validity classifiers work on the mean. Every command REPLACES the previous
+ensemble, so that two trainings never mix:
 
 ```
-train    -> 1 modele                    (ecart-type nul au pipeline)
-tune     ├─ trials d'HPO (folds internes)      -> non exportes
-         └─ reprises sur les 5 folds externes  -> EXPORTEES : 5 modeles + ensemble.json
-evaluate run_id=<run_id> -> 1 modele (retenir un run deja entraine, sans reentrainement)
+train                  -> 1 model + ensemble.json    (zero standard deviation in the pipeline)
+train folds=[0,1,2]    -> 3 models + ensemble.json   (one per fold, ADR-0039)
+tune     ├─ HPO trials (inner folds)           -> not exported
+         └─ reruns on the outer folds          -> EXPORTED: 5 models (or those of `folds`) + ensemble.json
+evaluate run_id=<run_id> -> 1 model (retain an already-trained run, without retraining)
 ```
 
 ```bash
-# ne rien exporter (exploration) : l'ensemble en place reste intact
+# export nothing (exploration): the ensemble in place stays intact
 python -m insectpose.cli train experiment=exp_a_yolo_pooled retain.enabled=false
 ```
 
-Apres `tune`, `ensemble.json` liste les membres et porte `cv_estimate` : la moyenne et
-l'ecart-type de la metrique primaire sur les folds externes, chacun mesure sur un test
-qu'il n'a pas vu. Relancer `tune` apres coup saute les folds deja complets et
-reconstitue l'ensemble. `tuning.final_full_fit=true` entraine EN PLUS un modele sur
-toutes les images (hyperparametres retenus ; en `nested`, ceux de la meilleure valeur
-interne) et l'AJOUTE a l'ensemble. Un `retain.name` fixe ferait ecrire plusieurs runs au
-meme endroit (seul le dernier survivrait, avec un avertissement) : le laisser a `null`.
+After `train` and `tune`, `ensemble.json` lists the members and carries `cv_estimate`: the
+mean and the standard deviation of the primary metric over the folds trained, each one
+measured on a test it has not seen. Running `tune` again afterwards skips the folds already complete and rebuilds
+the ensemble. `tuning.final_full_fit=true` ALSO trains a model on all the images (retained
+hyperparameters; in `nested` mode, those of the best inner value) and ADDS it to the
+ensemble. A fixed `retain.name` would make several runs write to the same place (only the
+last one would survive, with a warning): leave it at `null`.
 
-Un run `mode=smoke`, un trial d'HPO ou une approche hors de `retain.approaches` n'est
-jamais exporte et ne touche pas a l'ensemble en place. `retain.*` n'entre ni dans le
-`run_id` ni dans le `variant_hash` : changer ces cles ne reentraine rien et ne scinde pas
-les tableaux du rapport. `paths.retained=<chemin>` deplace la destination si la racine
-du module n'est pas `modules/architectures`.
+A `mode=smoke` run, an HPO trial or an approach outside `retain.approaches` is never exported
+and does not touch the ensemble in place. `retain.*` enters neither the `run_id` nor the
+`variant_hash`: changing these keys retrains nothing and does not split the report tables.
+`paths.retained=<path>` moves the destination if the module root is not
+`modules/architectures`.
 
-## Keypoints, mesures et resultats
+## Keypoints, measurements and results
 
-Le schema `insect42_v1` (points, difficultes, symetries, squelette) et les 27 mesures
-sont lus dans `<depot>/kp_infos.yaml`, definition unique du depot. Les analyses
-(`report`, `scripts/compare_models.py`, `plot_optuna.py`) sont ecrites dans
-`<depot>/results/pose/` (voir `results/README.md`).
+The `insect42_v1` schema (points, difficulties, symmetries, skeleton) and the 27 measurements
+are read from `<repo>/kp_infos.yaml`, the single definition of the repository. The analyses
+(`report`, `scripts/compare_models.py`, `plot_optuna.py`) are written to `<repo>/results/pose/`
+(see `results/README.md`).
 
-## Ajouter une approche
+## Adding an approach
 
-Copier `src/insectpose/approaches/TEMPLATE.py.txt` et suivre `CONVENTIONS.md` §11
-(6 artefacts). Le smoke test est parametre sur le registre : une approche enregistree
-y entre automatiquement, sans modifier `tests/`.
+Copy `src/insectpose/approaches/TEMPLATE.py.txt` and follow `CONVENTIONS.md` §11
+(6 artefacts). The smoke test is parametrised on the registry: a registered approach enters it
+automatically, without changing `tests/`.
 
-## Etat
+## Status
 
-Socle generique complet (contrats, registre, splits, evaluation, tuning niche, reporting, CLI).
+Complete generic framework (contracts, registry, splits, evaluation, tuning, reporting, CLI).
 
-| Approche                | Etat                                                                          |
-| ----------------------- | ----------------------------------------------------------------------------- |
-| `mean_pose`           | implementee - reference et baseline plancher (bbox GT, diagnostic)            |
-| `yolo_pooled`         | **implementee** - GPU CUDA, AMP, FP16 a l'inference                     |
-| `yolo_per_dataset`    | **implementee** - N modeles routes par dataset (ADR-0023)               |
-| `detect_then_pose`    | **implementee** - detecteur poule + pose sur crop (ADR-0024)            |
-| `lora`                | **implementee** - adaptateurs sur le cou, tetes entrainables (ADR-0025) |
-| `group_bn`            | **implementee** - BatchNorm par dataset, lots mixtes (ADR-0026)         |
-| `yolo_pooled_reduced` | **implementee** - A sans pattes ni ailes posterieures (ADR-0027)        |
+| Approach                | Status                                                                  |
+| ----------------------- | ----------------------------------------------------------------------- |
+| `mean_pose`           | implemented - reference and floor baseline (GT bbox, diagnostic)        |
+| `yolo_pooled`         | **implemented** - CUDA GPU, AMP, FP16 at inference; the retained model |
+| `yolo_per_dataset`    | **implemented** - N models routed by dataset (ADR-0023)                |
+| `detect_then_pose`    | **implemented** - pooled detector + pose on a crop (ADR-0024)          |
+| `lora`                | **implemented** - adapters on the neck, trainable heads (ADR-0025)     |
+| `group_bn`            | **implemented** - BatchNorm per dataset, mixed batches (ADR-0026)      |
+| `yolo_pooled_reduced` | **implemented** - A without legs nor hind wings (ADR-0027)             |
 
-Une approche dont la dependance lourde est absente est **ignoree** par le smoke test
-(mecanisme `availability()`), jamais en echec.
+An approach whose heavy dependency is missing is **skipped** by the smoke test
+(`availability()` mechanism), never failed.
 
-Chaque run produit : `manifest.json`, `config.yaml` resolu, `predictions/`,
-`metrics.parquet`, `logs/` et `figures/` (12 exemples pred vs GT dont les 6 pires cas).
+Every run produces: `manifest.json`, resolved `config.yaml`, `predictions/`,
+`metrics.parquet`, `logs/` and `figures/` (12 pred vs GT examples including the 6 worst cases).
 
-### A quoi sert `mean_pose`
+### What `mean_pose` is for
 
-Ce n'est pas un modele candidat : elle predit, pour chaque instance, la **pose moyenne du
-train** replacee dans la bbox de verite terrain. Elle remplit trois roles :
+It is not a candidate model: for each instance it predicts the **mean pose of the train set**
+placed back into the ground-truth bbox. It plays three roles:
 
-1. **baseline plancher** - un modele entraine qui ne la depasse pas nettement a un probleme
-   (convergence, labels mal formes, ordre de keypoints errone). C'est un test de sanite, pas
-   un concurrent ;
-2. **gabarit** - c'est l'implementation de reference du protocole `Approach`, a copier pour
-   ecrire une nouvelle approche ;
-3. **smoke test** - elle s'execute en quelques secondes, sans GPU ni dependance lourde, ce qui
-   valide toute la chaine `train -> predict -> evaluate -> figures` a chaque `pytest -m smoke`.
+1. **floor baseline** - a trained model that does not clearly beat it has a problem
+   (convergence, malformed labels, wrong keypoint order). It is a sanity test, not a
+   competitor;
+2. **template** - it is the reference implementation of the `Approach` protocol, to copy when
+   writing a new approach;
+3. **smoke test** - it runs in a few seconds, without a GPU nor a heavy dependency, which
+   validates the whole `train -> predict -> evaluate -> figures` chain at every
+   `pytest -m smoke`.
 
-Elle utilise les bboxes GT (`bbox_source: gt`) : ses chiffres ne sont donc **pas comparables**
-a ceux des approches bout-en-bout et ne doivent jamais figurer dans le meme tableau (§9.3).
+It uses the GT bboxes (`bbox_source: gt`): its numbers are therefore **not comparable** with
+those of the end-to-end approaches and must never appear in the same table (§9.3).
 
-L'approche `mean_pose` est une **implementation de reference** : elle sert de gabarit, de test
-de bout en bout et de baseline plancher. Elle utilise les bboxes GT (`bbox_source: gt`) et n'est
-donc **pas comparable** aux approches bout-en-bout (cf. §9.3).
+## Frozen protocol
 
-## Protocole fige
+Every protocol decision is settled (ADR-0006 to 0039, see `DECISIONS.md`):
 
-Toutes les decisions de protocole sont tranchees (ADR-0006 a 0015, cf. `DECISIONS.md`) :
+| Point          | Value                                                                  |
+| -------------- | ---------------------------------------------------------------------- |
+| Keypoints      | `insect42_v1`: 42 points, common to the 4 datasets, union = identity |
+| OKS sigmas     | `difficulty x 0.0025` (10 -> 0.025 ... 40 -> 0.100)                  |
+| PCK            | `alpha x thorax width`, reference alpha = 0.25                        |
+| Primary metric | `oks_ap` (overridable without re-evaluation)                         |
+| Measurements   | 27 morphometric measurements + 9 symmetry pairs                        |
+| Folds          | 5 outer folds, group_id = image_id (one image = one specimen)          |
+| HPO            | `tune_once`: search on the inner folds of outer fold 0, 20 trials (ADR-0031) |
+| Resolution     | 640x640 for every approach (strict guard)                              |
 
-| Point             | Valeur                                                               |
-| ----------------- | -------------------------------------------------------------------- |
-| Keypoints         | `insect42_v1` : 42 points, commun aux 4 datasets, union = identite |
-| Sigmas OKS        | `difficulty x 0.0025` (10 -> 0.025 ... 40 -> 0.100)                |
-| PCK               | `alpha x largeur du thorax`, reference alpha = 0.25                |
-| Metrique primaire | `oks_ap` (surchargeable sans reevaluer)                            |
-| Mesures           | 27 mesures morphometriques + 9 paires de symetrie                    |
-| Folds             | 5 externes, group_id = image_id (une image = un specimen)            |
-| HPO               | nichee : recherche sur folds internes, test externe jamais vu        |
-| Resolution        | 640x640 pour toutes les approches (garde-fou strict)                 |
-
-**Cout de l'HPO nichee** : `n_folds x n_trials x inner_folds` entrainements par approche,
-soit 600 aux valeurs par defaut. A calibrer avant de lancer une approche lourde, puis a figer
-a l'identique pour toutes (equite du budget)
+**Cost of the fully nested HPO** (`tuning.mode=nested`): `n_folds x n_trials x inner_folds`
+trainings per approach. To be calibrated before launching a heavy approach, then frozen
+identically for all of them (fair budget).

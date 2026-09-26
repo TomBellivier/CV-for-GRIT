@@ -1,5 +1,5 @@
 # @package _global_
-# Experience H : tronc commun + adaptateurs LoRA par ordre d'insecte.
+# Experiment H: common trunk + LoRA adapters per insect order.
 defaults:
   - override /data: pooled
   - override /approach: lora_per_dataset

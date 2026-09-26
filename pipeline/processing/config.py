@@ -9,8 +9,8 @@ file first when you adapt the pipeline to a new machine / dataset / model.
 All paths are resolved relative to the PROJECT ROOT (the folder that contains
 `process_folder.py`, i.e. the `pipeline/` folder at the repo root), so the
 pipeline works regardless of where you launch it from. `REPO_ROOT` is one
-level above that, and holds the `datasets/`, `modules/` and `all_images/`
-folders.
+level above that, and holds `kp_infos.yaml`, `modules/`, `retained_models/`,
+`annotation_data/` and `all_images/`.
 """
 
 from pathlib import Path
@@ -23,10 +23,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # REPO_ROOT = repository root (one level above pipeline/)
 REPO_ROOT = PROJECT_ROOT.parent
 
-# Root of the YOLO datasets. Expected layout (standard YOLO):
-#     datasets/<dataset_name>/images/<split>/<image files>
-#     datasets/<dataset_name>/labels/<split>/<label files>
-DATASETS_ROOT = REPO_ROOT / "datasets"
+# Single annotation table of the repository (annotation_tools/build_annotation_data.py):
+# its keypoints are the ground truth analyze_results.py compares the CSV against.
+ANNOTATION_DATA_CSV = REPO_ROOT / "annotation_data" / "annotation_data.csv"
 
 # Every model this pipeline loads lives here, and every one of them is written
 # by a module of `modules/` (see retained_models/README.md). Nothing is trained
@@ -46,6 +45,11 @@ ENSEMBLE_MIN_IOU = 0.5
 
 # YOLO scale-bar detector (trained outside this repo, dropped in by hand).
 SCALE_BAR_MODEL_PATH = RETAINED_MODELS_DIR / "scale_bar" / "best.pt"
+
+# Code of the scale detectors: a single copy, in modules/ (imported by scale.py).
+# A pipeline copied outside the repository takes these two folders with it.
+RULER_DETECTION_DIR = REPO_ROOT / "modules" / "ruler_detection"
+SCALE_BAR_DETECTION_DIR = REPO_ROOT / "modules" / "scale_bar_detection"
 
 # Folder of images to process, and where to write the CSV.
 INPUT_FOLDER = REPO_ROOT / "images_to_process"   # <-- EDIT ME if needed
@@ -67,13 +71,33 @@ EXPORT_KEYPOINTS = True
 IMG_EXTENSIONS = (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp")
 
 # --------------------------------------------------------------------------- #
-# Dataset membership (train / val columns)
+# Hardware (see hardware.py): by default everything adapts to the machine
 # --------------------------------------------------------------------------- #
-IMAGES_SUBDIR = "images"        # "<dataset>/images/<split>"
-TRAIN_SPLIT_DIRNAME = "train"
-VAL_SPLIT_DIRNAME = "val"
+# Where the models run: "auto" = every CUDA GPU (workers take them in turn), else
+# the Apple GPU ("mps"), else the CPU. Or force "cpu", "cuda:1", "mps"...
+DEVICE = "auto"
 
-# How a processed image is matched against the dataset files:
+# Parallel worker threads: "auto" (sized from the GPUs, CPUs and free memory) or a
+# number. --workers on the command line overrides it.
+WORKERS = "auto"
+WORKERS_PER_GPU = 4            # threads sharing one GPU (they overlap its inference with CPU work)
+CPU_THREADS_PER_WORKER = 2     # CPU only: compute threads given to each worker
+
+# Every worker holds its own copy of the models: "auto" never plans more workers
+# than MEMORY_BUDGET_FRACTION of the free RAM (and VRAM) can hold, counting
+# WORKER_MEMORY_OVERHEAD_MB of buffers per worker on top of its models.
+MEMORY_BUDGET_FRACTION = 0.7
+WORKER_MEMORY_OVERHEAD_MB = 400
+
+# FP16 inference of the pose models on a CUDA GPU (faster, half the memory). No
+# effect on the CPU or the Apple GPU, which stay in FP32.
+HALF_PRECISION_ON_GPU = True
+
+# --------------------------------------------------------------------------- #
+# Image name matching
+# --------------------------------------------------------------------------- #
+# How a processed image is matched against the image database (taxonomic group,
+# see insect_group.py):
 #   "name" -> exact file name incl. extension (e.g. "bee_001.jpg")   [requested]
 #   "stem" -> file name without extension     (e.g. "bee_001")
 MATCH_ON = "name"

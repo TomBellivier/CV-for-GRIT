@@ -1,7 +1,7 @@
-"""Adaptateur synthetique : genere un mini-corpus reproductible.
+"""Synthetic adapter: generates a reproducible mini-corpus.
 
-Sert aux tests de contrat et au smoke test de bout en bout (§10). Ne doit jamais
-alimenter un resultat de rapport : les images sont artificielles.
+Used by the contract tests and the end-to-end smoke test (§10). Must never feed a
+report result: the images are artificial.
 """
 
 from __future__ import annotations
@@ -15,10 +15,10 @@ import pandas as pd
 from insectpose.data.adapters.base import BaseAdapter
 from insectpose.registry import register_adapter
 
-# Gabarit anatomique approximatif du schema insect42_v1, en unites de demi-longueur
-# de corps (x vers la droite, y vers le bas). Sert uniquement aux fixtures de test :
-# il rend la largeur de thorax et les mesures morphometriques realistes, donc les
-# metriques du pipeline interpretables sur des donnees jouets.
+# Approximate anatomical template of the insect42_v1 schema, in half body lengths
+# (x to the right, y downwards). Only used by the test fixtures: it makes the thorax
+# width and the morphometric measurements realistic, hence the metrics of the pipeline
+# interpretable on toy data.
 _TEMPLATE_42 = [
     (0.00, -1.00), (-0.18, -0.85), (0.18, -0.85), (-0.10, -0.88), (0.10, -0.88),
     (0.00, -0.72), (-0.22, -0.45), (0.22, -0.45), (0.00, -0.20), (-0.18, 0.15),
@@ -35,7 +35,7 @@ _TEMPLATE_42 = [
 
 @register_adapter("synthetic")
 class SyntheticAdapter(BaseAdapter):
-    """Genere des annotations plausibles (et les images si `write_images=True`)."""
+    """Generate plausible annotations (and the images if `write_images=True`)."""
 
     def read(self) -> pd.DataFrame:
         opts: dict[str, Any] = self.options
@@ -63,7 +63,7 @@ class SyntheticAdapter(BaseAdapter):
             kpts = np.clip(kpts, 1.0, size - 2.0)
             vis = np.full(n_keypoints, 2, dtype=int)
             vis[rng.random(n_keypoints) < 0.1] = 1
-            # ADR-0016 : certains keypoints n'existent pas chez tous les ordres.
+            # ADR-0016: some keypoints do not exist in every order.
             for k in absent:
                 vis[k] = 0
             x0, y0 = kpts.min(axis=0)
@@ -91,7 +91,7 @@ class SyntheticAdapter(BaseAdapter):
 
     @staticmethod
     def _write_images(df: pd.DataFrame, root: Path, size: int) -> None:
-        """Effet de bord : ecrit des PNG gris sous `root` (fixtures de test uniquement)."""
+        """Side effect: writes grey PNGs under `root` (test fixtures only)."""
         from PIL import Image
 
         for path in df["image_path"]:

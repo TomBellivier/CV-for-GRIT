@@ -1,580 +1,631 @@
 
-# DECISIONS.md - journal des choix methodologiques
+# DECISIONS.md - log of methodological choices
 
-Append-only. Une entree = une decision. Format ADR allege.
-Toute decision non triviale prise en ecrivant du code atterrit ici (CONVENTIONS.md §12).
+Append-only. One entry = one decision. Lightweight ADR format.
+Any non-trivial decision taken while writing code lands here (CONVENTIONS.md §12).
 
 ---
 
-## ADR-0001 - Contrats de fichiers plutot qu'API Python entre modules
+## ADR-0001 - File contracts rather than a Python API between modules
 
-**Date** : initialisation - **Statut** : accepte
-**Contexte** : 5+ approches sur des frameworks heterogenes (Ultralytics, PyTorch, PEFT).
-**Decision** : les approches communiquent avec le pipeline par fichiers au schema fige
-(annotations / splits / predictions / metriques / manifeste). L'evaluateur ne charge aucun modele.
-**Consequences** : re-evaluation possible sans reentrainement ; surcout d'I/O accepte ;
-toute approche externe (modele tiers, prediction manuelle) est integrable sans code.
+**Date**: initialisation - **Status**: accepted
+**Context**: 5+ approaches on heterogeneous frameworks (Ultralytics, PyTorch, PEFT).
+**Decision**: the approaches communicate with the pipeline through files with a frozen schema
+(annotations / splits / predictions / metrics / manifest). The evaluator loads no model.
+**Consequences**: re-evaluation without retraining; I/O overhead accepted; any external
+approach (third-party model, manual prediction) can be integrated without code.
 
-## ADR-0002 - Toutes les coordonnees dans le repere de l'image d'origine
+## ADR-0002 - All coordinates in the frame of the original image
 
-**Date** : initialisation - **Statut** : accepte
-**Contexte** : la pipeline detection->pose travaille sur crops ; YOLO travaille en normalise.
-**Decision** : aucun format normalise ni repere de crop ne quitte un module. Conversion et
-retro-projection a la frontiere, verifiees par test aller-retour (1e-6).
-**Consequences** : evaluation unique et comparable pour toutes les approches.
+**Date**: initialisation - **Status**: accepted
+**Context**: the detection->pose pipeline works on crops; YOLO works in normalised coordinates.
+**Decision**: no normalised format nor crop frame leaves a module. Conversion and
+back-projection happen at the boundary, checked by a round-trip test (1e-6).
+**Consequences**: a single, comparable evaluation for every approach.
 
-## ADR-0003 - Un seul evaluateur, metriques jamais lues depuis un framework
+## ADR-0003 - A single evaluator, metrics never read from a framework
 
-**Date** : initialisation - **Statut** : accepte
-**Decision** : les metriques d'Ultralytics et consorts servent au monitoring uniquement.
-Seul `insectpose.evaluation` produit des chiffres citables.
+**Date**: initialisation - **Status**: accepted
+**Decision**: the metrics of Ultralytics and the like are used for monitoring only.
+Only `insectpose.evaluation` produces quotable numbers.
 
-## ADR-0004 - Export qualitatif obligatoire a chaque run
+## ADR-0004 - Mandatory qualitative export at every run
 
-**Date** : initialisation - **Statut** : accepte
-**Contexte** : un tableau de metriques ne montre pas *comment* un modele echoue.
-**Decision** : chaque run exporte 12 figures pred vs GT dont les 6 pires cas selon l'OKS
-par instance, plus un index JSON tracable. Une image manquante est une ERREUR bloquante
-(`eval.qualitative.allow_missing_images=false`) : un export vide masquerait un chemin casse.
-**Consequences** : `image_path` doit rester valide et relatif a `paths.data`.
+**Date**: initialisation - **Status**: accepted
+**Context**: a metrics table does not show *how* a model fails.
+**Decision**: every run exports 12 pred vs GT figures including the 6 worst cases by
+per-instance OKS, plus a traceable JSON index. A missing image is a BLOCKING error
+(`eval.qualitative.allow_missing_images=false`): an empty export would hide a broken path.
+**Consequences**: `image_path` must stay valid and relative to `paths.data`.
 
-## ADR-0005 - Metriques ponctuelles agregees par compteurs, pas par empilement
+## ADR-0005 - Point metrics aggregated through counters, not by stacking
 
-**Date** : initialisation - **Statut** : accepte
-**Contexte** : les 4 ordres n'ont pas le meme nombre de keypoints ; en perimetre poole,
-empiler des tableaux (N, K) de schemas differents est impossible.
-**Decision** : PCK / NME agregent numerateurs et denominateurs par bloc de schema homogene.
-**Consequences** : les scopes `overall` et `dataset:*` restent valides en multi-schemas ;
-c'est une consequence directe de OPEN-01 et une raison de plus de la trancher tot.
+**Date**: initialisation - **Status**: accepted
+**Context**: the 4 orders do not have the same number of keypoints; in the pooled scope,
+stacking (N, K) arrays of different schemas is impossible.
+**Decision**: PCK / NME aggregate numerators and denominators per homogeneous schema block.
+**Consequences**: the `overall` and `dataset:*` scopes remain valid with several schemas;
+a direct consequence of OPEN-01 and one more reason to settle it early.
 
-## ADR-0006 - Schema de keypoints unique aux 4 datasets : insect42_v1
+## ADR-0006 - A single keypoint schema for the 4 datasets: insect42_v1
 
-**Date** : specification expert - **Statut** : accepte (ferme OPEN-01)
-**Contexte** : le risque principal du projet etait une divergence anatomique entre ordres.
-**Decision** : les 4 datasets partagent un seul schema de 42 points (`kp_infos.yaml` (racine du depot)), avec squelette de 51 aretes et table de symetrie gauche/droite complete.
-L'espace union est ce schema lui-meme : le mapping est l'identite.
-**Consequences** : le modele poole n'a aucun point a masquer, les comparaisons pooled vs
-par-dataset portent uniquement sur la methode. Le mecanisme d'espace union reste en place
-et teste, pour absorber sans refonte une divergence future. **L'ordre des 42 points est fige
-a vie** : il est encode dans tous les artefacts produits.
+**Date**: expert specification - **Status**: accepted (closes OPEN-01)
+**Context**: the main risk of the project was an anatomical divergence between orders.
+**Decision**: the 4 datasets share a single 42-point schema (`kp_infos.yaml`, repository root), with a skeleton of 51 edges and a complete left/right symmetry table.
+The union space is that schema itself: the mapping is the identity.
+**Consequences**: the pooled model has no point to mask, the pooled vs per-dataset
+comparisons are only about the method. The union-space mechanism stays in place and tested,
+to absorb a future divergence without a redesign. **The order of the 42 points is frozen
+for life**: it is encoded in every artefact produced.
 
-## ADR-0007 - Sigmas OKS derives de la difficulte de positionnement
+## ADR-0007 - OKS sigmas derived from the placement difficulty
 
-**Date** : specification expert - **Statut** : accepte (ferme OPEN-02, volet OKS)
-**Decision** : `sigma = difficulty * 0.0025`, ou `difficulty` (10 a 40) est fournie par
-l'expert par point. Correspondance : 10 -> 0.025, 20 -> 0.050, 30 -> 0.075, 40 -> 0.100,
-soit la plage des sigmas COCO. La regle est declaree dans le schema, pas dans le code.
-**Consequences** : un point difficile a annoter est juge avec plus d'indulgence, ce qui evite
-que la metrique soit dominee par le bruit d'annotation. Changer `scale` change la definition
-de l'OKS : bumper `eval.version` et rejouer les runs.
+**Date**: expert specification - **Status**: accepted (closes OPEN-02, OKS part)
+**Decision**: `sigma = difficulty * 0.0025`, where `difficulty` (10 to 40) is given by the
+expert per point. Correspondence: 10 -> 0.025, 20 -> 0.050, 30 -> 0.075, 40 -> 0.100,
+i.e. the range of the COCO sigmas. The rule is declared in the schema, not in the code.
+**Consequences**: a point that is hard to annotate is judged more leniently, which keeps the
+metric from being dominated by annotation noise. Changing `scale` changes the definition of
+the OKS: bump `eval.version` and replay the runs.
 
-## ADR-0008 - Erreur sur les mesures morphometriques comme metrique de premier plan
+## ADR-0008 - Error on the morphometric measurements as a first-class metric
 
-**Date** : specification expert - **Statut** : accepte
-**Contexte** : l'aval du projet consomme 27 mesures (longueurs, largeurs), pas des keypoints.
-**Decision** : `kp_infos.yaml` (racine du depot) definit les 27 mesures et les 9 paires
-symetriques. Deux metriques : `measurement_mape_median` (erreur relative pred vs GT, par mesure
-et globale) et `symmetry_gap_median/p90` (ecart gauche/droite des mesures PREDITES).
-**Consequences** : `symmetry_gap` ne demande aucune verite terrain : c'est un controle qualite
-utilisable en production sur des images non annotees. Une mesure n'est evaluee que si tous ses
-points sont annotes visibles.
+**Date**: expert specification - **Status**: accepted
+**Context**: the project downstream consumes 27 measurements (lengths, widths), not keypoints.
+**Decision**: `kp_infos.yaml` (repository root) defines the 27 measurements and the 9
+symmetric pairs. Two metrics: `measurement_mape_median` (relative error pred vs GT, per
+measurement and overall) and `symmetry_gap_median/p90` (left/right gap of the PREDICTED
+measurements).
+**Consequences**: `symmetry_gap` needs no ground truth: it is a quality check usable in
+production on unannotated images. A measurement is only evaluated if all its points are
+annotated as visible.
 
-## ADR-0009 - PCK normalise par la largeur du thorax
+## ADR-0009 - PCK normalised by the thorax width
 
-**Date** : specification expert - **Statut** : accepte (ferme OPEN-02, volet PCK)
-**Decision** : un point est correct si son erreur est inferieure a `alpha x largeur du thorax`,
-la largeur etant la distance `thorax-left` <-> `thorax-right`. Valeur de reference du projet :
-**alpha = 0.25** ; alphas 0.125 et 0.5 donnent la courbe.
-**Consequences** : normalisation anatomique, insensible au cadrage de la bbox (contrairement a
-la diagonale). Si les deux points de thorax ne sont pas annotes, repli sur la diagonale de bbox,
-et le **taux de repli est publie** (`pck_normalizer_fallback_rate`) : une echelle de reference
-silencieusement remplacee fausserait la comparaison.
+**Date**: expert specification - **Status**: accepted (closes OPEN-02, PCK part)
+**Decision**: a point is correct if its error is below `alpha x thorax width`, the width
+being the `thorax-left` <-> `thorax-right` distance. Reference value of the project:
+**alpha = 0.25**; alphas 0.125 and 0.5 give the curve.
+**Consequences**: anatomical normalisation, insensitive to the framing of the bbox (unlike the
+diagonal). If the two thorax points are not annotated, fallback to the bbox diagonal, and the
+**fallback rate is published** (`pck_normalizer_fallback_rate`): a silently replaced
+reference scale would bias the comparison.
 
-## ADR-0010 - Metrique primaire : oks_ap, changeable sans invalider les runs
+## ADR-0010 - Primary metric: oks_ap, changeable without invalidating the runs
 
-**Date** : specification expert - **Statut** : accepte (ferme OPEN-03)
-**Decision** : `eval.primary_metric = oks_ap`. C'est **la seule cle d'evaluation librement
-surchargeable** : elle ne modifie aucun calcul, seulement l'objectif d'Optuna et le classement.
+**Date**: expert specification - **Status**: accepted (closes OPEN-03)
+**Decision**: `eval.primary_metric = oks_ap`. It is **the only freely overridable evaluation
+key**: it changes no computation, only the Optuna objective and the ranking.
 
 ```
 python -m insectpose.cli train ... eval.primary_metric=measurement_mape_median \
                                    eval.primary_direction=minimize
 ```
 
-**Consequences** : toutes les metriques sont calculees a chaque run, donc changer d'objectif
-n'oblige jamais a reevaluer. Le manifeste enregistre l'objectif utilise ; l'agregation alerte
-si des runs tunes sur des objectifs differents sont compares.
+**Consequences**: every metric is computed at every run, so changing the objective never
+requires a re-evaluation. The manifest records the objective used; the aggregation warns if
+runs tuned on different objectives are compared.
 
-## ADR-0011 - Une image = un specimen : group_id = image_id
+## ADR-0011 - One image = one specimen: group_id = image_id
 
-**Date** : specification expert - **Statut** : accepte (ferme OPEN-04)
-**Decision** : aucun dataset ne contient plusieurs images d'un meme specimen ou d'une meme
-planche. Le decoupage par groupe reste actif avec `group_id = image_id`.
-**Consequences** : pas de fuite. Si un futur dataset apporte plusieurs vues par specimen, il
-suffit de renseigner `data.adapter_options.group_id_field` : aucun code a modifier.
+**Date**: expert specification - **Status**: accepted (closes OPEN-04)
+**Decision**: no dataset contains several images of the same specimen or of the same plate.
+The group split stays active with `group_id = image_id`.
+**Consequences**: no leakage. If a future dataset brings several views per specimen, filling
+`data.adapter_options.group_id_field` is enough: no code to change.
 
-## ADR-0012 - HPO nichee (nested)
+## ADR-0012 - Nested HPO
 
-**Date** : specification expert - **Statut** : accepte (ferme OPEN-05)
-**Decision** : pour chaque fold externe, la recherche d'hyperparametres tourne sur des folds
-**internes** construits a partir du seul train externe (`<split_id>__outer<k>`, generes par
-`cli split` et versionnes comme les folds externes). Les meilleurs hyperparametres sont ensuite
-appliques au fold externe entier ; le test externe n'a jamais servi a choisir un hyperparametre.
-**Consequences** : cout = `n_folds x n_trials x inner_folds` entrainements, soit 5 x 40 x 3 = 600
-runs par approche aux valeurs par defaut. **A calibrer avant de lancer une approche lourde** :
-reduire `n_trials`, `inner_folds`, ou basculer en `tune_once` (documente comme tel). Le budget
-effectif est enregistre dans chaque manifeste, et il doit rester identique entre approches.
+**Date**: expert specification - **Status**: accepted (closes OPEN-05)
+**Decision**: for each outer fold, the hyperparameter search runs on **inner** folds built from
+the outer train only (`<split_id>__outer<k>`, generated by `cli split` and versioned like the
+outer folds). The best hyperparameters are then applied to the whole outer fold; the outer
+test has never been used to choose a hyperparameter.
+**Consequences**: cost = `n_folds x n_trials x inner_folds` trainings, i.e. 5 x 40 x 3 = 600
+runs per approach with the default values. **To be calibrated before launching a heavy
+approach**: reduce `n_trials`, `inner_folds`, or switch to `tune_once` (documented as such). The
+actual budget is recorded in every manifest, and it must stay identical across approaches.
 
-## ADR-0013 - Resolution d'entree commune 640x640
+## ADR-0013 - Common input resolution 640x640
 
-**Date** : specification expert - **Statut** : accepte (ferme OPEN-06)
-**Decision** : `protocol.image_size = [640, 640]` pour toutes les approches. Le garde-fou
-`strict.enforce_common_image_size` refuse toute divergence.
-**Consequences** : la comparaison porte sur la methode, pas sur la resolution. Une exploration
-a autre resolution reste possible en desactivant le garde-fou, mais ses resultats ne sont pas
-citables dans le rapport.
+**Date**: expert specification - **Status**: accepted (closes OPEN-06)
+**Decision**: `protocol.image_size = [640, 640]` for every approach. The
+`strict.enforce_common_image_size` guard refuses any divergence.
+**Consequences**: the comparison is about the method, not the resolution. An exploration at
+another resolution remains possible by disabling the guard, but its results cannot be quoted
+in the report.
 
-## ADR-0014 - Le groupe d'insecte est toujours connu a l'inference
+## ADR-0014 - The insect group is always known at inference
 
-**Date** : specification expert - **Statut** : accepte (ferme OPEN-07)
-**Decision** : l'utilisateur final declare l'ordre d'insecte des images traitees. Les approches
-conditionnees par dataset (BatchNorm par groupe, modeles par dataset) peuvent donc s'appuyer sur
-`meta.dataset` sans strategie de repli.
-**Consequences** : un dataset absent ou inconnu a l'inference est une **erreur explicite**, pas
-un cas a deviner. A implementer comme tel dans l'approche `group_bn`.
+**Date**: expert specification - **Status**: accepted (closes OPEN-07)
+**Decision**: the end user declares the insect order of the processed images. The
+dataset-conditioned approaches (per-group BatchNorm, per-dataset models) can therefore rely on
+`meta.dataset` without a fallback strategy.
+**Consequences**: a missing or unknown dataset at inference is an **explicit error**, not a
+case to guess. To be implemented as such in the `group_bn` approach.
 
-## ADR-0015 - Aucun suivi d'experiences complementaire
+## ADR-0015 - No additional experiment tracking
 
-**Date** : specification expert - **Statut** : accepte (ferme OPEN-08)
-**Decision** : pas de MLflow ni W&B. Les manifestes JSON et `results/master.parquet` sont la
-seule source de verite.
+**Date**: expert specification - **Status**: accepted (closes OPEN-08)
+**Decision**: no MLflow nor W&B. The JSON manifests and `results/master.parquet` are the
+only source of truth.
 
-## ADR-0016 - Keypoints absents selon l'ordre d'insecte : masques, jamais imputes
+## ADR-0016 - Keypoints absent depending on the insect order: masked, never imputed
 
-**Date** : specification expert - **Statut** : accepte (ferme OPEN-10)
-**Contexte** : le schema `insect42_v1` est commun aux 4 ordres, mais certains points
-n'existent pas chez tous (ailes, antennes selon les groupes). Ils portent `vis = 0`.
-**Decision** : ces points sont **masques** partout, jamais remplaces par une valeur :
-exclus de l'OKS et du PCK, masques dans la loss (label YOLO `0 0 0`), et les mesures qui en
-dependent sont declarees non calculables pour ce dataset. `cli prepare` produit un rapport
-de couverture (`data/processed/coverage_*.parquet` + `coverage_summary.json`) qui distingue
-trois cas : absent (<= 1 % d'annotation), rare (< 50 %, PCK par point peu informatif) et present.
-**Consequences** : un point absent de TOUS les datasets est signale en avertissement — le
-modele le predirait sans aucune supervision, et il faudrait envisager de le retirer du schema.
-Les scopes `keypoint:<dataset>:<point>` absents des resultats ne sont pas un bug : ils
-signalent une absence d'annotation, et le `n` de chaque ligne permet de le verifier.
+**Date**: expert specification - **Status**: accepted (closes OPEN-10)
+**Context**: the `insect42_v1` schema is common to the 4 orders, but some points do not exist
+in all of them (wings, antennae depending on the groups). They carry `vis = 0`.
+**Decision**: these points are **masked** everywhere, never replaced by a value: excluded from
+the OKS and the PCK, masked in the loss (YOLO label `0 0 0`), and the measurements depending on
+them are declared not computable for that dataset. `cli prepare` produces a coverage report
+(`data/processed/coverage_*.parquet` + `coverage_summary.json`) that distinguishes three cases:
+absent (<= 1 % annotated), rare (< 50 %, per-point PCK not very informative) and present.
+**Consequences**: a point absent from ALL the datasets is reported as a warning — the model
+would predict it without any supervision, and removing it from the schema should be
+considered. `keypoint:<dataset>:<point>` scopes missing from the results are not a bug: they
+signal an absence of annotation, and the `n` of each row lets one check it.
 
-## ADR-0017 - Une image = un insecte
+## ADR-0017 - One image = one insect
 
-**Date** : specification expert - **Statut** : accepte
-**Decision** : `data.single_instance_per_image = true`. La violation est une **erreur
-bloquante a la preparation** des donnees, pas un avertissement.
-**Consequences** : les approches a detection utilisent `max_det = 1`. Sans ce garde-fou, une
-image multi-instances ferait mentir la detection top-1 en silence. La detection reste evaluee
-(`det_ap@0.5`) : cadrer un seul insecte n'est pas trivial pour autant.
+**Date**: expert specification - **Status**: accepted
+**Decision**: `data.single_instance_per_image = true`. A violation is a **blocking error at
+data preparation**, not a warning.
+**Consequences**: the detection approaches use `max_det = 1`. Without this guard, a
+multi-instance image would silently make the top-1 detection lie. Detection is still
+evaluated (`det_ap@0.5`): framing a single insect is not trivial for all that.
 
-## ADR-0018 - yolo_pooled : premiere approche implementee
+## ADR-0018 - yolo_pooled: first approach implemented
 
-**Date** : implementation - **Statut** : accepte
-**Decision** : Approche A = un seul modele YOLO-pose, une classe `insect`, les 4 datasets
-confondus, 42 keypoints. Comme le schema est commun (ADR-0006), aucune reprojection union ->
-local n'est necessaire. La logique risquee (conversion de coordonnees, format des labels,
-table de symetrie) est isolee dans `data/yolo_export.py` et testee par aller-retour, sans GPU.
-**Consequences** :
+**Date**: implementation - **Status**: accepted
+**Decision**: Approach A = a single YOLO-pose model, one `insect` class, the 4 datasets
+pooled, 42 keypoints. Since the schema is common (ADR-0006), no union -> local reprojection is
+needed. The risky logic (coordinate conversion, label format, symmetry table) is isolated in
+`data/yolo_export.py` and tested by a round trip, without a GPU.
+**Consequences**:
 
-- `data.yaml` embarque `flip_idx` : sans lui, `fliplr` apprendrait une anatomie inversee.
-  L'approche refuse `fliplr > 0` si le schema n'a aucune paire de symetrie.
-- Les fichiers YOLO sont un artefact **derive**, regenere par fold sous `runs/<run_id>/`,
-  jamais ecrit dans `data/processed/`.
-- Les noms de fichiers sont aplatis (`coleoptera__img000`) : sans cela, deux datasets ayant
-  un `img000.png` se recouvriraient silencieusement.
-- `conf = 0.001` a l'inference : le seuillage est une operation d'evaluation, pas d'ecriture.
-- Ultralytics ne remontant pas d'intermediaire exploitable, `prunable = false` : l'elagage
-  Optuna se fait au niveau du fold, pas de l'epoque.
-- Dependance lourde declaree via `availability()` : le smoke test **ignore proprement**
-  l'approche si `ultralytics` est absent, au lieu d'echouer.
+- `data.yaml` carries `flip_idx`: without it, `fliplr` would learn a mirrored anatomy.
+  The approach refuses `fliplr > 0` if the schema has no symmetry pair.
+- The YOLO files are a **derived** artefact, regenerated per fold under `runs/<run_id>/`,
+  never written to `data/processed/`.
+- File names are flattened (`coleoptera__img000`): otherwise two datasets both having an
+  `img000.png` would silently overwrite each other.
+- `conf = 0.001` at inference: thresholding is an evaluation operation, not a writing one.
+- Since Ultralytics reports no usable intermediate value, `prunable = false`: Optuna pruning
+  happens at the fold level, not the epoch level.
+- Heavy dependency declared through `availability()`: the smoke test **cleanly skips** the
+  approach if `ultralytics` is missing, instead of failing.
 
-## ADR-0019 - Materiel : CUDA disponible, torch et ultralytics en dependances de premier rang
+## ADR-0019 - Hardware: CUDA available, torch and ultralytics as first-rank dependencies
 
-**Date** : specification environnement - **Statut** : accepte
-**Contexte** : l'environnement cible dispose d'ultralytics et d'un GPU CUDA.
-**Decision** :
+**Date**: environment specification - **Status**: accepted
+**Context**: the target environment has ultralytics and a CUDA GPU.
+**Decision**:
 
-- `torch`, `torchvision` et `ultralytics` passent dans `dependencies` (l'extra `[yolo]` est
-  conserve vide, par compatibilite) ;
-- `train.device: auto` se resout en GPU 0 si CUDA est disponible, sinon `cpu` ; une valeur
-  explicite (`cpu`, `"0,1"`, `mps`) est toujours respectee ;
-- precision mixte (`train.amp: true`) active par defaut, **desactivee d'office en
-  `mode: debug`** ou la reproductibilite prime sur la vitesse ;
-- precision d'inference declaree en clair (`approach.inference_precision: fp16 | fp32`),
-  traduite en `quantize` (Ultralytics >= 8.4) ou `half` (versions anterieures) ; en fp32
-  aucun argument n'est passe, ce qui evite un avertissement de depreciation ;
-- **inference en flux obligatoire** (`stream=True`) : sans cela Ultralytics conserve un
-  objet `Results` par image, image d'origine comprise. Sur des photos de specimens en pleine
-  resolution, quelques centaines d'images suffisent a saturer la RAM et le processus se fait
-  tuer par l'OOM killer apres l'entrainement. Le double de test refuse desormais un appel
-  non streame ;
-- la VRAM maximale (`peak_vram_mb`), le temps d'entrainement et le nombre de parametres sont
-  enregistres dans le manifeste, comme metriques de cout de premier ordre.
-  **Consequences** : le materiel resolu (nom du GPU, capability, VRAM totale, versions CUDA/cuDNN)
-  entre dans `manifest.environment.device`, et l'agregation **alerte si des runs compares
-  proviennent de materiels differents** : les couts (latence, VRAM) ne seraient alors pas
-  comparables, meme si l'OKS l'est.
-  Le mecanisme `availability()` reste en place : une CI sans GPU ignore proprement l'approche
-  au lieu d'echouer. L'integration Ultralytics est verifiee par un double (`tests/approaches/ test_yolo_pooled_integration.py`) qui teste ce que nous controlons — conversion bbox centree
-  vers coin haut-gauche, arguments du protocole, copie des poids — sans exiger de GPU.
+- `torch`, `torchvision` and `ultralytics` move to `dependencies` (the `[yolo]` extra is kept
+  empty, for compatibility);
+- `train.device: auto` resolves to GPU 0 if CUDA is available, else the Apple GPU (`mps`), else
+  `cpu`; an explicit value (`cpu`, `"0,1"`, `mps`) is always respected. `train.num_workers:
+  auto` takes one data-loading worker per CPU minus one, capped at 8;
+- mixed precision (`train.amp: true`) enabled by default, **automatically disabled in
+  `mode: debug`** where reproducibility prevails over speed, and on the CPU;
+- inference precision declared explicitly (`approach.inference_precision: fp16 | fp32`),
+  translated into `quantize` (Ultralytics >= 8.4) or `half` (earlier versions); in fp32 no
+  argument is passed, which avoids a deprecation warning;
+- **streamed inference is mandatory** (`stream=True`): without it Ultralytics keeps one
+  `Results` object per image, original image included. On full-resolution specimen photos, a
+  few hundred images are enough to saturate the RAM and the process gets killed by the OOM
+  killer after training. The test double now refuses a non-streamed call;
+- peak VRAM (`peak_vram_mb`), training time and number of parameters are recorded in the
+  manifest, as first-order cost metrics.
+  **Consequences**: the resolved hardware (GPU name, capability, total VRAM, CUDA/cuDNN
+  versions, number of CPUs) goes into `manifest.environment.device`, and the aggregation
+  **warns if compared runs come from different hardware**: the costs (latency, VRAM) would then
+  not be comparable, even if the OKS is.
+  The `availability()` mechanism stays in place: a CI without a GPU cleanly skips the approach
+  instead of failing. The Ultralytics integration is checked by a double (`tests/approaches/test_yolo_pooled_integration.py`) that tests what we control — centred bbox to
+  top-left corner conversion, protocol arguments, weight copy — without requiring a GPU.
 
-## ADR-0020 - Plafond de resolution des images source a l'export
+## ADR-0020 - Resolution cap of the source images at export
 
-**Date** : diagnostic terrain - **Statut** : ANNULE (remplace par ADR-0021)
-**Annulation** : ce plafond avait ete introduit sur un diagnostic errone (voir plus bas).
-La cause reelle de la saturation memoire etait le NOMBRE d'images passees en un appel, pas
-leur resolution (ADR-0021). Le redimensionnement a donc ete retire : il ajoutait une
-transformation de coordonnees a maintenir et a tester pour un benefice qui n'etait pas
-celui recherche. Les images sont exportees telles quelles, par lien symbolique, et les
-predictions restent nativement dans le repere de l'image d'origine.
-Si le decodage devient un jour un goulot d'etranglement mesure, cette piste reste valable
-et l'implementation est dans l'historique git.
+**Date**: field diagnosis - **Status**: CANCELLED (replaced by ADR-0021)
+**Cancellation**: this cap had been introduced on a wrong diagnosis (see below). The real cause
+of the memory saturation was the NUMBER of images passed in one call, not their resolution
+(ADR-0021). The resizing was therefore removed: it added a coordinate transform to maintain and
+test for a benefit that was not the one sought. Images are exported as they are, through a
+symbolic link, and the predictions natively stay in the frame of the original image.
+If decoding one day becomes a measured bottleneck, this lead remains valid and the
+implementation is in the git history.
 
-**Contenu d'origine, conserve pour memoire** - **Statut initial** : accepte
-**Contexte** : les datasets reels contiennent des photos de 10 a 50 MP (mediane 36 MP pour
-les Lepidopteres). Une image de 36 MP decodee occupe ~108 Mo en uint8, x4 en float pour
-l'augmentation, x4 en mosaique : l'entrainement saturait 31 Go de RAM et le processus etait
-tue par l'OOM killer, avant meme la premiere epoque utile.
-**Decision** : `protocol.export_max_side: 1280` plafonne le grand cote des images a l'export
-YOLO (0 = aucun plafond). Consequences exploitees :
+**Original content, kept for the record** - **Initial status**: accepted
+**Context**: the real datasets contain photos of 10 to 50 MP (median 36 MP for the
+Lepidoptera). A decoded 36 MP image takes ~108 MB in uint8, x4 in float for the augmentation,
+x4 in mosaic: training saturated 31 GB of RAM and the process was killed by the OOM killer,
+before even the first useful epoch.
+**Decision**: `protocol.export_max_side: 1280` caps the long side of the images at the YOLO
+export (0 = no cap). Consequences used:
 
-- les labels YOLO sont NORMALISES, donc **invariants au redimensionnement uniforme** :
-  aucun label a recalculer, aucune conversion supplementaire a tester ;
-- le facteur d'echelle est conserve par image dans `scales.json`, et les predictions sont
-  **retro-projetees vers la resolution d'origine** avant ecriture (contrat 3) ;
-- l'inference tourne aussi sur les copies reduites : decoder du 36 MP a la prediction
-  couterait la meme RAM qu'a l'entrainement ;
-- le decodage JPEG utilise le mode `draft` de PIL, qui decode directement a taille reduite.
-  **Consequences** : `export_max_side` est un parametre de PROTOCOLE, enregistre dans le
-  manifeste et **identique pour toutes les approches** — deux approches entrainees sur des
-  resolutions sources differentes ne seraient pas comparables. 1280 px pour un modele qui
-  travaille a 640 laisse une marge confortable ; a revoir si les keypoints fins (tarses,
-  antennes) se degradent, en le documentant ici.
-  En complement, le trainer Ultralytics (dataloaders, workers, buffers d'augmentation) est
-  explicitement libere entre `fit` et `predict` : sans cela l'inference demarrait avec
-  plusieurs Go deja occupes.
+- the YOLO labels are NORMALISED, hence **invariant to a uniform resizing**: no label to
+  recompute, no extra conversion to test;
+- the scale factor is kept per image in `scales.json`, and the predictions are
+  **back-projected to the original resolution** before writing (contract 3);
+- inference also runs on the reduced copies: decoding 36 MP at prediction time would cost the
+  same RAM as at training time;
+- JPEG decoding uses PIL's `draft` mode, which decodes directly at the reduced size.
+  **Consequences**: `export_max_side` is a PROTOCOL parameter, recorded in the manifest and
+  **identical for every approach** — two approaches trained on different source resolutions
+  would not be comparable. 1280 px for a model working at 640 leaves a comfortable margin; to be
+  revisited if the fine keypoints (tarsi, antennae) degrade, documenting it here.
+  In addition, the Ultralytics trainer (dataloaders, workers, augmentation buffers) is
+  explicitly released between `fit` and `predict`: without it, inference started with several
+  GB already taken.
 
-## ADR-0021 - Inference decoupee en lots
+## ADR-0021 - Inference split into chunks
 
-**Date** : diagnostic terrain - **Statut** : accepte
-**Contexte** : `predict(source=<liste complete du fold>)` faisait croitre la RAM de ~1 Go
-toutes les 5 secondes jusqu'a l'OOM, alors que le meme modele entraine groupe par groupe
-passait sans probleme. `tracemalloc` a designe le chargeur d'Ultralytics
-(`data/loaders.py`, `self.im0 = [...]`, `bs = len(im0)`) : **toutes les images du `source`
-sont materialisees a la construction du chargeur, avant toute inference**. `stream=True`
-n'y change rien, l'accumulation ayant lieu en amont.
-**Decision** : l'inference parcourt les images par lots de `approach.predict_chunk_size`
-(16 par defaut), avec liberation explicite entre deux lots. La conversion des `Results` est
-isolee dans `_rows_from_results` pour qu'aucun d'eux ne survive a son lot.
-**Consequences** : l'empreinte memoire de l'inference devient independante de la taille du
-fold. Ce parametre n'affecte **aucun resultat**, seulement la memoire : il peut etre ajuste
-librement, contrairement aux parametres de protocole.
-**Note d'honnetete** : le diagnostic initial attribuait la saturation a la resolution des
-images (ADR-0020). C'etait faux — l'utilisateur entrainait deja ces memes images sans
-probleme, groupe par groupe. Le facteur discriminant etait le NOMBRE d'images par appel.
-ADR-0020 reste utile (decodage et I/O plus rapides) mais n'etait pas la cause.
+**Date**: field diagnosis - **Status**: accepted
+**Context**: `predict(source=<whole fold list>)` made the RAM grow by ~1 GB every 5 seconds
+until the OOM, whereas the same model trained group by group went through without a problem.
+`tracemalloc` pointed at the Ultralytics loader (`data/loaders.py`, `self.im0 = [...]`,
+`bs = len(im0)`): **every image of the `source` is materialised when the loader is built,
+before any inference**. `stream=True` changes nothing, the accumulation happening upstream.
+**Decision**: inference goes through the images in chunks of `approach.predict_chunk_size`
+(16 by default), with an explicit release between two chunks. The conversion of the `Results`
+is isolated in `_rows_from_results` so that none of them outlives its chunk.
+**Consequences**: the memory footprint of inference becomes independent of the fold size. This
+parameter affects **no result**, only memory: it can be tuned freely, unlike the protocol
+parameters.
+**Honesty note**: the initial diagnosis attributed the saturation to the resolution of the
+images (ADR-0020). It was wrong — the user was already training on these same images without a
+problem, group by group. The discriminating factor was the NUMBER of images per call.
+ADR-0020 remains useful (faster decoding and I/O) but was not the cause.
 
-## ADR-0023 - Approche B : un modele YOLO-pose par dataset
+## ADR-0023 - Approach B: one YOLO-pose model per dataset
 
-**Date** : specification expert - **Statut** : accepte
-**Decisions** :
+**Date**: expert specification - **Status**: accepted
+**Decisions**:
 
-- **Initialisation** : chaque modele repart des poids de base (COCO), pas du modele poule.
-  A et B restent independantes ; la question posee est "un specialiste vaut-il un
-  generaliste ?", et non "la specialisation apporte-t-elle quelque chose apres mutualisation ?".
-- **Budget d'HPO** : total equivalent a celui de A. Consequence retenue : les hyperparametres
-  sont **partages** par les N modeles, un trial les entrainant tous. Une recherche independante
-  par dataset aurait quadruple le budget, et B aurait gagne par l'optimisation plutot que par
-  la methode (§6.3).
-- **Epoques** : identiques pour tous les datasets, quel que soit leur effectif.
-  **Consequences** : avec 192 images (Hymenoptera) contre 935 (Coleoptera), le premier voit cinq
-  fois moins de pas d'optimisation. **Un ecart de performance entre ordres n'est donc pas
-  necessairement une difference de difficulte** : cette limite doit etre rappelee dans le rapport.
-  Si elle devient genante, la variante "pas d'optimisation egalises" sera une nouvelle decision,
-  pas un reglage. Techniquement, B est UNE approche encapsulant N modeles : le pipeline ne voit
-  pas la difference, donc A et B sont evaluees exactement de la meme facon.
+- **Initialisation**: each model starts again from the base weights (COCO), not from the
+  pooled model. A and B remain independent; the question asked is "is a specialist worth a
+  generalist?", not "does specialisation bring anything after pooling?".
+- **HPO budget**: total equal to A's. Consequence retained: the hyperparameters are **shared**
+  by the N models, one trial training them all. An independent search per dataset would have
+  quadrupled the budget, and B would have won through the optimisation rather than through the
+  method (§6.3).
+- **Epochs**: identical for every dataset, whatever its size.
+  **Consequences**: with 192 images (Hymenoptera) against 935 (Coleoptera), the former sees five
+  times fewer optimisation steps. **A performance gap between orders is therefore not
+  necessarily a difference of difficulty**: this limit must be recalled in the report.
+  If it becomes a problem, the "equalised optimisation steps" variant will be a new decision,
+  not a setting. Technically, B is ONE approach wrapping N models: the pipeline does not see
+  the difference, so A and B are evaluated exactly the same way.
 
-## ADR-0024 - Approche C : detection poulee puis pose sur crop
+## ADR-0024 - Approach C: pooled detection then pose on a crop
 
-**Date** : specification expert - **Statut** : accepte
-**Decisions** :
+**Date**: expert specification - **Status**: accepted
+**Decisions**:
 
-- **Detecteur** : unique et poule (une classe "insecte"), entraine DANS le run. Reutiliser les
-  poids d'un run A aurait rendu C dependante de A et complique la gestion des folds.
-- **Modele de pose** : YOLO-pose sur crops. Un top-down a heatmaps (HRNet, ViTPose) reste
-  possible comme 6e approche si le gain de C sur A est net.
-- **Resolution des crops** : 640x640, identique au protocole (ADR-0013). Une resolution plus
-  faible aurait divise le cout, mais la comparaison avec A aurait alors porte en partie sur la
-  resolution. Une variante 256 reste envisageable comme etude de cout, hors tableau principal.
-- **Bruit de cadrage** : `jitter_scale=0.15`, `jitter_shift=0.10` a l'entrainement, aucun en
-  validation ni a l'inference. **Marge de recadrage** : `padding=0.15`.
-  **Consequences** : C entraine deux modeles par fold, donc son cout depasse celui de A et B a
-  budget de trials egal - a mentionner dans la comparaison cout/performance. Les points tombant
-  hors du crop sont masques (`vis = 0`), jamais appris comme des zeros. Le mode
-  `pose_on_gt_boxes` isole la qualite de la pose de celle de la detection, mais ses resultats
-  portent `bbox_source=gt` et ne figurent jamais dans le tableau bout-en-bout.
+- **Detector**: single and pooled (one "insect" class), trained INSIDE the run. Reusing the
+  weights of an A run would have made C dependent on A and complicated the fold handling.
+- **Pose model**: YOLO-pose on crops. A top-down heatmap model (HRNet, ViTPose) remains
+  possible as a 6th approach if the gain of C over A is clear.
+- **Crop resolution**: 640x640, identical to the protocol (ADR-0013). A lower resolution would
+  have divided the cost, but the comparison with A would then partly have been about the
+  resolution. A 256 variant remains possible as a cost study, outside the main table.
+- **Framing noise**: `jitter_scale=0.15`, `jitter_shift=0.10` at training time, none in
+  validation nor at inference. **Crop margin**: `padding=0.15`.
+  **Consequences**: C trains two models per fold, so its cost exceeds A's and B's at an equal
+  trial budget - to be mentioned in the cost/performance comparison. Points falling outside the
+  crop are masked (`vis = 0`), never learnt as zeros. The `pose_on_gt_boxes` mode isolates the
+  quality of the pose from that of the detection, but its results carry `bbox_source=gt` and
+  never appear in the end-to-end table.
 
-## ADR-0025 - Approche D : adaptateurs LoRA
+## ADR-0025 - Approach D: LoRA adapters
 
-**Date** : specification expert - **Statut** : accepte
-**Decisions** : depart des poids COCO (pas du modele poule, pour garder D independante) ;
-adaptateurs sur les convolutions du dernier segment du COU ; tetes entrainables, tout le
-reste gele ; implementation via **peft** (`inject_adapter_in_model`, qui injecte en place
-sans envelopper le modele).
-**Consequences** :
+**Date**: expert specification - **Status**: accepted
+**Decisions**: start from the COCO weights (not from the pooled model, to keep D independent);
+adapters on the convolutions of the last segment of the NECK; trainable heads, everything else
+frozen; implementation through **peft** (`inject_adapter_in_model`, which injects in place
+without wrapping the model).
+**Consequences**:
 
-- les index de blocs sont **calcules depuis la structure du modele**, jamais ecrits en dur :
-  changer de taille de reseau (n/s/m/l) decalerait tout ;
-- le manifeste enregistre le **nombre de parametres entrainables** et la liste des modules
-  adaptes. C'est indispensable : "LoRA rang 8" ne designe rien tant qu'on ne sait pas ce qui
-  reste degele a cote des adaptateurs, et deux configurations tres differentes se publient
-  sous la meme etiquette ;
-- les convolutions **groupees** (depthwise) sont ecartees des cibles : peft exige alors un
-  rang divisible par `groups`, ce qui imposerait un rang de plusieurs dizaines pour un gain
-  nul, une depthwise ne portant qu'une poignee de parametres. Le cou des architectures YOLO
-  en contient ; le nombre d'exclusions est enregistre au manifeste (`lora_skipped_grouped`) ;
-- si peft se revele inadapte aux `Conv2d` de cette architecture, l'alternative est un wrapper
-  maison (~60 lignes) : ce serait une revision de cet ADR, pas un reglage.
+- the block indices are **computed from the structure of the model**, never hard-coded:
+  changing the network size (n/s/m/l) would shift everything;
+- the manifest records the **number of trainable parameters** and the list of adapted modules.
+  It is essential: "LoRA rank 8" means nothing as long as one does not know what stays
+  unfrozen next to the adapters, and two very different configurations get published under the
+  same label;
+- **grouped** (depthwise) convolutions are left out of the targets: peft then requires a rank
+  divisible by `groups`, which would impose a rank of several dozens for no gain, a depthwise
+  convolution carrying only a handful of parameters. The neck of the YOLO architectures has
+  some; the number of exclusions is recorded in the manifest (`lora_skipped_grouped`);
+- if peft proves unsuited to the `Conv2d` of this architecture, the alternative is a home-made
+  wrapper (~60 lines): that would be a revision of this ADR, not a setting.
 
-## ADR-0026 - Approche E : BatchNorm par groupe d'insecte
+## ADR-0026 - Approach E: BatchNorm per insect group
 
-**Date** : specification expert - **Statut** : accepte
-**Decisions** : toutes les `BatchNorm2d`, statistiques ET parametres affines par groupe ;
-entrainement complet depuis COCO (E reste independante de A) ; lots **mixtes**, le forward se
-scindant par groupe puis recomposant dans l'ordre.
-**Consequences** :
+**Date**: expert specification - **Status**: accepted
+**Decisions**: every `BatchNorm2d`, statistics AND affine parameters per group; full training
+from COCO (E stays independent of A); **mixed** batches, the forward pass splitting by group
+then recomposing in order.
+**Consequences**:
 
-- chaque branche est initialisee depuis les statistiques du modele pre-entraine, jamais
-  aleatoirement : la specialisation part d'un point commun au lieu de detruire les poids COCO ;
-- le groupe vient du nom de fichier exporte (`<dataset>__<stem>`) a l'entrainement et d'une
-  declaration explicite a l'inference. Un dataset inconnu leve une erreur (ADR-0014) ;
-- l'inference regroupe les images par dataset. Ce n'est pas une optimisation : c'est la seule
-  facon de declarer le groupe actif, l'information n'existant pas au niveau des couches ;
-- l'equivalence lot mixte / N lots purs n'est PAS testee (choix assume : cout de calcul). Si un
-  doute surgit sur la dynamique d'entrainement, c'est le premier test a ecrire.
+- each branch is initialised from the statistics of the pre-trained model, never randomly: the
+  specialisation starts from a common point instead of destroying the COCO weights;
+- the group comes from the exported file name (`<dataset>__<stem>`) at training time and from
+  an explicit declaration at inference. An unknown dataset raises an error (ADR-0014);
+- inference groups the images by dataset. It is not an optimisation: it is the only way to
+  declare the active group, the information not existing at the layer level;
+- the equivalence mixed batch / N pure batches is NOT tested (deliberate choice: compute
+  cost). If a doubt arises on the training dynamics, it is the first test to write.
 
-## ADR-0027 - Approche F : variante sans pattes ni ailes posterieures
+## ADR-0027 - Approach F: variant without legs nor hind wings
 
-**Date** : demande expert - **Statut** : accepte
-**Contexte** : les points de pattes et d'ailes posterieures sont les plus difficiles et les plus
-mobiles. Question posee : leur retrait libere-t-il de la capacite au profit des autres ?
-**Decision** : les 16 points concernes passent a `vis = 0` dans les labels d'ENTRAINEMENT et de
-validation. Le schema reste `insect42_v1`, le test reste intact, et les predictions conservent
-les 42 points (le contrat 3 impose le schema du dataset).
-**Consequences - a rappeler dans tout rapport** : la verite terrain contient toujours ces points
-et l'evaluation les compte. Les metriques `overall` de F sont donc **mecaniquement moins bonnes**
-que celles de A et **ne sont pas comparables**. La seule comparaison valide porte sur les scopes
-`keypoint:*` des points conserves :
-`python scripts/compare_models.py --exclude-keypoints leg hindwing`, qui ajoute une ligne
-`MEAN (retained)`. Confondre les deux lectures conduirait a conclure que F est mauvaise alors
-qu'elle est simplement evaluee sur des points qu'elle n'a jamais appris.
+**Date**: expert request - **Status**: accepted
+**Context**: the leg and hind-wing points are the hardest and the most mobile. Question asked:
+does removing them free capacity for the others?
+**Decision**: the 16 points concerned get `vis = 0` in the TRAINING and validation labels. The
+schema stays `insect42_v1`, the test stays intact, and the predictions keep the 42 points
+(contract 3 imposes the schema of the dataset).
+**Consequences - to be recalled in every report**: the ground truth still contains these points
+and the evaluation counts them. The `overall` metrics of F are therefore **mechanically worse**
+than A's and **are not comparable**. The only valid comparison is on the `keypoint:*` scopes of
+the kept points:
+`python scripts/compare_models.py --exclude-keypoints leg hindwing`, which adds a
+`MEAN (retained)` row. Mixing up the two readings would lead to the conclusion that F is bad
+when it is simply evaluated on points it never learnt.
 
-## ADR-0028 - Patch du modele Ultralytics
+## ADR-0028 - Patching the Ultralytics model
 
-**Date** : implementation - **Statut** : accepte
-**Contexte** : D et E modifient le `nn.Module` construit par Ultralytics, qui ne prevoit ni
-adaptateurs ni normalisation conditionnelle. Deux internes ont ete verifies sur la version
-installee, et tous deux invalident l'approche naive :
+**Date**: implementation - **Status**: accepted
+**Context**: D and E modify the `nn.Module` built by Ultralytics, which foresees neither
+adapters nor conditional normalisation. Two internals were checked on the installed version,
+and both invalidate the naive approach:
 
-- `on_pretrain_routine_start` se declenche AVANT la construction du modele,
-  `on_pretrain_routine_end` APRES l'optimiseur et l'EMA. **Aucun callback ne convient** : un
-  patch pose la serait soit perdu, soit absent de l'optimiseur ;
-- la boucle de `freeze` remet `requires_grad=True` sur tout parametre gele dont le nom ne
-  correspond pas a `args.freeze`. **Un simple `requires_grad=False` serait annule en silence.**
-  **Decision** : passer un trainer derive (`train(trainer=...)`, supporte) ; appliquer le patch
-  dans `get_model` et le gel dans `_build_train_pipeline`, juste avant l'optimiseur. Toute cette
-  dependance aux internes est isolee dans `training/patching.py`.
-  **Complements verifies a l'execution (revision)** : trois pieges supplementaires, tous
-  constates sur un entrainement reel :
-- le **validateur** possede son propre `preprocess` et ne passe pas par celui du trainer. Sans
-  relais, la normalisation par groupe recevait les indices du dernier lot d'ENTRAINEMENT face a
-  un lot de validation de taille differente. Le contexte est donc renseigne des deux cotes ;
-- l'**evaluation finale** d'Ultralytics recharge le meilleur checkpoint et le FUSIONNE. Sur un
-  modele patche, la fusion echoue (enveloppes LoRA) ou serait fausse (N jeux de statistiques
-  ecrases en un). Elle est desactivee : ses metriques ne servent qu'au monitoring (§7.1) ;
-- une classe construite DANS une fonction n'est pas picklable, et Ultralytics serialise le
-  modele a chaque sauvegarde de checkpoint. `GroupBatchNorm2d` est donc publiee au niveau du
-  module (identite corrigee + `__getattr__` de module) tout en gardant l'import de torch differe ;
-- les enveloppes LoRA de peft n'exposent pas les attributs d'une convolution (`out_channels`).
-  Les adaptateurs sont donc **fusionnes dans les poids de base** avant sauvegarde : le
-  checkpoint redevient un YOLO standard, rechargeable et fusionnable, sans dependance a peft.
-  Pour la normalisation par groupe, la fusion est simplement neutralisee a l'inference.
+- `on_pretrain_routine_start` fires BEFORE the model is built, `on_pretrain_routine_end` AFTER
+  the optimiser and the EMA. **No callback fits**: a patch applied there would either be lost
+  or missing from the optimiser;
+- the `freeze` loop sets `requires_grad=True` again on every frozen parameter whose name does
+  not match `args.freeze`. **A plain `requires_grad=False` would be silently undone.**
+  **Decision**: pass a derived trainer (`train(trainer=...)`, supported); apply the patch in
+  `get_model` and the freeze in `_build_train_pipeline`, just before the optimiser. All this
+  dependency on the internals is isolated in `training/patching.py`.
+  **Additions checked at run time (revision)**: three more pitfalls, all observed on a real
+  training:
+- the **validator** has its own `preprocess` and does not go through the trainer's. Without a
+  relay, the per-group normalisation received the indices of the last TRAINING batch while
+  facing a validation batch of a different size. The context is therefore filled on both sides;
+- the **final evaluation** of Ultralytics reloads the best checkpoint and FUSES it. On a patched
+  model, the fusion fails (LoRA wrappers) or would be wrong (N sets of statistics crushed into
+  one). It is disabled: its metrics are only used for monitoring (§7.1);
+- a class built INSIDE a function cannot be pickled, and Ultralytics serialises the model at
+  every checkpoint save. `GroupBatchNorm2d` is therefore published at module level (fixed
+  identity + module `__getattr__`) while keeping the torch import deferred;
+- the peft LoRA wrappers do not expose the attributes of a convolution (`out_channels`). The
+  adapters are therefore **merged into the base weights** before saving: the checkpoint becomes
+  a standard YOLO again, reloadable and fusable, with no dependency on peft. For the per-group
+  normalisation, the fusion is simply neutralised at inference.
 
-**Consequences** : un compte de parametres entrainables est journalise et enregistre au manifeste
-a chaque run, et un compte nul leve une erreur. Si une future version d'Ultralytics change cet
-ordre, ce chiffre le signale au lieu de laisser passer un entrainement silencieusement faux. La
-logique de decision (quels modules, quels parametres, quel groupe) est ecrite en fonctions pures,
-testables sans torch : c'est la partie qui casse en silence.
+**Consequences**: a count of trainable parameters is logged and recorded in the manifest at
+every run, and a zero count raises an error. If a future Ultralytics version changes this order,
+this number reveals it instead of letting a silently wrong training through. The decision logic
+(which modules, which parameters, which group) is written as pure functions, testable without
+torch: it is the part that breaks silently.
 
 ---
 
-## ADR-0029 - Identite de modele independante du fold
+## ADR-0029 - Model identity independent of the fold
 
-**Date** : incident terrain - **Statut** : accepte
-**Contexte** : deux runs de la meme approche avec des poids de depart differents mais le meme
-tag ont ete **moyennes ensemble** dans les tableaux, comme s'ils etaient deux folds d'un meme
-modele. Resultat faux, et silencieux.
-**Decision** : chaque manifeste porte un `variant_hash`, empreinte de la configuration
-resolue **privee du fold**. Deux runs partagent cette empreinte si et seulement s'ils sont le
-meme modele entraine sur des folds differents. L'agregation regroupe desormais par variante
-(colonne `model`), plus par approche. L'etiquette reste courte (`approche · tag`) et ne se voit
-completer du hash que si deux variantes la partagent.
-**Consequence pour l'HPO nichee** : chaque fold externe retient LEGITIMEMENT des
-hyperparametres differents (ADR-0012). Les cles issues de la recherche sont donc exclues de
-l'empreinte (`hpo_overridden_keys`), faute de quoi chaque fold formerait une variante isolee
-et la dispersion inter-folds disparaitrait des tableaux.
-**Complement (revision)** : `study.optimize(n_trials=N)` ajoute N trials A CHAQUE APPEL.
-Sur une etude reprise apres interruption, un fold externe pouvait ainsi recevoir 40 trials et
-un autre 16 — la dispersion inter-folds melangeait alors deux effets. `tune` vise desormais un
-budget TOTAL par etude : il complete jusqu'a `n_trials` et ne fait rien si le compte est
-atteint. Le budget consomme reste enregistre au manifeste et dans `<study>_best.json`.
+**Date**: field incident - **Status**: accepted
+**Context**: two runs of the same approach with different starting weights but the same tag
+were **averaged together** in the tables, as if they were two folds of one model. A wrong
+result, and a silent one.
+**Decision**: every manifest carries a `variant_hash`, a fingerprint of the resolved
+configuration **without the fold**. Two runs share this fingerprint if and only if they are the
+same model trained on different folds. The aggregation now groups by variant (`model` column),
+no longer by approach. The label stays short (`approach · tag`) and is only completed by the
+hash if two variants share it.
+**Consequence for the nested HPO**: each outer fold LEGITIMATELY retains different
+hyperparameters (ADR-0012). The keys coming from the search are therefore excluded from the
+fingerprint (`hpo_overridden_keys`), otherwise each fold would form an isolated variant and the
+dispersion across folds would disappear from the tables.
+**Addition (revision)**: `study.optimize(n_trials=N)` adds N trials AT EVERY CALL. On a study
+resumed after an interruption, an outer fold could thus get 40 trials and another one 16 — the
+dispersion across folds then mixed two effects. `tune` now targets a TOTAL budget per study: it
+tops up to `n_trials` and does nothing if the count is reached. The budget consumed stays
+recorded in the manifest and in `<study>_best.json`.
 
-**Complement** : les colonnes `outer_fold` et `inner_fold` sont publiees. Pour un run final
-elles valent le fold externe ; pour un trial d'HPO, l'outer vient du nom du decoupage
-(`<split_id>__outer<k>`) et le fold est l'index interne.
+**Addition**: the `outer_fold` and `inner_fold` columns are published. For a final run they
+are the outer fold; for an HPO trial, the outer one comes from the split name
+(`<split_id>__outer<k>`) and the fold is the inner index.
 
-## ADR-0030 - Lisibilite des figures produites
+## ADR-0030 - Readability of the produced figures
 
-**Date** : retour utilisateur - **Statut** : accepte
-**Decisions** :
+**Date**: user feedback - **Status**: accepted
+**Decisions**:
 
-- la couleur du texte des heatmaps suit la **luminance reelle de la case** (coefficients sRGB
-  apres linearisation gamma), et non un seuil sur la valeur numerique. Une palette comme
-  viridis allant du violet fonce au jaune vif, un seuil sur la valeur se trompe aux deux
-  extremites. Le point de bascule retenu, 0.179, est celui ou le contraste WCAG du noir egale
-  celui du blanc ;
-- `report` ecrit en plus un dossier de figures **par run** sous `results/runs/<run_id>/`
-  (`report.per_run_figures`). Le rapport global compare les modeles entre eux ; ces dossiers
-  permettent d'examiner un run isolement sans que le suivant ne l'ecrase.
+- the text colour of the heatmaps follows the **real luminance of the cell** (sRGB coefficients
+  after gamma linearisation), not a threshold on the numeric value. With a palette such as
+  viridis going from dark purple to bright yellow, a threshold on the value is wrong at both
+  ends. The switch point retained, 0.179, is the one where the WCAG contrast of black equals
+  that of white;
+- `report` also writes a folder of figures **per run** under `results/runs/<run_id>/`
+  (`report.per_run_figures`). The global report compares the models with each other; these
+  folders let one examine a run in isolation without the next one overwriting it.
 
-## ADR-0031 - Budget d'HPO fige (ferme OPEN-09)
+## ADR-0031 - Frozen HPO budget (closes OPEN-09)
 
-**Date** : calibration terrain - **Statut** : accepte
-**Contexte** : l'HPO nichee a 40 trials x 5 folds x 3 folds internes demandait ~7 jours par
-approche, soit plus de 6 semaines pour les six. Insoutenable.
-**Decision, identique pour les SIX approches** :
+**Date**: field calibration - **Status**: accepted
+**Context**: the nested HPO at 40 trials x 5 folds x 3 inner folds required ~7 days per
+approach, i.e. more than 6 weeks for the six. Unsustainable.
+**Decision, identical for the SIX approaches**:
 `mode=tune_once`, `n_trials=20`, `n_startup_trials=5`, `inner_folds=3`,
-`pruner_warmup_steps=1`, `epochs=100`, et **quatre hyperparametres** par approche.
-**Justifications** :
+`pruner_warmup_steps=1`, `epochs=100`, and **four hyperparameters** per approach.
+**Justifications**:
 
-- `tune_once` plutot que niche : la recherche a lieu sur les folds internes du fold externe 0,
-  puis les hyperparametres retenus sont appliques aux 5 folds. Les jeux de test des folds 1 a 4
-  restent **vierges de toute recherche** ; seule l'estimation du fold 0 devient legerement
-  optimiste. On perd un cinquieme de la rigueur, pas la totalite — et on conserve les 5 folds,
-  donc la variance, sans laquelle aucune comparaison ne tient ;
-- `pruner_warmup_steps=1` : a 5, l'elagage ne se declenchait JAMAIS, un trial ne remontant que
-  `inner_folds` valeurs intermediaires. Le budget etait paye en entier ;
-- `n_startup_trials=5` : le defaut d'Optuna (10) aurait consomme la moitie du budget en tirage
-  aleatoire ;
-- **quatre dimensions** : 20 trials sur 9 dimensions ne permettent pas au TPE d'apprendre quoi
-  que ce soit. Un budget de 16 a 20 trials par tache est la pratique retenue dans des
-  protocoles de comparaison publies.
-  **Parametres retenus** :| Approches                                                                                             | Hyperparametres                                                      |
-  | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-  | A, B, E, F                                                                                            | `lr0`, `pose`, `kobj`, `weight_decay`                        |
-  | C                                                                                                     | `pose.lr0`, `pose.pose`, `crop.padding`, `crop.jitter_scale` |
-  | D                                                                                                     | `lr0`, `lora.r`, `lora.neck_blocks`, `pose`                  |
-  | Le taux d'apprentissage est retenu partout : les analyses d'importance (fANOVA) le placent en         |                                                                      |
-  | tete ou juste derriere la profondeur du reseau, laquelle est ici fixee par le choix du modele.        |                                                                      |
-  | `pose` et `kobj` comptent particulierement hors domaine COCO — avec les valeurs par defaut, la   |                                                                      |
-  | perte de pose peut ne pas descendre du tout sur des keypoints non humains, et nous en avons 42.       |                                                                      |
-  | Pour C, la detection est quasi triviale (un insecte par image, ADR-0017) : le budget va au            |                                                                      |
-  | modele de pose et a la geometrie du recadrage. Pour D,`alpha` est **lie au rang**             |                                                                      |
-  | (`alpha = 2r`) au lieu d'etre cherche : le prefacteur alpha/r rend le taux d'apprentissage          |                                                                      |
-  | optimal quasi independant du rang, donc chercher les deux explorerait une redondance.                 |                                                                      |
-  | **Cout** : ~65 entrainements au pire, ~45 avec elagage, plus 5 finaux — de l'ordre de 15 h par |                                                                      |
-  | approche.                                                                                             |                                                                      |
-  | **Garde-fou** : le nom d'etude Optuna integre desormais un hash de l'espace de recherche et des |                                                                      |
-  | reglages de tuning (`__sp<hash>`). Modifier l'un des deux cree AUTOMATIQUEMENT une nouvelle         |                                                                      |
-  | etude, l'ancienne restant intacte. Sans cela, une reprise apres modification melangerait des          |                                                                      |
-  | trials evalues sous deux protocoles, le TPE construirait ses densites sur du bruit, et                |                                                                      |
-  | `best_trial` pourrait retenir un trial dont les parametres ne sont meme plus cherches.              |                                                                      |
+- `tune_once` rather than nested: the search runs on the inner folds of outer fold 0, then the
+  retained hyperparameters are applied to the 5 folds. The test sets of folds 1 to 4 stay
+  **untouched by any search**; only the estimate of fold 0 becomes slightly optimistic. A fifth
+  of the rigour is lost, not all of it — and the 5 folds are kept, hence the variance, without
+  which no comparison holds;
+- `pruner_warmup_steps=1`: at 5, pruning NEVER fired, a trial only reporting `inner_folds`
+  intermediate values. The budget was paid in full;
+- `n_startup_trials=5`: Optuna's default (10) would have spent half the budget on random draws;
+- **four dimensions**: 20 trials on 9 dimensions do not let the TPE learn anything. A budget of
+  16 to 20 trials per task is the practice retained in published comparison protocols.
 
-## ADR-0032 - Parametres d'augmentation fixes, non cherches
+**Parameters retained**:
 
-**Date** : calibration terrain - **Statut** : accepte
-**Decision** : `degrees`, `scale`, `translate`, `fliplr`, `mosaic`, `hsv_*` et `lrf` sont fixes
-et sortis des espaces de recherche.
-**Justifications** : le guide d'entrainement officiel de YOLO26 **prescrit** des valeurs pour
-les petits jeux de donnees (< 1000 images) plutot que de suggerer de les chercher — nos quatre
-datasets (192 a 935 images) sont dans ce regime. Par ailleurs, la recherche convergeait
-systematiquement vers `mosaic=0`, donc une dimension etait depensee a confirmer un resultat
-connu. `lrf` interagit avec la duree d'entrainement et pese bien moins que `lr0`.
-**Consequence** : `fliplr=0.5` reste licite parce que `flip_idx` est correct (§3.1). `degrees`
-est maintenu a 10 : les specimens sont montes, donc globalement alignes.
+| Approaches | Hyperparameters                                              |
+| ---------- | ------------------------------------------------------------ |
+| A, B, E, F | `lr0`, `pose`, `kobj`, `weight_decay`                        |
+| C          | `pose.lr0`, `pose.pose`, `crop.padding`, `crop.jitter_scale` |
+| D          | `lr0`, `lora.r`, `lora.neck_blocks`, `pose`                  |
 
-## ADR-0033 - yolo26n comme modele de base fige (ferme OPEN-11)
+The learning rate is kept everywhere: the importance analyses (fANOVA) put it first or just
+behind the depth of the network, which is fixed here by the choice of the model. `pose` and
+`kobj` matter particularly outside the COCO domain — with the default values, the pose loss may
+not decrease at all on non-human keypoints, and we have 42 of them. For C, the detection is
+almost trivial (one insect per image, ADR-0017): the budget goes to the pose model and to the
+crop geometry. For D, `alpha` is **tied to the rank** (`alpha = 2r`) instead of being searched:
+the alpha/r prefactor makes the optimal learning rate almost independent of the rank, so
+searching both would explore a redundancy.
+**Cost**: ~65 trainings at worst, ~45 with pruning, plus 5 final ones — about 15 h per approach.
+**Guard**: the Optuna study name now includes a hash of the search space and of the tuning
+settings (`__sp<hash>`). Changing either one AUTOMATICALLY creates a new study, the old one
+staying intact. Without it, a resume after a change would mix trials evaluated under two
+protocols, the TPE would build its densities on noise, and `best_trial` could retain a trial
+whose parameters are not even searched any more.
 
-**Date** : specification expert - **Statut** : accepte
-**Decision** : `yolo26n` (et `yolo26n-pose`) pour les six approches. Une taille differente
-changerait la capacite du reseau et la comparaison porterait sur elle plutot que sur la methode.
-**Option de comparaison conservee** : d'autres poids de depart restent testables comme **etude
-annexe**, hors tableau principal :
+## ADR-0032 - Augmentation parameters fixed, not searched
+
+**Date**: field calibration - **Status**: accepted
+**Decision**: `degrees`, `scale`, `translate`, `fliplr`, `mosaic`, `hsv_*` and `lrf` are fixed
+and taken out of the search spaces.
+**Justifications**: the official YOLO26 training guide **prescribes** values for small datasets
+(< 1000 images) rather than suggesting to search them — our four datasets (192 to 935 images)
+are in that regime. Besides, the search systematically converged to `mosaic=0`, so a dimension
+was spent confirming a known result. `lrf` interacts with the training duration and weighs much
+less than `lr0`.
+**Consequence**: `fliplr=0.5` stays legitimate because `flip_idx` is correct (§3.1). `degrees`
+is kept at 10: the specimens are mounted, hence globally aligned.
+
+## ADR-0033 - yolo26n as the frozen base model (closes OPEN-11)
+
+**Date**: expert specification - **Status**: accepted
+**Decision**: `yolo26n` (and `yolo26n-pose`) for the six approaches. A different size would
+change the capacity of the network and the comparison would be about it rather than about the
+method.
+**Comparison option kept**: other starting weights remain testable as a **side study**,
+outside the main table:
 
 ```
 python -m insectpose.cli train experiment=exp_a_yolo_pooled \
     approach.weights=yolo11n-pose.pt tag=yolo11n
 ```
 
-Le `tag` est obligatoire : sans lui, les deux variantes seraient certes distinguees par leur
-`variant_hash` (ADR-0029) mais porteraient la meme etiquette dans les figures.
+The `tag` is mandatory: without it, the two variants would indeed be told apart by their
+`variant_hash` (ADR-0029) but would carry the same label in the figures.
 
-## ADR-0034 - Zero prediction est un resultat, pas une erreur
+## ADR-0034 - Zero prediction is a result, not an error
 
-**Date** : incident terrain - **Statut** : accepte
-**Contexte** : `predict` levait une erreur bloquante quand une approche ne produisait aucune
-detection. Un modele sous-entraine, mal regle ou dote d'un seuil trop haut fait pourtant
-exactement cela — et le pipeline s'arretait au lieu de le mesurer.
-**Decision** : un fichier de predictions **vide mais conforme** au contrat 3 est ecrit, avec un
-avertissement explicite. L'evaluateur publie alors des metriques **nulles** (metrique primaire
-et couverture a 0), sur le denominateur des instances GT du fold.
-**Consequences** :
+**Date**: field incident - **Status**: accepted
+**Context**: `predict` raised a blocking error when an approach produced no detection. An
+under-trained, badly tuned model, or one with too high a threshold, does exactly that — and the
+pipeline stopped instead of measuring it.
+**Decision**: an **empty but compliant** predictions file (contract 3) is written, with an
+explicit warning. The evaluator then publishes **zero** metrics (primary metric and coverage at
+0), over the denominator of the GT instances of the fold.
+**Consequences**:
 
-- le run reste COMPLET : manifeste ecrit, donc agregeable et auditable. Un modele qui echoue
-  apparait dans les tableaux avec un score de 0, ce qui est l'information recherchee ;
-- le split et le fold sont desormais deduits du **nom du fichier** (`<split>_fold<k>.parquet`)
-  et non de son contenu, qu'un fichier vide ne porte pas ;
-- le perimetre d'evaluation d'un fichier vide vient du **decoupage**, pas des predictions :
-  sinon le denominateur serait nul et l'echec deviendrait invisible ;
-- l'export qualitatif est ignore pour un tel run, faute de prediction a tracer.
-  Une erreur reste levee si des predictions existent mais qu'aucune metrique n'est produite :
-  ce cas-la signale bien une configuration cassee.
+- the run stays COMPLETE: manifest written, hence aggregatable and auditable. A model that fails
+  appears in the tables with a score of 0, which is the information sought;
+- the split and the fold are now derived from the **file name** (`<split>_fold<k>.parquet`)
+  and not from its content, which an empty file does not carry;
+- the evaluation scope of an empty file comes from the **split**, not from the predictions:
+  otherwise the denominator would be zero and the failure would become invisible;
+- the qualitative export is skipped for such a run, for lack of a prediction to draw.
+  An error is still raised if predictions exist but no metric is produced: that case does
+  signal a broken configuration.
 
-## ADR-0035 - Le modele livre est un ensemble de `yolo_pooled`
+## ADR-0035 - Approach G: training the heads only
 
-**Date** : decision projet - **Statut** : accepte (remplace l'export d'un modele unique
-entraine sur toutes les images)
-**Decision** : `retained_models/pose/` contient un ENSEMBLE. `train` (et `evaluate
-run_id=...`) le remplace par un seul modele ; `tune` le remplace par les modeles de ses folds
-externes, un par fold. Le pipeline infere tous les modeles du dossier, ecrit la moyenne et
-l'ecart-type de chaque coordonnee de point, et calcule mesures et validite des mesures sur la
-moyenne. Seules les approches de `retain.approaches` (`yolo_pooled`) sont exportees.
-**Consequences** :
+**Date**: implementation - **Status**: accepted (entry written after the fact, from the code)
+**Context**: on YOLO26 the heads weigh about two thirds of the parameters at training time. A
+LoRA variant that keeps them trainable (approach D, ADR-0025) therefore trains ~67 % of the
+network, its adapters weighing only ~1.3 %.
+**Decision**: approach G freezes the backbone and the neck entirely and trains the
+detection/pose heads only, without any adapter (`head.blocks: 1`). It is the **control of D**,
+with the same base model, the same search space keys as A/B/E/F and the same budget.
+**Consequences**: comparing D and G gives three readings — G close to D: the adapters bring
+nothing, only the head retraining counts; D clearly above G: the adapters do bring something;
+G close to A: the COCO backbone transfers well and freezing most of the network is enough.
 
-- chaque commande vide le dossier avant d'ecrire : deux entrainements ne se melangent jamais ;
-- l'ecart-type de l'ensemble est une mesure de desaccord entre modeles, nulle avec un seul ;
-- `tuning.final_full_fit` passe a `false` par defaut. A `true`, le modele entraine sur toutes
-  les images est AJOUTE a l'ensemble ; il a vu les tests des folds ;
-- `ensemble.json` porte `cv_estimate`, la performance mesuree des folds externes.
+## ADR-0036 - Approach H: LoRA adapters per insect group
 
-## ADR-0036 - `kp_infos.yaml`, definition unique des keypoints et des mesures
+**Date**: implementation - **Status**: accepted (entry written after the fact, from the code)
+**Decision**: a trunk common to every order plus one set of LoRA adapters per order, trained
+in TWO PHASES within one run: (1) the whole model is trained on the whole train of the fold,
+without adapters, for `epoch_split` of the epochs; (2) the trunk is reloaded, NEW adapters are
+injected, everything else is frozen, and they are trained per order for the remaining epochs.
+**Consequences**:
 
-**Date** : decision projet - **Statut** : accepte (remplace `configs/keypoints/insect42_v1.yaml`
-et `configs/measurements/insect42_v1.yaml`)
-**Decision** : le schema `insect42_v1` (points, difficultes, symetries, squelette) et les
-mesures sont lus dans `kp_infos.yaml`, a la racine du depot, partage avec l'annotation, les
-classifieurs de mesure et le pipeline. `configs/keypoints/<nom>.yaml` reste lu en premier, pour
-un schema d'etude. `intertegular distance` est definie sur `left/right-forewing-base`, comme
-dans le pipeline et les classifieurs de mesure (le fichier de ce module disait `hindwing-base`).
+- the adapters are injected in phase 2 only: saving merges them into the base weights
+  (ADR-0025), so adapters injected in phase 1 would no longer exist to specialise;
+- no data is set aside: the adapters see images the trunk has already seen — a split specific
+  to this approach would break §6.2 and measure the data volume rather than the method;
+- the heads are trained in phase 1 and frozen in phase 2: unfreezing them per group would give
+  four almost complete models, the category of B;
+- the total epoch budget equals the other approaches' (`epoch_split=0.6` = 60 % trunk, 40 %
+  adapters), and `epoch_split` replaces `kobj` among the four searched hyperparameters.
+
+## ADR-0037 - The delivered model is an ensemble of `yolo_pooled`
+
+**Date**: project decision - **Status**: accepted (replaces the export of a single model
+trained on all the images)
+**Decision**: `retained_models/pose/` holds an ENSEMBLE. `train` (and `evaluate
+run_id=...`) replaces it with a single model; `tune` replaces it with the models of its outer
+folds, one per fold. The pipeline runs every model of the folder, writes the mean and the
+standard deviation of every keypoint coordinate, and computes the measurements and their
+validity on the mean. Only the approaches of `retain.approaches` (`yolo_pooled`) are exported.
+**Consequences**:
+
+- every command empties the folder before writing: two trainings never mix;
+- the standard deviation of the ensemble measures the disagreement between models, zero with
+  a single one;
+- `tuning.final_full_fit` becomes `false` by default. At `true`, the model trained on all the
+  images is ADDED to the ensemble; it has seen the tests of the folds;
+- `ensemble.json` carries `cv_estimate`, the measured performance of the outer folds.
+
+## ADR-0038 - `kp_infos.yaml`, single definition of the keypoints and measurements
+
+**Date**: project decision - **Status**: accepted (replaces `configs/keypoints/insect42_v1.yaml`
+and `configs/measurements/insect42_v1.yaml`)
+**Decision**: the `insect42_v1` schema (points, difficulties, symmetries, skeleton) and the
+measurements are read from `kp_infos.yaml`, at the repository root, shared with the annotation,
+the measurement classifiers and the pipeline. `configs/keypoints/<name>.yaml` is still read
+first, for a study schema. `intertegular distance` is defined on `left/right-forewing-base`, as
+in the pipeline and the measurement classifiers (the file of this module said `hindwing-base`).
+
+## ADR-0039 - `folds`: the outer folds a command runs
+
+**Date**: project decision - **Status**: accepted (amends ADR-0037)
+**Decision**: the `folds` key (a list of outer folds, a single fold, or `"all"`) says which
+outer folds `train` and `tune` run. `train` without `folds` still runs `fold` alone; with
+`folds`, it trains each fold in turn and the folds form ONE ensemble in
+`retained_models/pose/` (the first replaces the previous ensemble, the next ones are added,
+as the final folds of `tune`). `tune` without `folds` still retrains every outer fold; with
+`folds`, only these are retrained (and, in `nested` mode, searched).
+**Consequences**:
+
+- `folds` is operational, like `retain`: it enters neither the `run_id` nor the
+  `variant_hash`. Training fold 0 alone, then `folds=[0,1]`, skips fold 0 the second time;
+- `ensemble.json` is now written after `train` too, with `source: train`, the folds and
+  `cv_estimate` over these folds: each one is measured on its own untouched test, so the
+  estimate stays honest, but on fewer folds it is less precise;
+- the number of outer folds itself (`cv.n_folds`) stays frozen at 5 (CONVENTIONS.md §6.2): `folds`
+  chooses among them, it never changes the split.
 
 ---
 
-**Aucune decision ouverte.** Toutes les questions de protocole sont tranchees (ADR-0006 a
-ADR-0036). Toute evolution ulterieure passe par un nouvel ADR et, si elle touche une metrique,
-par un increment de `eval.version`.
+**No open decision.** Every protocol question is settled (ADR-0006 to ADR-0039). Any later
+change goes through a new ADR and, if it touches a metric, through an increment of
+`eval.version`.

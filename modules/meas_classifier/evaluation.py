@@ -241,7 +241,7 @@ def build_pipeline(config: RunConfig, scale_pos_weight: float = 1.0) -> Pipeline
                 scale_pos_weight=scale_pos_weight,
                 eval_metric="logloss",
                 tree_method="hist",
-                n_jobs=4,
+                n_jobs=-1,                    # every CPU of the machine, whatever their number
             ),
         )
     )

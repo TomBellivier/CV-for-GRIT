@@ -1,7 +1,7 @@
-"""Tests des metriques sur cas calcules a la main (§10.2).
+"""Tests of the metrics on hand-computed cases (§10.2).
 
-Une metrique dont on ne sait pas predire la valeur sur un cas trivial n'est pas
-utilisable pour departager des approches.
+A metric whose value cannot be predicted on a trivial case cannot be used to decide
+between approaches.
 """
 
 from __future__ import annotations
@@ -18,10 +18,10 @@ SCHEMA = "insect42_v1"
 
 
 def _template(k: int) -> list[float]:
-    """Instance jouet : points repartis, thorax-left/right ecartes de 20 px."""
+    """Toy instance: spread points, thorax-left/right 20 px apart."""
     pts = np.stack([np.linspace(20, 80, k), np.linspace(20, 80, k)], axis=1)
     pts[6] = [40.0, 50.0]   # thorax-left
-    pts[7] = [60.0, 50.0]   # thorax-right -> largeur de thorax = 20 px
+    pts[7] = [60.0, 50.0]   # thorax-right -> thorax width = 20 px
     return [float(v) for v in pts.reshape(-1)]
 
 
@@ -66,7 +66,7 @@ def test_perfect_predictions_give_perfect_scores(project, eval_cfg) -> None:
 
 
 def test_missed_instance_is_counted_as_failure(project, eval_cfg) -> None:
-    """Une image non predite doit faire chuter le PCK, pas disparaitre du denominateur."""
+    """An unpredicted image must lower the PCK, not disappear from the denominator."""
     schema = load_schema(SCHEMA, project.configs)
     k = schema.n_keypoints
     kpts = _template(k)
@@ -83,7 +83,7 @@ def test_missed_instance_is_counted_as_failure(project, eval_cfg) -> None:
 def test_average_precision_hand_computed() -> None:
     scores = np.array([0.9, 0.8, 0.7])
     tp = np.array([True, False, True])
-    # rappels 1/2 puis 1 ; precisions 1.0 et 2/3 -> AP 101 points
+    # recalls 1/2 then 1; precisions 1.0 and 2/3 -> 101-point AP
     value = average_precision(scores, tp, n_gt=2)
     assert 0.75 < value < 0.90
 
@@ -95,8 +95,8 @@ def test_average_precision_is_nan_without_gt() -> None:
 def test_greedy_assignment_respects_score_order() -> None:
     similarity = np.array([[0.9, 0.4], [0.8, 0.3]])
     matched, _ = assign_greedy(similarity, np.array([0.5, 0.99]), threshold=0.5)
-    assert matched[1] == 0   # la prediction la mieux notee prend le meilleur GT
-    assert matched[0] == -1  # l'autre GT est sous le seuil
+    assert matched[1] == 0   # the best-scored prediction takes the best GT
+    assert matched[0] == -1  # the other GT is below the threshold
 
 
 def test_prediction_in_wrong_schema_is_rejected(project, eval_cfg) -> None:

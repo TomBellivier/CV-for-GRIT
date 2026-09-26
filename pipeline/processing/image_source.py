@@ -15,7 +15,7 @@ does not care where an image comes from:
         items   : list of (key, image_name)
                   - key        : what load_fn needs to fetch the image
                   - image_name : the plain file name, used for the CSV and for
-                                 train/val membership (matched by exact name)
+                                 the group lookup (matched by exact name)
         load_fn : key -> BGR numpy array (or raises on failure)
 
 The heavy parallelism (many downloads / reads in flight) is applied later by
@@ -112,7 +112,7 @@ def _list_hf_images(fs, repo: str, folders: list[str] | None) -> list[tuple[str,
                 keys.extend(fs.glob(f"{base}/**/*.{e}"))
                 keys.extend(fs.glob(f"{base}/*.{e}"))
     keys = sorted(set(keys))
-    # image_name = the plain file name (used for membership + CSV).
+    # image_name = the plain file name (used for the group lookup + CSV).
     return [(k, os.path.basename(k)) for k in keys]
 
 

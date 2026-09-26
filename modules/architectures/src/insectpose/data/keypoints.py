@@ -1,12 +1,12 @@
-"""Schemas de keypoints et espace union (CONVENTIONS.md §3.1).
+"""Keypoint schemas and union space (CONVENTIONS.md §3.1).
 
-L'ordre des points d'un schema est FIGE : il est encode dans tous les artefacts
-existants. Ajouter un point => l'ajouter en fin de liste et bumper schema_version.
+The order of the points of a schema is FROZEN: it is encoded in every existing
+artefact. Adding a point => append it at the end of the list and bump schema_version.
 
-Le schema du projet (`insect42_v1`) n'est pas declare dans ce module : il est lu
-dans kp_infos.yaml, a la racine du depot, definition unique partagee avec
-l'annotation, les classifieurs de mesure et le pipeline. `configs/keypoints/`
-reste lu en premier, pour un schema d'etude qui n'aurait rien a faire ailleurs.
+The schema of the project (`insect42_v1`) is not declared in this module: it is read
+from kp_infos.yaml, at the repository root, the single definition shared with the
+annotation, the measurement classifiers and the pipeline. `configs/keypoints/` is still
+read first, for a study schema that would have nothing to do anywhere else.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from insectpose.paths import KP_INFOS_PATH
 
 @dataclass(frozen=True)
 class KeypointSchema:
-    """Definition ordonnee des points d'un dataset (ou de l'espace union)."""
+    """Ordered definition of the points of a dataset (or of the union space)."""
 
     name: str
     schema_version: int
@@ -45,32 +45,32 @@ class KeypointSchema:
 
     @property
     def sigma_source(self) -> str:
-        """'difficulty' si les sigmas sont derives, 'explicit' s'ils sont ecrits en dur."""
+        """'difficulty' if the sigmas are derived, 'explicit' if they are hard-coded."""
         return self._sigma_source
 
     @property
     def is_placeholder(self) -> bool:
-        """True tant que le schema n'a pas ete valide par un expert (DECISION OPEN-01)."""
+        """True as long as the schema has not been validated by an expert (DECISION OPEN-01)."""
         return self.status.upper() == "PLACEHOLDER"
 
     def index(self, name: str) -> int:
-        """Index d'un point par son nom."""
+        """Index of a point by its name."""
         return self.names.index(name)
 
 
 def _load_yaml(path: Path) -> dict:
     if not path.exists():
         raise FileNotFoundError(
-            f"Schema de keypoints introuvable : {path}. Le schema du projet est dans "
-            f"{KP_INFOS_PATH} ; un schema d'etude se declare dans configs/keypoints/."
+            f"Keypoint schema not found: {path}. The schema of the project is in "
+            f"{KP_INFOS_PATH}; a study schema is declared in configs/keypoints/."
         )
     with path.open(encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
 def schema_file(name: str, configs_dir: Path) -> Path:
-    """Fichier qui declare le schema `name` : configs/keypoints/<name>.yaml s'il existe,
-    sinon kp_infos.yaml (dont `name` est le schema du projet)."""
+    """File declaring the schema `name`: configs/keypoints/<name>.yaml if it exists,
+    else kp_infos.yaml (whose `name` is the schema of the project)."""
     local = Path(configs_dir) / "keypoints" / f"{name}.yaml"
     if local.exists() or not KP_INFOS_PATH.exists():
         return local
@@ -81,12 +81,12 @@ def schema_file(name: str, configs_dir: Path) -> Path:
 
 @lru_cache(maxsize=32)
 def load_schema(name: str, configs_dir: Path) -> KeypointSchema:
-    """Charge un schema de keypoints (kp_infos.yaml, ou configs/keypoints/<name>.yaml)."""
+    """Load a keypoint schema (kp_infos.yaml, or configs/keypoints/<name>.yaml)."""
     raw = _load_yaml(schema_file(name, Path(configs_dir)))
     kpts = raw["keypoints"]
     names = tuple(k["name"] for k in kpts)
     if len(set(names)) != len(names):
-        raise ContractError(f"[{name}] noms de keypoints dupliques : {names}")
+        raise ContractError(f"[{name}] duplicated keypoint names: {names}")
 
     scale = float((raw.get("sigma_from_difficulty") or {}).get("scale", 0.0))
     sigmas, difficulty, sources = [], [], set()
@@ -99,14 +99,14 @@ def load_schema(name: str, configs_dir: Path) -> KeypointSchema:
             sources.add("difficulty")
         else:
             raise ContractError(
-                f"[{name}] le point '{k['name']}' n'a ni 'sigma' ni ('difficulty' + "
-                "sigma_from_difficulty.scale). Un OKS sans tolerance definie n'a pas de sens."
+                f"[{name}] point '{k['name']}' has neither 'sigma' nor ('difficulty' + "
+                "sigma_from_difficulty.scale). An OKS without a defined tolerance makes no sense."
             )
         difficulty.append(float(k.get("difficulty", np.nan)))
     if len(sources) > 1:
         raise ContractError(
-            f"[{name}] sigmas mixtes (explicites et derives de la difficulte) : choisir une "
-            "seule source, sinon la tolerance OKS n'est plus interpretable."
+            f"[{name}] mixed sigmas (explicit and derived from the difficulty): choose a "
+            "single source, otherwise the OKS tolerance can no longer be interpreted."
         )
 
     name_to_idx = {n: i for i, n in enumerate(names)}
@@ -116,7 +116,7 @@ def load_schema(name: str, configs_dir: Path) -> KeypointSchema:
         if partner is None:
             flip.append(name_to_idx[k["name"]])
         elif partner not in name_to_idx:
-            raise ContractError(f"[{name}] flip '{partner}' inconnu (point '{k['name']}').")
+            raise ContractError(f"[{name}] unknown flip '{partner}' (point '{k['name']}').")
         else:
             flip.append(name_to_idx[partner])
 
@@ -129,7 +129,7 @@ def load_schema(name: str, configs_dir: Path) -> KeypointSchema:
         sigmas=np.asarray(sigmas, dtype=float),
         difficulty=np.asarray(difficulty, dtype=float),
         flip_index=tuple(flip),
-        # Sans cle `union` (kp_infos.yaml), un point est son propre equivalent union.
+        # Without a `union` key (kp_infos.yaml), a point is its own union equivalent.
         union_names=tuple(k["union"] if "union" in k else k["name"] for k in kpts),
         union_space=raw.get("union_space"),
         skeleton=tuple(tuple(e) for e in raw.get("skeleton", [])),
@@ -139,45 +139,45 @@ def load_schema(name: str, configs_dir: Path) -> KeypointSchema:
 
 def load_schemas(names: list[str], configs_dir: Path, strict: bool = False
                  ) -> dict[str, KeypointSchema]:
-    """Charge plusieurs schemas. `strict=True` refuse les PLACEHOLDER (§13.1)."""
+    """Load several schemas. `strict=True` refuses the PLACEHOLDER ones (§13)."""
     out = {n: load_schema(n, Path(configs_dir)) for n in names}
     if strict:
         placeholders = [n for n, s in out.items() if s.is_placeholder]
         if placeholders:
             raise ContractError(
-                f"Schemas de keypoints non valides (status=PLACEHOLDER) : {placeholders}. "
-                "DECISION OPEN-01 doit etre tranchee, ou passer strict.require_validated_"
-                "keypoints=false pour du developpement."
+                f"Keypoint schemas not validated (status=PLACEHOLDER): {placeholders}. "
+                "DECISION OPEN-01 must be settled, or set strict.require_validated_"
+                "keypoints=false for development."
             )
     return out
 
 
 @dataclass(frozen=True)
 class UnionMapping:
-    """Correspondance schema local <-> espace union, pour les modeles multi-datasets."""
+    """Local schema <-> union space correspondence, for the multi-dataset models."""
 
     local: KeypointSchema
     union: KeypointSchema
-    local_to_union: np.ndarray   # (K_local,) index union ou -1 si aucun equivalent
-    union_to_local: np.ndarray   # (K_union,) index local ou -1
+    local_to_union: np.ndarray   # (K_local,) union index or -1 if no equivalent
+    union_to_local: np.ndarray   # (K_union,) local index or -1
 
     @property
     def masked_local(self) -> list[str]:
-        """Points locaux sans equivalent union : masques dans la loss, jamais mis a zero."""
+        """Local points without a union equivalent: masked in the loss, never set to zero."""
         pairs = zip(self.local.names, self.local.union_names, strict=True)
         return [name for name, union in pairs if union is None]
 
 
 def build_union_mapping(local: KeypointSchema, union: KeypointSchema) -> UnionMapping:
-    """Construit la correspondance locale <-> union et verifie sa coherence.
+    """Build the local <-> union correspondence and check its consistency.
 
-    Cas nominal du projet (ADR-0006) : les 4 datasets partagent `insect42_v1`, donc
-    local is union et le mapping est l'identite. Le mecanisme reste en place pour
-    absorber sans refonte une divergence future entre ordres d'insectes.
+    Nominal case of the project (ADR-0006): the 4 datasets share `insect42_v1`, so local
+    is union and the mapping is the identity. The mechanism stays in place to absorb a
+    future divergence between insect orders without a redesign.
     """
     if local.union_space is not None and local.union_space != union.name:
         raise ContractError(
-            f"[{local.name}] declare union_space='{local.union_space}' mais recoit "
+            f"[{local.name}] declares union_space='{local.union_space}' but receives "
             f"'{union.name}'."
         )
     l2u = np.full(local.n_keypoints, -1, dtype=int)
@@ -187,14 +187,14 @@ def build_union_mapping(local: KeypointSchema, union: KeypointSchema) -> UnionMa
             continue
         if uname not in union.names:
             raise ContractError(
-                f"[{local.name}] le point '{local.names[i]}' pointe vers '{uname}', absent de "
-                f"l'espace union '{union.name}'."
+                f"[{local.name}] point '{local.names[i]}' points to '{uname}', missing from "
+                f"the union space '{union.name}'."
             )
         j = union.index(uname)
         if u2l[j] != -1:
             raise ContractError(
-                f"[{local.name}] deux points locaux pointent vers '{uname}' : correspondance "
-                "ambigue, l'espace union doit etre desambiguise."
+                f"[{local.name}] two local points point to '{uname}': ambiguous "
+                "correspondence, the union space must be disambiguated."
             )
         l2u[i] = j
         u2l[j] = i
@@ -202,7 +202,7 @@ def build_union_mapping(local: KeypointSchema, union: KeypointSchema) -> UnionMa
 
 
 def local_to_union(values: np.ndarray, mapping: UnionMapping, fill: float = np.nan) -> np.ndarray:
-    """Projette (..., K_local, C) vers (..., K_union, C). Les trous valent `fill`."""
+    """Project (..., K_local, C) to (..., K_union, C). The holes are `fill`."""
     arr = np.asarray(values, dtype=float)
     out = np.full((*arr.shape[:-2], mapping.union.n_keypoints, arr.shape[-1]), fill, dtype=float)
     sel = mapping.local_to_union >= 0
@@ -211,10 +211,10 @@ def local_to_union(values: np.ndarray, mapping: UnionMapping, fill: float = np.n
 
 
 def union_to_local(values: np.ndarray, mapping: UnionMapping, fill: float = 0.0) -> np.ndarray:
-    """Projette (..., K_union, C) vers (..., K_local, C).
+    """Project (..., K_union, C) to (..., K_local, C).
 
-    A appliquer AVANT l'ecriture des predictions d'un modele multi-datasets (§3.1) :
-    le contrat 3 impose le schema local du dataset.
+    To be applied BEFORE writing the predictions of a multi-dataset model (§3.1):
+    contract 3 imposes the local schema of the dataset.
     """
     arr = np.asarray(values, dtype=float)
     out = np.full((*arr.shape[:-2], mapping.local.n_keypoints, arr.shape[-1]), fill, dtype=float)
@@ -224,5 +224,5 @@ def union_to_local(values: np.ndarray, mapping: UnionMapping, fill: float = 0.0)
 
 
 def union_mask(mapping: UnionMapping) -> np.ndarray:
-    """Masque booleen (K_union,) des points reellement supervises par ce dataset."""
+    """Boolean mask (K_union,) of the points actually supervised by this dataset."""
     return mapping.union_to_local >= 0

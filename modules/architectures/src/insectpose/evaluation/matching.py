@@ -1,7 +1,7 @@
-"""Appariement predictions <-> verite terrain (CONVENTIONS.md §7.3).
+"""Predictions <-> ground truth matching (CONVENTIONS.md §7.3).
 
-Implemente UNE SEULE FOIS ici. Aucune metrique ne reimplemente son propre
-appariement, sans quoi deux metriques peuvent se contredire sur le meme run.
+Implemented ONCE, here. No metric reimplements its own matching, otherwise two
+metrics could contradict each other on the same run.
 """
 
 from __future__ import annotations
@@ -17,13 +17,13 @@ from insectpose.utils.geometry import bbox_area, bbox_iou, oks_matrix
 
 @dataclass
 class ImagePairs:
-    """Similarites pred x gt pour une image."""
+    """Pred x gt similarities for one image."""
 
     image_id: str
     dataset: str
-    gt_rows: np.ndarray      # indices de lignes dans le DataFrame GT
-    pred_rows: np.ndarray    # indices de lignes dans le DataFrame predictions
-    scores: np.ndarray       # (P,) score de detection
+    gt_rows: np.ndarray      # row indices in the GT DataFrame
+    pred_rows: np.ndarray    # row indices in the predictions DataFrame
+    scores: np.ndarray       # (P,) detection score
     oks: np.ndarray          # (P, G)
     iou: np.ndarray          # (P, G)
 
@@ -44,10 +44,10 @@ def _stack(series: pd.Series, dtype: type = float) -> np.ndarray:
 
 def build_pairs(gt: pd.DataFrame, pred: pd.DataFrame, schemas: dict[str, KeypointSchema],
                 area_source: str = "bbox") -> list[ImagePairs]:
-    """Calcule OKS et IoU par image. Les images sans prediction sont conservees.
+    """Compute the OKS and IoU per image. Images without a prediction are kept.
 
-    Une image GT sans prediction produit un ImagePairs a P=0 : indispensable pour que
-    la non-detection soit penalisee (§7.2) plutot qu'ignoree.
+    A GT image without a prediction produces an ImagePairs with P=0: essential for the
+    non-detection to be penalised (§7.2) rather than ignored.
     """
     pairs: list[ImagePairs] = []
     pred_by_image = dict(list(pred.groupby("image_id"))) if len(pred) else {}
@@ -91,9 +91,9 @@ def build_pairs(gt: pd.DataFrame, pred: pd.DataFrame, schemas: dict[str, Keypoin
 
 def assign_greedy(similarity: np.ndarray, scores: np.ndarray, threshold: float
                   ) -> tuple[np.ndarray, np.ndarray]:
-    """Appariement glouton par score decroissant, a un seuil de similarite donne.
+    """Greedy matching by decreasing score, at a given similarity threshold.
 
-    Retourne (gt_index_par_prediction, similarite_retenue) ; -1 = prediction non appariee.
+    Returns (gt_index_per_prediction, retained_similarity); -1 = unmatched prediction.
     """
     n_pred, n_gt = similarity.shape
     matched_gt = np.full(n_pred, -1, dtype=int)
@@ -114,7 +114,7 @@ def assign_greedy(similarity: np.ndarray, scores: np.ndarray, threshold: float
 
 def average_precision(scores: np.ndarray, tp: np.ndarray, n_gt: int,
                       n_points: int = 101) -> float:
-    """AP par interpolation en 101 points (convention COCO). 0.0 si aucun GT."""
+    """AP by 101-point interpolation (COCO convention). NaN if there is no GT."""
     if n_gt == 0:
         return float("nan")
     if scores.size == 0:
@@ -125,7 +125,7 @@ def average_precision(scores: np.ndarray, tp: np.ndarray, n_gt: int,
     cum_fp = np.cumsum(1.0 - tp_sorted)
     recall = cum_tp / n_gt
     precision = cum_tp / np.maximum(cum_tp + cum_fp, 1e-9)
-    # precision monotone decroissante
+    # monotonically decreasing precision
     precision = np.maximum.accumulate(precision[::-1])[::-1]
     grid = np.linspace(0, 1, n_points)
     idx = np.searchsorted(recall, grid, side="left")

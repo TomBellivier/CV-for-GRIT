@@ -1,10 +1,10 @@
-"""Export qualitatif obligatoire de chaque run (CONVENTIONS.md §8.4).
+"""Mandatory qualitative export of each run (CONVENTIONS.md §8.5).
 
-Un modele n'est jamais valide sur des chiffres seuls. Chaque run exporte des images
-de test annotees pred vs GT, dont les pires cas selon l'OKS par instance.
+A model is never validated on numbers alone. Each run exports annotated test images
+pred vs GT, including the worst cases by per-instance OKS.
 
-Ce module ne lit que des artefacts (contrats 1 et 3) : comme l'evaluateur, il ignore
-quelle approche a produit les predictions.
+This module only reads artefacts (contracts 1 and 3): like the evaluator, it does not
+know which approach produced the predictions.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from insectpose.utils.logging import get_logger
 
 log = get_logger("qualitative")
 
-# Couleurs fixes : GT en vert, prediction en orange, lien d'erreur en rouge.
+# Fixed colours: GT in green, prediction in orange, error link in red.
 _GT_COLOR = (60, 200, 90)
 _PRED_COLOR = (245, 150, 40)
 _ERROR_COLOR = (220, 60, 60)
@@ -30,10 +30,10 @@ _ERROR_COLOR = (220, 60, 60)
 
 def instance_scores(gt: pd.DataFrame, pred: pd.DataFrame, schemas: dict[str, KeypointSchema],
                     eval_cfg: Any) -> pd.DataFrame:
-    """OKS de chaque instance GT et index de la prediction appariee.
+    """OKS of each GT instance and index of the matched prediction.
 
-    Une instance non appariee recoit oks=0.0 et pred_row=-1 : elle est donc candidate
-    prioritaire a l'inspection visuelle, ce qui est exactement le but (§7.2).
+    An unmatched instance gets oks=0.0 and pred_row=-1: it is therefore a priority
+    candidate for the visual inspection, which is exactly the goal (§7.2).
     """
     pairs = build_pairs(gt, pred, schemas, area_source=str(eval_cfg.oks.area_source))
     threshold = float(eval_cfg.match_oks_threshold)
@@ -51,17 +51,17 @@ def instance_scores(gt: pd.DataFrame, pred: pd.DataFrame, schemas: dict[str, Key
 
 def select_examples(scores: pd.DataFrame, n_examples: int, n_worst: int, seed: int,
                     n_best_per_dataset: int = 1) -> pd.DataFrame:
-    """Selectionne les pires cas, les meilleurs par dataset, puis un tirage aleatoire.
+    """Select the worst cases, the best per dataset, then a random draw.
 
-    Les trois categories repondent a trois questions differentes :
-    - `worst` : ou le modele echoue, et de quelle facon ;
-    - `best` : de quoi il est capable au mieux. Sans cette reference, on ne sait pas si
-      les echecs traduisent un plafond du modele ou des cas accidentels. La selection
-      est faite **par dataset**, car le meilleur cas global viendrait toujours de l'ordre
-      le plus facile ;
-    - `random` : ce a quoi ressemble un cas ordinaire, seul echantillon non biaise.
+    The three categories answer three different questions:
+    - `worst`: where the model fails, and how;
+    - `best`: what it can do at best. Without this reference, one cannot tell whether the
+      failures reflect a ceiling of the model or accidental cases. The selection is made
+      **per dataset**, since the global best case would always come from the easiest
+      order;
+    - `random`: what an ordinary case looks like, the only unbiased sample.
 
-    Le tirage aleatoire absorbe la variation : `n_examples` reste le total.
+    The random draw absorbs the variation: `n_examples` stays the total.
     """
     if scores.empty:
         return scores
@@ -95,7 +95,7 @@ def select_examples(scores: pd.DataFrame, n_examples: int, n_worst: int, seed: i
 def _draw_instance(draw: Any, kpts: np.ndarray, color: tuple[int, int, int],
                    skeleton: tuple[tuple[int, int], ...], radius: float,
                    mask: np.ndarray | None = None) -> None:
-    """Trace squelette et points d'une instance sur un ImageDraw."""
+    """Draw the skeleton and the points of an instance on an ImageDraw."""
     keep = np.ones(len(kpts), dtype=bool) if mask is None else mask
     for a, b in skeleton:
         if a < len(kpts) and b < len(kpts) and keep[a] and keep[b]:
@@ -109,16 +109,16 @@ def _draw_instance(draw: Any, kpts: np.ndarray, color: tuple[int, int, int],
 def export_qualitative(run_dir: Path, gt: pd.DataFrame, pred: pd.DataFrame,
                        schemas: dict[str, KeypointSchema], eval_cfg: Any, data_root: Path,
                        seed: int = 0) -> list[Path]:
-    """Ecrit les figures pred vs GT du run.
+    """Write the pred vs GT figures of the run.
 
-    Effet de bord : ecrit runs/<run_id>/figures/*.png et figures/qualitative_index.json.
-    Retourne la liste des figures produites.
+    Side effect: writes runs/<run_id>/figures/*.png and figures/qualitative_index.json.
+    Returns the list of the figures produced.
     """
     from PIL import Image, ImageDraw
 
     cfg = eval_cfg.qualitative
     if pred.empty:
-        log.warning("Aucune prediction : export qualitatif ignore pour ce run.")
+        log.warning("No prediction: qualitative export skipped for this run.")
         return []
     scores = instance_scores(gt, pred, schemas, eval_cfg)
     selection = select_examples(
@@ -126,7 +126,7 @@ def export_qualitative(run_dir: Path, gt: pd.DataFrame, pred: pd.DataFrame,
         n_best_per_dataset=int(cfg.get("n_best_per_dataset", 1)),
     )
     if selection.empty:
-        log.warning("Aucune instance a exporter : verifier les predictions du run.")
+        log.warning("No instance to export: check the predictions of the run.")
         return []
 
     out_dir = run_dir / "figures"
@@ -140,11 +140,11 @@ def export_qualitative(run_dir: Path, gt: pd.DataFrame, pred: pd.DataFrame,
         if not image_path.exists():
             if not bool(cfg.allow_missing_images):
                 raise FileNotFoundError(
-                    f"Image absente pour l'export qualitatif : {image_path}. "
-                    "Corriger image_path (relatif a paths.data) ou passer "
+                    f"Image missing for the qualitative export: {image_path}. "
+                    "Fix image_path (relative to paths.data) or set "
                     "eval.qualitative.allow_missing_images=true."
                 )
-            log.warning("Image absente, exemple ignore : %s", image_path)
+            log.warning("Image missing, example skipped: %s", image_path)
             continue
 
         image = Image.open(image_path).convert("RGB")
@@ -178,5 +178,5 @@ def export_qualitative(run_dir: Path, gt: pd.DataFrame, pred: pd.DataFrame,
     write_json(out_dir / "qualitative_index.json",
                {"n_examples": len(index), "legend": {"gt": "green", "prediction": "orange",
                                                      "error": "red"}, "examples": index})
-    log.info("Export qualitatif : %d figure(s) dans %s", len(written), out_dir)
+    log.info("Qualitative export: %d figure(s) in %s", len(written), out_dir)
     return written

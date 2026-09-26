@@ -1,7 +1,7 @@
-"""Tests des figures du rapport et de la comparaison multi-modeles (§8.3).
+"""Tests of the report figures and of the multi-model comparison (§8.4).
 
-On ne verifie pas l'esthetique : on verifie que chaque figure est produite, non vide,
-et qu'elle repose bien sur les artefacts (donc sur des metriques deja calculees).
+The aesthetics are not checked: we check that each figure is produced, not empty, and
+that it rests on the artefacts (hence on metrics already computed).
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from insectpose.utils.io import read_parquet
 
 @pytest.fixture()
 def reported(cfg, project):
-    """Deux folds entraines, agreges : le minimum pour avoir une dispersion."""
+    """Two trained folds, aggregated: the minimum to get a spread."""
     from insectpose.data.coverage import write_coverage
     from insectpose.data.datamodule import load_annotations
     from insectpose.data.keypoints import load_schemas
@@ -32,7 +32,7 @@ def reported(cfg, project):
         OmegaConf.update(cfg, "fold", fold)
         pipeline.cmd_train(cfg)
 
-    # La couverture est un artefact de `prepare` ; la fixture court-circuite l'adaptateur.
+    # The coverage is a `prepare` artefact; the fixture bypasses the adapter.
     annotations = load_annotations([str(d) for d in cfg.data.datasets], project)
     write_coverage(
         annotations, load_schemas([str(cfg.data.keypoint_schema)], project.configs),
@@ -42,7 +42,7 @@ def reported(cfg, project):
     return cfg, project, master
 
 
-# --- groupes anatomiques -----------------------------------------------------
+# --- anatomical groups -------------------------------------------------------
 @pytest.mark.parametrize(
     ("name", "expected"),
     [
@@ -64,14 +64,14 @@ def test_group_color_ignores_side() -> None:
     assert figures.group_color("left legs") == figures.group_color("right legs")
 
 
-# --- figures du rapport ------------------------------------------------------
+# --- report figures ----------------------------------------------------------
 def test_report_writes_all_figures(reported) -> None:
     cfg, project, master = reported
     produced = figures.write_figures(project, cfg, master)
     names = {p.name for p in produced}
 
-    assert any(n.startswith("metric_") for n in names)      # une figure par metrique
-    assert any(n.startswith("folds_") for n in names)        # boxplot par fold
+    assert any(n.startswith("metric_") for n in names)      # one figure per metric
+    assert any(n.startswith("folds_") for n in names)        # boxplot per fold
     assert "keypoint_confidence_vs_error.png" in names
     assert "pck_curve.png" in names
     assert "pck_vs_coverage.png" in names
@@ -95,11 +95,11 @@ def test_figures_can_be_disabled(reported) -> None:
 
 def test_metric_figure_returns_none_when_metric_absent(reported) -> None:
     _, project, master = reported
-    assert figures.fig_metric_by_dataset(master, "metrique_inexistante",
+    assert figures.fig_metric_by_dataset(master, "nonexistent_metric",
                                          project.results / "figures") is None
 
 
-# --- comparaison multi-modeles ----------------------------------------------
+# --- multi-model comparison --------------------------------------------------
 def test_comparison_writes_heatmaps(reported) -> None:
     _, project, _ = reported
     produced = write_comparison(project, CompareFilter())
@@ -114,12 +114,12 @@ def test_comparison_filters_are_applied(reported) -> None:
     selection = CompareFilter(approaches=("mean_pose",))
     assert write_comparison(project, selection)
 
-    with pytest.raises(ValueError, match="Aucun run"):
-        write_comparison(project, CompareFilter(approaches=("approche_absente",)))
+    with pytest.raises(ValueError, match="No run"):
+        write_comparison(project, CompareFilter(approaches=("missing_approach",)))
 
 
 def test_comparison_excludes_hpo_trials(reported) -> None:
-    """Un trial d'HPO n'est pas un modele candidat : il ne doit pas apparaitre."""
+    """An HPO trial is not a candidate model: it must not appear."""
     _, project, master = reported
     trials = master.assign(role_in_protocol="hpo_trial",
                            run_id=master["run_id"].astype(str) + "-trial")
@@ -130,10 +130,10 @@ def test_comparison_excludes_hpo_trials(reported) -> None:
 
 
 # ===========================================================================
-# Identite des modeles et lisibilite des heatmaps
+# Model identity and heatmap readability
 # ===========================================================================
 def test_two_variants_sharing_a_tag_are_not_averaged_together() -> None:
-    """Regression : deux poids de depart sous le meme tag etaient pris pour deux folds."""
+    """Regression: two starting weights under the same tag were taken for two folds."""
     from insectpose.evaluation.aggregate import model_label, summary_table
 
     master = pd.DataFrame({
@@ -154,7 +154,7 @@ def test_two_variants_sharing_a_tag_are_not_averaged_together() -> None:
 
 
 def test_single_variant_keeps_a_short_label() -> None:
-    """Le hash n'apparait qu'en cas de collision : sinon les etiquettes seraient illisibles."""
+    """The hash only appears on a collision: otherwise the labels would be unreadable."""
     from insectpose.evaluation.aggregate import model_label
 
     master = pd.DataFrame({
@@ -175,19 +175,19 @@ def test_outer_and_inner_folds_are_distinguished(reported) -> None:
 
 @pytest.mark.parametrize(
     ("rgba", "expected"),
-    [((0.99, 0.91, 0.14, 1.0), "black"),    # jaune vif (haut de viridis)
-     ((0.27, 0.00, 0.33, 1.0), "white"),    # violet fonce (bas de viridis)
-     ((0.13, 0.57, 0.55, 1.0), "black")],   # teal median : le noir contraste mieux
+    [((0.99, 0.91, 0.14, 1.0), "black"),    # bright yellow (top of viridis)
+     ((0.27, 0.00, 0.33, 1.0), "white"),    # dark purple (bottom of viridis)
+     ((0.13, 0.57, 0.55, 1.0), "black")],   # median teal: black contrasts better
 )
 def test_heatmap_text_colour_follows_cell_luminance(rgba, expected) -> None:
-    """Un seuil fonde sur la valeur se trompe aux deux extremites de la palette."""
+    """A threshold based on the value is wrong at both ends of the palette."""
     from insectpose.reporting.compare import text_color
 
     assert text_color(rgba) == expected
 
 
 def test_text_colour_threshold_is_the_wcag_crossover() -> None:
-    """Le seuil retenu (0.179) est le point ou noir et blanc contrastent autant."""
+    """The chosen threshold (0.179) is the point where black and white contrast equally."""
     from insectpose.reporting.compare import text_color
 
     def contrast(luminance: float, other: float) -> float:
@@ -202,7 +202,7 @@ def test_text_colour_threshold_is_the_wcag_crossover() -> None:
 
 
 def test_per_run_figures_go_to_separate_folders(reported) -> None:
-    """Un run ne doit pas ecraser les figures du precedent."""
+    """A run must not overwrite the figures of the previous one."""
     from insectpose.reporting.figures import write_per_run_figures
 
     cfg, project, master = reported

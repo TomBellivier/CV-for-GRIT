@@ -1,8 +1,8 @@
-"""Tests de la couverture des keypoints (ADR-0016).
+"""Tests of the keypoint coverage (ADR-0016).
 
-Le schema est commun aux 4 ordres, mais tous les points n'existent pas partout.
-Cet artefact rend l'information visible AVANT l'entrainement, plutot qu'apres coup
-en lisant un PCK par keypoint incomprehensible.
+The schema is shared by the 4 orders, but not every point exists everywhere. This
+artefact makes the information visible BEFORE training, rather than afterwards while
+reading an incomprehensible per-keypoint PCK.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ def test_absent_keypoints_are_detected_per_dataset(coverage) -> None:
     absent = table[(table["dataset"] == "diptera") & (table["status"] == "absent")]
     assert set(absent["keypoint_index"]) == set(range(26, 34))
     assert absent["keypoint"].str.contains("hindwing").all()
-    # Le meme point est present chez l'autre dataset : c'est bien une absence LOCALE
+    # The same point is present in the other dataset: it is indeed a LOCAL absence
     other = table[(table["dataset"] == "coleoptera") & (table["keypoint_index"] == 26)]
     assert other["status"].iloc[0] == "present"
 
@@ -37,7 +37,7 @@ def test_absent_keypoints_are_detected_per_dataset(coverage) -> None:
 def test_summary_separates_local_and_global_absence(coverage) -> None:
     _, _, table = coverage
     summary = summarize(table)
-    assert summary["absent_everywhere"] == []   # aucun point absent des DEUX datasets
+    assert summary["absent_everywhere"] == []   # no point missing from BOTH datasets
     assert len(summary["absent_by_dataset"]["diptera"]) == 8
     assert "thorax-left" in summary["present_everywhere"]
 
@@ -54,7 +54,7 @@ def test_measurement_coverage_flags_unusable_measurements(coverage, project) -> 
     spec = load_measurements()
     table = measurement_coverage(annotations, schemas, spec)
     diptera = table[table["dataset"] == "diptera"].set_index("measurement")
-    # Les mesures d'ailes posterieures sont incalculables faute de points annotes
+    # The hind wing measurements cannot be computed for lack of annotated points
     assert not diptera.loc["left hind wing length", "usable"]
     assert diptera.loc["thorax width", "usable"]
 
@@ -65,8 +65,8 @@ def test_prepare_writes_coverage_artifacts(cfg, project, raw_coco) -> None:  # n
     from insectpose import pipeline
     from insectpose.utils.io import read_json, read_parquet
 
-    # La fixture ecrit du COCO : on force l'adaptateur, car le depot local peut avoir
-    # bascule `data.adapter` sur un autre format (yolo, par exemple).
+    # The fixture writes COCO: the adapter is forced, because the local repository may
+    # have switched `data.adapter` to another format (yolo, for instance).
     OmegaConf.update(cfg, "data.adapter", "coco")
     OmegaConf.update(cfg, "data.adapter_options.annotations_glob", "*.json")
     pipeline.cmd_prepare(cfg)
@@ -78,7 +78,7 @@ def test_prepare_writes_coverage_artifacts(cfg, project, raw_coco) -> None:  # n
 
 
 def test_absent_keypoints_are_excluded_from_metrics(cfg, project) -> None:
-    """Un point non annote ne doit jamais compter comme une erreur nulle."""
+    """An unannotated point must never count as a zero error."""
     from insectpose import pipeline
     from insectpose.utils.io import read_parquet
 

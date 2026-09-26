@@ -1,11 +1,11 @@
-"""Erreur sur les mesures morphometriques (ADR-0008).
+"""Error on the morphometric measurements (ADR-0008).
 
-Deux keypoints peuvent etre legerement decales sans que la mesure en souffre, et
-inversement : cette metrique mesure ce que le projet produit vraiment en aval.
+Two keypoints can be slightly off without the measurement suffering from it, and
+conversely: this metric measures what the project really produces downstream.
 
-- `measurement_mape` : erreur relative absolue mediane/moyenne pred vs GT.
-- `symmetry_gap` : ecart gauche/droite des mesures PREDITES. Calculable sans verite
-  terrain, donc utilisable comme controle qualite sur des donnees non annotees.
+- `measurement_mape`: median/mean absolute relative error pred vs GT.
+- `symmetry_gap`: left/right gap of the PREDICTED measurements. Computable without
+  ground truth, hence usable as a quality check on unannotated data.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from insectpose.registry import register_metric
 
 
 def _instance_arrays(bundle: EvalBundle, pairs: list) -> dict[str, Any]:
-    """Keypoints GT et predits des instances appariees, groupes par schema."""
+    """GT and predicted keypoints of the matched instances, grouped by schema."""
     matched = bundle.matched_instances(pairs)
     if matched.empty:
         return {}
@@ -43,7 +43,7 @@ def _instance_arrays(bundle: EvalBundle, pairs: list) -> dict[str, Any]:
 
 @register_metric("measurement_error")
 def measurement_error(bundle: EvalBundle) -> list[dict[str, Any]]:
-    """Erreur relative sur chaque mesure, plus une synthese par perimetre."""
+    """Relative error on each measurement, plus a summary per scope."""
     cfg = bundle.cfg.get("measurements")
     if cfg is None or not bool(cfg.enabled):
         return []
@@ -57,7 +57,7 @@ def measurement_error(bundle: EvalBundle) -> list[dict[str, Any]]:
             gt_values = measure_all(arrays["gt"], index)
             pred_values = measure_all(arrays["pred"], index)
             for measure, idx in index.items():
-                # Mesure evaluable seulement si tous ses points sont annotes visibles.
+                # A measurement can only be evaluated if all its points are annotated as visible.
                 usable = arrays["vis"][:, idx].all(axis=1) & (gt_values[measure] > 1e-6)
                 if not usable.any():
                     continue
@@ -85,7 +85,7 @@ def measurement_error(bundle: EvalBundle) -> list[dict[str, Any]]:
 
 @register_metric("symmetry_gap")
 def symmetry_gap(bundle: EvalBundle) -> list[dict[str, Any]]:
-    """Ecart gauche/droite des mesures predites : controle sans verite terrain."""
+    """Left/right gap of the predicted measurements: a check without ground truth."""
     cfg = bundle.cfg.get("measurements")
     if cfg is None or not bool(cfg.enabled) or not bool(cfg.symmetry):
         return []
@@ -111,7 +111,7 @@ def symmetry_gap(bundle: EvalBundle) -> list[dict[str, Any]]:
                     )
         if gaps:
             arr = np.asarray(gaps, dtype=float)
-            # La mediane resume, le p90 detecte une asymetrie localisee sur une seule paire.
+            # The median summarises, the p90 detects an asymmetry localised on a single pair.
             out.append(record(scope, "symmetry_gap_median", float(np.median(arr)), int(arr.size)))
             out.append(record(scope, "symmetry_gap_p90", float(np.percentile(arr, 90)),
                               int(arr.size)))

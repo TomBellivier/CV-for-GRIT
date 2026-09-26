@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# Compare toutes les approches sur UN fold, sans optimisation d'hyperparametres.
+# Compare every approach on ONE fold, without hyperparameter optimisation.
 #
-# Objectif : degrossir en quelques heures quelles approches meritent qu'on depense du
-# budget d'HPO dessus. Ce n'est PAS un resultat citable — un seul fold ne donne aucune
-# dispersion, et sans dispersion aucune comparaison ne tient (§8.3).
+# Goal: sort out in a few hours which approaches deserve HPO budget. This is NOT a
+# quotable result — a single fold gives no spread, and without spread no comparison
+# holds (§8.4).
 #
-# Usage :
-#   ./compare_surface.sh                 # fold 0, 100 epoques (defaut des configs)
-#   ./compare_surface.sh 2 30            # fold 2, 30 epoques
+# Usage:
+#   ./compare_surface.sh                 # fold 0, 100 epochs (config default)
+#   ./compare_surface.sh 2 30            # fold 2, 30 epochs
 #   APPROACHES="exp_a_yolo_pooled exp_d_lora" ./compare_surface.sh
 #
-# Une approche qui echoue n'interrompt pas les suivantes : son erreur est journalisee
-# et le script continue. C'est le point de tout lancer d'un coup.
+# An approach that fails does not stop the following ones: its error is logged and the
+# script goes on. That is the point of launching everything at once.
 
 set -uo pipefail
 
@@ -27,54 +27,54 @@ mkdir -p "$LOG_DIR"
 EXTRA=()
 [ -n "$EPOCHS" ] && EXTRA+=("train.epochs=$EPOCHS")
 
-echo "=== Comparaison de surface | fold $FOLD | tag $TAG ==="
-echo "Journaux : $LOG_DIR"
-[ -n "$EPOCHS" ] && echo "Epoques forcees : $EPOCHS"
+echo "=== Surface comparison | fold $FOLD | tag $TAG ==="
+echo "Logs: $LOG_DIR"
+[ -n "$EPOCHS" ] && echo "Forced epochs: $EPOCHS"
 echo
 
-# Le decoupage doit exister : toutes les approches partagent les MEMES folds (§6.2).
+# The split must exist: every approach shares the SAME folds (§6.2).
 if ! ls data/splits/*.parquet >/dev/null 2>&1; then
-    echo "Aucun decoupage trouve. Lancement de 'split'..."
-    python -m insectpose.cli split || { echo "ECHEC du decoupage, arret."; exit 1; }
+    echo "No split found. Running 'split'..."
+    python -m insectpose.cli split || { echo "Split FAILED, stopping."; exit 1; }
 fi
 
-declare -a REUSSIES=() ECHOUEES=()
-DEBUT_TOTAL=$SECONDS
+declare -a SUCCEEDED=() FAILED=()
+TOTAL_START=$SECONDS
 
 for experiment in $APPROACHES; do
     echo "--- $experiment ---"
-    debut=$SECONDS
+    start=$SECONDS
     if python -m insectpose.cli train \
             "experiment=$experiment" "cv.fold=$FOLD" "tag=$TAG" \
             "${EXTRA[@]}" > "$LOG_DIR/$experiment.log" 2>&1; then
-        duree=$((SECONDS - debut))
-        REUSSIES+=("$experiment")
-        printf '    OK   %dm%02ds\n' $((duree / 60)) $((duree % 60))
+        duration=$((SECONDS - start))
+        SUCCEEDED+=("$experiment")
+        printf '    OK   %dm%02ds\n' $((duration / 60)) $((duration % 60))
     else
-        duree=$((SECONDS - debut))
-        ECHOUEES+=("$experiment")
-        printf '    ECHEC apres %dm%02ds\n' $((duree / 60)) $((duree % 60))
-        echo "    Derniere erreur :"
+        duration=$((SECONDS - start))
+        FAILED+=("$experiment")
+        printf '    FAILED after %dm%02ds\n' $((duration / 60)) $((duration % 60))
+        echo "    Last error:"
         grep -E "Error|Exception|Traceback" "$LOG_DIR/$experiment.log" | tail -3 \
             | sed 's/^/      /'
     fi
     echo
 done
 
-TOTAL=$((SECONDS - DEBUT_TOTAL))
-printf '=== %d reussie(s), %d echouee(s) en %dh%02dm ===\n' \
-    "${#REUSSIES[@]}" "${#ECHOUEES[@]}" $((TOTAL / 3600)) $(((TOTAL % 3600) / 60))
-[ "${#ECHOUEES[@]}" -gt 0 ] && printf 'Echecs : %s\n' "${ECHOUEES[*]}"
+TOTAL=$((SECONDS - TOTAL_START))
+printf '=== %d succeeded, %d failed in %dh%02dm ===\n' \
+    "${#SUCCEEDED[@]}" "${#FAILED[@]}" $((TOTAL / 3600)) $(((TOTAL % 3600) / 60))
+[ "${#FAILED[@]}" -gt 0 ] && printf 'Failures: %s\n' "${FAILED[*]}"
 
-if [ "${#REUSSIES[@]}" -eq 0 ]; then
-    echo "Aucun run exploitable."
+if [ "${#SUCCEEDED[@]}" -eq 0 ]; then
+    echo "No usable run."
     exit 1
 fi
 
 echo
-echo "=== Agregation ==="
+echo "=== Aggregation ==="
 python -m insectpose.cli report > "$LOG_DIR/report.log" 2>&1 \
-    || { echo "Echec du rapport, voir $LOG_DIR/report.log"; exit 1; }
+    || { echo "Report failed, see $LOG_DIR/report.log"; exit 1; }
 
 python - "$TAG" <<'PYEOF'
 import sys
@@ -85,27 +85,27 @@ tag = sys.argv[1]
 master = final_runs(pd.read_parquet("../../results/pose/master.parquet"))
 master = master[master["tag"].astype(str) == tag]
 if master.empty:
-    print("Aucun run avec ce tag dans master.parquet")
+    print("No run with this tag in master.parquet")
     raise SystemExit
 
 master = master.copy()
 master["model"] = model_label(master)
 selection = master[(master["scope"] == "overall") & (master["split"] == "test")]
 
-metriques = ["oks_ap", "pck@0.25_thorax_width", "kpt_coverage",
-             "measurement_mape_median", "latency_ms_per_instance"]
-table = selection[selection["metric"].isin(metriques)].pivot_table(
+metrics = ["oks_ap", "pck@0.25_thorax_width", "kpt_coverage",
+           "measurement_mape_median", "latency_ms_per_instance"]
+table = selection[selection["metric"].isin(metrics)].pivot_table(
     index="model", columns="metric", values="value", aggfunc="mean")
-colonnes = [m for m in metriques if m in table.columns]
-print(table[colonnes].sort_values(colonnes[0], ascending=False).round(4).to_string())
+columns = [m for m in metrics if m in table.columns]
+print(table[columns].sort_values(columns[0], ascending=False).round(4).to_string())
 
-print("\nRappels de lecture :")
-print("  - un seul fold : aucune dispersion, donc aucune conclusion definitive ;")
-print("  - lire kpt_coverage AVANT le reste : si elle est basse, tout est biaise ;")
-print("  - yolo_pooled_reduced est evaluee sur des points qu'elle n'apprend pas :")
+print("\nReading reminders:")
+print("  - a single fold: no spread, hence no definitive conclusion;")
+print("  - read kpt_coverage BEFORE the rest: if it is low, everything is biased;")
+print("  - yolo_pooled_reduced is evaluated on points it does not learn:")
 print("      python scripts/compare_models.py --exclude-keypoints leg hindwing")
-print("  - comparer head_only a lora dit si les adaptateurs apportent quelque chose.")
+print("  - comparing head_only with lora tells whether the adapters bring anything.")
 PYEOF
 
 echo
-echo "Detail : python scripts/compare_models.py --tags $TAG"
+echo "Details: python scripts/compare_models.py --tags $TAG"

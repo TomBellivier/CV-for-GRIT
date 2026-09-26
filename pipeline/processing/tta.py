@@ -114,7 +114,8 @@ def _build_augmentations(image_shape) -> list[_Augmentation]:
 # --------------------------------------------------------------------------- #
 # Public entry point
 # --------------------------------------------------------------------------- #
-def collect_tta_measurements(models, img_bgr: np.ndarray) -> dict[str, list[float]]:
+def collect_tta_measurements(models, img_bgr: np.ndarray,
+                             device: str | None = None) -> dict[str, list[float]]:
     """Run all TTA passes and gather the per-pass value of each measurement.
 
     Returns
@@ -128,7 +129,7 @@ def collect_tta_measurements(models, img_bgr: np.ndarray) -> dict[str, list[floa
 
     for aug in augs:
         aug_img = aug.apply_image(img_bgr)
-        pose = run_pose_ensemble(models, aug_img)
+        pose = run_pose_ensemble(models, aug_img, device)
         if pose is None:
             continue
         kp_original_frame = aug.invert_keypoints(pose.keypoints)

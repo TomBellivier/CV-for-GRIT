@@ -1,30 +1,30 @@
 # @package _global_
 tuning:
-  # ADR-0031 : budget FIGE pour les six approches. `tune_once` cherche sur les folds
-  # internes du fold externe 0, puis applique les hyperparametres retenus aux 5 folds
-  # externes. Seule l'estimation du fold 0 devient legerement optimiste ; les jeux de
-  # test des folds 1 a 4 restent vierges de toute recherche.
+  # ADR-0031: FROZEN budget for the six approaches. `tune_once` searches on the inner
+  # folds of outer fold 0, then applies the retained hyperparameters to the 5 outer
+  # folds. Only the estimate of fold 0 becomes slightly optimistic; the test sets of
+  # folds 1 to 4 stay untouched by any search.
   mode: tune_once               # nested | tune_once
-  n_trials: 20                  # DOIT etre identique entre approches (§6.3 budget equitable)
-  # Trials tires au hasard avant que le TPE ne prenne le relais. Le defaut d'Optuna
-  # (10) consommerait la moitie d'un budget de 20 en tirage aveugle.
+  n_trials: 20                  # MUST be identical across approaches (§6.3 fair budget)
+  # Trials drawn at random before the TPE takes over. Optuna's default (10) would
+  # spend half of a budget of 20 on blind draws.
   n_startup_trials: 5
   timeout_s: null
-  inner_folds: 3                # folds internes pour l'HPO
-  tuning_outer_fold: 0          # utilise seulement si mode=tune_once
+  inner_folds: 3                # inner folds for the HPO
+  tuning_outer_fold: 0          # only used if mode=tune_once
   sampler: tpe                  # tpe | random
   pruner: median                # median | none
-  # 1 et non 5 : un trial ne remonte que `inner_folds` valeurs intermediaires, donc a 5
-  # l'elagage ne se declenchait JAMAIS et le budget etait paye en entier.
+  # 1 and not 5: a trial only reports `inner_folds` intermediate values, so at 5 the
+  # pruning NEVER fired and the budget was paid in full.
   pruner_warmup_steps: 1
-  storage: sqlite               # sqlite | none (in-memory, non reprenable)
+  storage: sqlite               # sqlite | none (in-memory, cannot be resumed)
   load_if_exists: true
   seed: 42
-  # Le modele LIVRE est l'ensemble des folds externes (un modele par fold, exportes
-  # dans retained_models/pose/ et moyennes par le pipeline). true = entrainer EN PLUS
-  # un modele sur TOUTES les images avec les hyperparametres retenus, ajoute a cet
-  # ensemble (il a vu les tests des folds : l'ecart-type de l'ensemble s'en trouve reduit).
+  # The DELIVERED model is the ensemble of the outer folds (one model per fold,
+  # exported to retained_models/pose/ and averaged by the pipeline). true = ALSO train
+  # a model on ALL the images with the retained hyperparameters, added to that
+  # ensemble (it has seen the tests of the folds: the ensemble std is reduced by it).
   final_full_fit: false
-  # Part des images reservee au choix du checkpoint de ce modele final (elle n'est
-  # pas un test : rien n'est mesure dessus). null = reprendre cv.val_fraction.
+  # Share of the images kept to choose the checkpoint of that final model (it is not
+  # a test: nothing is measured on it). null = reuse cv.val_fraction.
   final_val_fraction: null

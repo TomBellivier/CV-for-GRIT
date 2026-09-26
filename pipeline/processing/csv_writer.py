@@ -6,7 +6,6 @@ Build the output CSV. One row per image.
 
 Columns (in order):
     image name
-    in_train, in_val
     <measurement> [px]     for every measurement          (pixel measurements)
     <measurement> [mm]     for every measurement          (converted measurements)
     <measurement> [conf]   for every measurement          (measurement confidences)
@@ -103,7 +102,7 @@ def _timing_columns() -> list[str]:
 
 def build_header() -> list[str]:
     """Return the ordered list of column names."""
-    header = ["image_name", "in_train", "in_val"]
+    header = ["image_name"]
     header += [m + PX_SUFFIX for m in MEASUREMENT_NAMES]
     header += [m + MM_SUFFIX for m in MEASUREMENT_NAMES]
     header += [m + CONF_SUFFIX for m in MEASUREMENT_NAMES]
@@ -128,11 +127,7 @@ def _fmt(value) -> str:
 
 def build_row(record: dict) -> list[str]:
     """Turn a per-image record dict into a list of formatted cells."""
-    row = [
-        _fmt(record.get("image_name")),
-        _fmt(record.get("in_train")),
-        _fmt(record.get("in_val")),
-    ]
+    row = [_fmt(record.get("image_name"))]
     pixels = record.get("pixels", {})
     mm = record.get("mm", {})
     conf = record.get("conf", {})

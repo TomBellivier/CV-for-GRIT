@@ -10,8 +10,8 @@ retained_models/
 │   ├── <run_id>/
 │   │   ├── best.pt                    ... one model of the ensemble
 │   │   └── model_card.json            ... run_id, approach, fold, metrics, keypoint schema
-│   ├── <run_id>/ ...                  ... one folder per model (5 after a `tune`)
-│   └── ensemble.json                  ... after `tune`: members + cross-validation estimate
+│   ├── <run_id>/ ...                  ... one folder per model (one per fold trained)
+│   └── ensemble.json                  ... members + cross-validation estimate of their folds
 ├── scale_bar/
 │   └── best.pt                        <- YOLO scale-bar detector
 └── measurement_validity/              <- measurement-validity classifiers
@@ -24,7 +24,8 @@ retained_models/
 | Folder | Produced by | How |
 |--------|-------------|-----|
 | `pose/` | `modules/architectures` | `train` / `evaluate run_id=...`: the folder is **replaced** by that single model |
-| `pose/` | `modules/architectures` | `tune`: the folder is **replaced** by one model per outer fold (5 by default) |
+| `pose/` | `modules/architectures` | `train folds=[...]`: the folder is **replaced** by one model per fold trained |
+| `pose/` | `modules/architectures` | `tune`: the folder is **replaced** by one model per outer fold (5, or those of `folds`) |
 | `measurement_validity/` | `modules/meas_classifier` | written directly by `python train_measure_validity.py` |
 | `scale_bar/` | trained outside this repo | drop the `best.pt` file in by hand |
 
@@ -53,8 +54,8 @@ the mean keypoints. `process_folder.py --models <folder or .pt>` points it at
 another ensemble.
 
 Each model's `model_card.json` says which run produced it and what it scored on
-its held-out fold. After a `tune`, `ensemble.json` holds `cv_estimate`: the mean
-and standard deviation of the primary metric over the outer folds.
+its held-out fold. `ensemble.json` holds `cv_estimate`: the mean and standard
+deviation of the primary metric over the folds of the ensemble.
 
 Model files (`*.pt`, `*.joblib`) are ignored by git — they are rebuilt by
 re-running the module that produced them.

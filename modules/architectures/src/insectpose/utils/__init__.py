@@ -1,1 +1,1 @@
-"""Utilitaires transverses. Un module = une responsabilite (pas de fourre-tout)."""
+"""Cross-cutting utilities. One module = one responsibility (no catch-all)."""

@@ -1,40 +1,40 @@
 # @package _global_
-# Approche H : adaptateurs LoRA par groupe d'insecte (ADR-0036).
-# Categorie "poids partiels par groupe" : un tronc commun, N jeux d'adaptateurs.
-# Pendant economique de l'approche B — 4 jeux d'adaptateurs pesent < 1 % du reseau
-# la ou 4 modeles complets le quadruplent.
+# Approach H: LoRA adapters per insect group (ADR-0036).
+# "Partial weights per group" category: a common trunk, N sets of adapters.
+# Economical counterpart of approach B — 4 sets of adapters weigh < 1 % of the network
+# where 4 complete models quadruple it.
 approach:
   name: lora_per_dataset
   _target_: insectpose.approaches.lora_per_dataset.LoraPerDatasetApproach
 
-  weights: yolo26n-pose.pt      # ADR-0033 : meme base que les autres approches
+  weights: yolo26n-pose.pt      # ADR-0033: same base as the other approaches
   prunable: false
 
-  # Repartition du budget d'epoques entre les deux phases. Le TOTAL egale
-  # `train.epochs` : sans cette contrainte, H disposerait de plus de calcul que les
-  # autres approches et gagnerait par la, pas par la methode (§6.3).
-  #   0.6 => 60 epoques pour le tronc commun, 40 par groupe d'insecte.
+  # Split of the epoch budget between the two phases. The TOTAL equals `train.epochs`:
+  # without this constraint, H would have more compute than the other approaches and
+  # would win through it, not through the method (§6.3).
+  #   0.6 => 60 epochs for the common trunk, 40 per insect group.
   epoch_split: 0.6
 
   lora:
     r: 8
-    # alpha = alpha_ratio x r (ADR-0031) : le prefacteur alpha/r rend le taux
-    # d'apprentissage optimal quasi independant du rang, donc chercher les deux
-    # explorerait une redondance.
+    # alpha = alpha_ratio x r (ADR-0031): the alpha/r prefactor makes the optimal
+    # learning rate almost independent of the rank, so searching both would explore a
+    # redundancy.
     alpha_ratio: 2.0
     alpha: null
     dropout: 0.0
     neck_blocks: 3
-    # Sans effet ici : la phase 1 entraine TOUT (tetes comprises) et la phase 2 ne
-    # laisse QUE les adaptateurs entrainables. Conserve pour compatibilite avec D.
+    # No effect here: phase 1 trains EVERYTHING (heads included) and phase 2 leaves ONLY
+    # the adapters trainable. Kept for compatibility with D.
     train_head: true
 
   # --- inference ---
-  max_det: 1                    # ADR-0017 : une image = un insecte
-  conf: 0.001                   # seuil BAS : ne jamais tronquer les courbes AP (§3.4)
+  max_det: 1                    # ADR-0017: one image = one insect
+  conf: 0.001                   # LOW threshold: never truncate the AP curves (§3.4)
   iou: 0.7
   inference_precision: fp16
-  predict_chunk_size: 16        # ADR-0021 : inference bornee en memoire
+  predict_chunk_size: 16        # ADR-0021: memory-bounded inference
 
   # --- optimisation ---
   optimizer: auto
@@ -45,14 +45,14 @@ approach:
   warmup_epochs: 3.0
   cos_lr: false
 
-  # --- ponderation des pertes ---
+  # --- loss weights ---
   box: 7.5
   pose: 12.0
   kobj: 1.0
   cls: 0.5
   dfl: 1.5
 
-  # --- augmentation : FIXE (ADR-0032), identique aux autres approches ---
+  # --- augmentation: FIXED (ADR-0032), identical to the other approaches ---
   fliplr: 0.5
   flipud: 0.0
   degrees: 10.0
@@ -68,9 +68,9 @@ approach:
   mixup: 0.0
   erasing: 0.0
 
-  # ADR-0031 : QUATRE hyperparametres, budget identique aux autres approches.
-  # `epoch_split` remplace `kobj` : c'est le parametre propre a cette approche, et
-  # l'arbitrage tronc/adaptateurs est precisement ce qu'elle doit calibrer.
+  # ADR-0031: FOUR hyperparameters, budget identical to the other approaches.
+  # `epoch_split` replaces `kobj`: it is the parameter specific to this approach, and the
+  # trunk/adapters trade-off is precisely what it has to calibrate.
   search_space:
     lr0: {type: float, low: 1.0e-4, high: 5.0e-2, log: true}
     pose: {type: float, low: 4.0, high: 30.0}

@@ -1,16 +1,16 @@
-"""Approche C : detection puis estimation de pose sur crop (CONVENTIONS.md §9.3).
+"""Approach C: detection then pose estimation on a crop (CONVENTIONS.md §9.3).
 
-Deux modeles enchaines dans un seul run :
-  1. un detecteur YOLO **poule** (une classe "insecte"), entraine sur les images entieres ;
-  2. un modele YOLO-pose entraine sur des crops normalises.
+Two models chained in a single run:
+  1. a **pooled** YOLO detector (one "insect" class), trained on the whole images;
+  2. a YOLO-pose model trained on normalised crops.
 
-Les trois pieges de cette architecture, tous traites ici :
-- le modele de pose s'entraine sur des bboxes GT **bruitees** (§9.3), faute de quoi il
-  ne verrait jamais les cadrages imparfaits que produit un detecteur ;
-- toute prediction est **retro-projetee** dans le repere de l'image d'origine avant
-  ecriture, sans quoi les coordonnees resteraient dans celui du crop (contrat 3) ;
-- l'evaluation bout-en-bout utilise les bboxes PREDITES. La variante a bboxes GT est un
-  diagnostic (`pose_on_gt_boxes: true`) et ne doit jamais figurer dans le meme tableau.
+The three pitfalls of this architecture, all handled here:
+- the pose model trains on **noisy** GT bboxes (§9.3), otherwise it would never see the
+  imperfect framings a detector produces;
+- every prediction is **back-projected** to the frame of the original image before
+  writing, otherwise the coordinates would stay in that of the crop (contract 3);
+- the end-to-end evaluation uses the PREDICTED bboxes. The GT-bbox variant is a
+  diagnostic (`pose_on_gt_boxes: true`) and must never appear in the same table.
 """
 
 from __future__ import annotations
@@ -30,7 +30,13 @@ from insectpose.data.datamodule import FoldData, ImageSet
 from insectpose.data.keypoints import KeypointSchema
 from insectpose.data.yolo_export import export_fold
 from insectpose.registry import register_approach
-from insectpose.utils.device import amp_enabled, device_info, peak_vram_mb, reset_peak_vram
+from insectpose.utils.device import (
+    amp_enabled,
+    device_info,
+    peak_vram_mb,
+    reset_peak_vram,
+    resolve_num_workers,
+)
 from insectpose.utils.geometry import apply_affine, invert_affine
 
 _DETECTOR_KEYS = (
@@ -43,7 +49,7 @@ _POSE_KEYS = (*_DETECTOR_KEYS, "pose", "kobj")
 
 @register_approach("detect_then_pose")
 class DetectThenPoseApproach(BaseApproach):
-    """Detecteur poule + modele de pose sur crops normalises."""
+    """Pooled detector + pose model on normalised crops."""
 
     REQUIRED_APPROACH_KEYS = (
         "detector", "pose", "crop", "conf", "iou", "max_det", "inference_precision",
@@ -59,19 +65,19 @@ class DetectThenPoseApproach(BaseApproach):
                    if k not in cfg.approach]
         if missing:
             raise KeyError(
-                f"[{self.name}] cles de configuration absentes : {missing}. "
-                "Comparer configs/approach/detect_then_pose.yaml avec la version du depot."
+                f"[{self.name}] missing configuration keys: {missing}. "
+                "Compare configs/approach/detect_then_pose.yaml with the version of the repository."
             )
 
     @classmethod
     def availability(cls) -> tuple[bool, str]:
         return YoloPooledApproach.availability()
 
-    # --- entrainement ------------------------------------------------------
+    # --- training ---------------------------------------------------------------
     def fit(self, data: FoldData, ctx: RunContext) -> None:
-        """Entraine le detecteur puis le modele de pose. Ne lit jamais data.test.
+        """Train the detector then the pose model. Never reads data.test.
 
-        Effet de bord : ecrit runs/<run_id>/{weights,yolo_dataset,crops,logs}/.
+        Side effect: writes runs/<run_id>/{weights,yolo_dataset,crops,logs}/.
         """
         from ultralytics import YOLO
 
@@ -81,7 +87,7 @@ class DetectThenPoseApproach(BaseApproach):
         reset_peak_vram()
         started = time.perf_counter()
 
-        # 1. detecteur poule : une classe, images entieres, labels sans keypoints
+        # 1. pooled detector: one class, whole images, labels without keypoints
         detector_data = export_fold(
             data, self.schema, ctx.subdir("yolo_dataset/detector"),
             splits=("train", "val"), with_keypoints=False,
@@ -98,7 +104,7 @@ class DetectThenPoseApproach(BaseApproach):
         detector_time = time.perf_counter() - started
         release_model(detector)
 
-        # 2. modele de pose sur crops issus de bboxes GT BRUITEES (§9.3)
+        # 2. pose model on crops from NOISY GT bboxes (§9.3)
         crop = self.cfg.approach.crop
         pose_data = export_crop_fold(
             data, self.schema, ctx.subdir("crops"), out_size=self._crop_size(),
@@ -131,17 +137,17 @@ class DetectThenPoseApproach(BaseApproach):
             "crop_size": list(self._crop_size()),
         })
 
-    # --- inference ---------------------------------------------------------
+    # --- inference --------------------------------------------------------------
     def predict_instances(self, images: ImageSet, ctx: RunContext) -> pd.DataFrame:  # noqa: ARG002
-        """Detecte, recadre, estime la pose, puis retro-projette (§3.4).
+        """Detect, crop, estimate the pose, then back-project (§3.4).
 
-        L'inference est decoupee en lots : Ultralytics materialise tout son `source`
-        avant d'inferer, et un fold entier saturerait la RAM (ADR-0021).
+        Inference is split into chunks: Ultralytics materialises its whole `source`
+        before inferring, and a whole fold would saturate the RAM (ADR-0021).
         """
         from PIL import Image
 
         if self.detector is None or self.pose_model is None:
-            raise RuntimeError("Modeles non charges : appeler fit() ou load() d'abord.")
+            raise RuntimeError("Models not loaded: call fit() or load() first.")
         schema = self.schema or self._schema(images)
         approach_cfg = self.cfg.approach
         use_gt_boxes = bool(approach_cfg.get("pose_on_gt_boxes", False))
@@ -190,10 +196,10 @@ class DetectThenPoseApproach(BaseApproach):
             )
         return frame
 
-    # --- etapes internes ---------------------------------------------------
+    # --- internal steps ---------------------------------------------------------
     def _detect(self, paths: list[str], image_ids: list[str], device: str,
                 precision: dict[str, Any]) -> dict[str, tuple[np.ndarray, np.ndarray]]:
-        """Detection sur images entieres, en coordonnees absolues xywh (coin haut-gauche)."""
+        """Detection on whole images, in absolute xywh coordinates (top-left corner)."""
         results = self.detector.predict(
             source=paths, imgsz=self._imgsz(), conf=float(self.cfg.approach.conf),
             iou=float(self.cfg.approach.iou), max_det=int(self.cfg.approach.max_det),
@@ -217,7 +223,7 @@ class DetectThenPoseApproach(BaseApproach):
                        detections: dict[str, tuple[np.ndarray, np.ndarray]],
                        table: pd.DataFrame, schema: KeypointSchema, device: str,
                        precision: dict[str, Any], use_gt_boxes: bool) -> list[dict[str, Any]]:
-        """Pose sur les crops, puis retro-projection vers l'image d'origine."""
+        """Pose on the crops, then back-projection to the original image."""
         results = self.pose_model.predict(
             source=crops, imgsz=self._crop_size()[0], conf=0.0, max_det=1,
             device=device, verbose=False, stream=True, **precision,
@@ -226,8 +232,8 @@ class DetectThenPoseApproach(BaseApproach):
         for (image_id, index), matrix, result in zip(owners, matrices, results, strict=True):
             if result.keypoints is None or len(result.keypoints.data) == 0:
                 continue
-            kpts = result.keypoints.data.cpu().numpy()[0]        # (K, 3) repere du crop
-            points = apply_affine(invert_affine(matrix), kpts[:, :2])   # -> image d'origine
+            kpts = result.keypoints.data.cpu().numpy()[0]        # (K, 3) frame of the crop
+            points = apply_affine(invert_affine(matrix), kpts[:, :2])   # -> original image
             boxes, scores = detections[image_id]
             rows.append({
                 "image_id": image_id,
@@ -237,41 +243,41 @@ class DetectThenPoseApproach(BaseApproach):
                 "kpts_xy": [float(v) for v in points.reshape(-1)],
                 "kpts_score": [float(v) for v in kpts[:, 2]],
                 "keypoint_schema": schema.name,
-                # Diagnostic si les bboxes viennent de la verite terrain (§9.3).
+                # Diagnostic if the bboxes come from the ground truth (§9.3).
                 "bbox_source": "gt" if use_gt_boxes else "predicted",
             })
         return rows
 
     @staticmethod
     def _gt_boxes(images: ImageSet) -> dict[str, np.ndarray]:
-        """Bboxes GT par image, pour le mode diagnostic uniquement."""
+        """GT bboxes per image, for the diagnostic mode only."""
         return {
             str(image_id): np.stack(
                 group["bbox_xywh"].map(lambda v: np.asarray(v, float)).to_numpy())
             for image_id, group in images.annotations.groupby("image_id")
         }
 
-    # --- rechargement ------------------------------------------------------
+    # --- reloading --------------------------------------------------------------
     @classmethod
     def load(cls, run_dir: Path, cfg: Any) -> DetectThenPoseApproach:
-        """Recharge les deux modeles du run, sans reentrainement."""
+        """Reload the two models of the run, without retraining."""
         from ultralytics import YOLO
 
         obj = cls(cfg)
         for attribute, name in (("detector", "detector"), ("pose_model", "pose")):
             weights = Path(run_dir) / "weights" / name / "best.pt"
             if not weights.exists():
-                raise FileNotFoundError(f"Poids introuvables : {weights}")
+                raise FileNotFoundError(f"Weights not found: {weights}")
             setattr(obj, attribute, YOLO(str(weights)))
         return obj
 
-    # --- utilitaires -------------------------------------------------------
+    # --- utilities --------------------------------------------------------------
     @staticmethod
     def _schema(source: Any) -> KeypointSchema:
         return YoloPooledApproach._schema(source)
 
     def _crop_size(self) -> tuple[int, int]:
-        """Taille des crops. Egale a la resolution du protocole (ADR-0024)."""
+        """Size of the crops. Equal to the resolution of the protocol (ADR-0024)."""
         size = self.cfg.approach.crop.size
         values = [int(size), int(size)] if isinstance(size, int) else [int(v) for v in size]
         return values[0], values[1]
@@ -287,12 +293,12 @@ class DetectThenPoseApproach(BaseApproach):
         return resolve_device(self.cfg.train.device)
 
     def _train_kwargs(self, section: Any, keys: tuple[str, ...]) -> dict[str, Any]:
-        """Hyperparametres d'un des deux modeles, tous issus de la config."""
+        """Hyperparameters of one of the two models, all coming from the config."""
         kwargs: dict[str, Any] = {
             "epochs": int(section.get("epochs", self.cfg.train.epochs)),
             "batch": int(section.get("batch", self.cfg.train.batch_size)),
             "imgsz": self._crop_size()[0] if section is self.cfg.approach.pose else self._imgsz(),
-            "workers": int(self.cfg.train.num_workers),
+            "workers": resolve_num_workers(self.cfg.train.num_workers),
             "patience": int(self.cfg.train.early_stopping_patience),
             "cache": self.cfg.train.cache,
             "plots": bool(self.cfg.train.plots),

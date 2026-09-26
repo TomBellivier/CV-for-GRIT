@@ -1,7 +1,7 @@
-"""Derivation et application des seeds (§6.4).
+"""Derivation and application of the seeds (§6.4).
 
-Une seule seed en config ; toutes les autres en sont derivees de facon stable, pour
-qu'un fold ou un dataloader ne partage jamais le meme flux aleatoire par accident.
+A single seed in the config; all the others are derived from it in a stable way, so
+that a fold or a dataloader never shares the same random stream by accident.
 """
 
 from __future__ import annotations
@@ -14,16 +14,16 @@ import numpy as np
 
 
 def seed_for(run_id: str, fold: int, purpose: str, base: int = 0) -> int:
-    """Seed deterministe pour un (run, fold, usage). Toujours dans [0, 2**31)."""
+    """Deterministic seed for a (run, fold, purpose). Always in [0, 2**31)."""
     key = f"{base}|{run_id}|{fold}|{purpose}".encode()
     return int.from_bytes(hashlib.blake2b(key, digest_size=4).digest(), "big") % (2**31)
 
 
 def set_global_seed(seed: int, deterministic: bool = False) -> None:
-    """Fixe python / numpy / torch (si present).
+    """Set python / numpy / torch (if present).
 
-    `deterministic=True` (mode debug) active les algorithmes deterministes de torch,
-    plus lents. Le choix est enregistre dans le manifeste.
+    `deterministic=True` (debug mode) enables the deterministic algorithms of torch,
+    which are slower. The choice is recorded in the manifest.
     """
     random.seed(seed)
     np.random.seed(seed)
@@ -44,6 +44,6 @@ def set_global_seed(seed: int, deterministic: bool = False) -> None:
 
 
 def worker_init_fn(worker_id: int, seed: int = 0) -> None:
-    """Init des workers de dataloader : chaque worker a son propre flux."""
+    """Init of the dataloader workers: each worker has its own stream."""
     np.random.seed((seed + worker_id) % (2**31))
     random.seed(seed + worker_id)

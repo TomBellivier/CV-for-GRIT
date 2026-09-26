@@ -1,7 +1,7 @@
-"""Adaptateur COCO-keypoints generique (format le plus courant en sortie d'annotation).
+"""Generic COCO-keypoints adapter (the most common format out of annotation tools).
 
-Enregistre sous le nom 'coco'. Toute particularite d'un dataset se declare en config
-(`data.adapter_options`), jamais par un `if dataset == ...` dans le code.
+Registered under the name 'coco'. Any particularity of a dataset is declared in the
+config (`data.adapter_options`), never through an `if dataset == ...` in the code.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from insectpose.utils.geometry import bbox_from_keypoints
 
 @register_adapter("coco")
 class CocoKeypointsAdapter(BaseAdapter):
-    """Lit un ou plusieurs JSON COCO-keypoints et produit le format canonique."""
+    """Read one or several COCO-keypoints JSON files and produce the canonical format."""
 
     def read(self) -> pd.DataFrame:
         pattern = str(self.options.get("annotations_glob", "*.json"))
@@ -29,8 +29,8 @@ class CocoKeypointsAdapter(BaseAdapter):
         files = sorted(self.source_dir.glob(pattern))
         if not files:
             raise FileNotFoundError(
-                f"Aucun fichier '{pattern}' dans {self.source_dir}. "
-                "Verifier paths.raw et data.raw_subdir."
+                f"No '{pattern}' file in {self.source_dir}. "
+                "Check paths.raw and data.raw_subdir."
             )
 
         rows: list[dict[str, Any]] = []
@@ -41,7 +41,7 @@ class CocoKeypointsAdapter(BaseAdapter):
             for ann in payload.get("annotations", []):
                 img = images.get(ann["image_id"])
                 if img is None:
-                    raise ValueError(f"[{file.name}] annotation sans image : {ann.get('id')}")
+                    raise ValueError(f"[{file.name}] annotation without an image: {ann.get('id')}")
                 stem = Path(img["file_name"]).stem
                 image_id = f"{self.dataset}/{stem}"
                 n = counters.get(image_id, 0)
@@ -75,6 +75,6 @@ class CocoKeypointsAdapter(BaseAdapter):
                     }
                 )
         df = pd.DataFrame(rows)
-        # image_path doit etre relatif a paths.data (contrat 1) : on prefixe par 'raw/'.
+        # image_path must be relative to paths.data (contract 1): prefixed with 'raw/'.
         df["image_path"] = "raw/" + df["image_path"].astype(str)
         return df

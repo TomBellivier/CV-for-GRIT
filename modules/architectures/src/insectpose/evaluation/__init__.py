@@ -1,1 +1,1 @@
-"""Evaluation : SEUL producteur de chiffres citables (CONVENTIONS.md §7.1)."""
+"""Evaluation: the ONLY producer of quotable numbers (CONVENTIONS.md §7.1)."""

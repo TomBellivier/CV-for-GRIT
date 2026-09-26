@@ -1,12 +1,12 @@
-"""Integration de `yolo_pooled` verifiee via un double d'Ultralytics.
+"""Integration of `yolo_pooled` checked through an Ultralytics double.
 
-Ultralytics et CUDA ne sont pas installables partout (CI legere, machine de dev). Ce
-test injecte un faux module `ultralytics` pour verifier ce que NOUS controlons :
-les arguments passes a l'entrainement, la copie des poids, et surtout la conversion
-des sorties (bbox CENTREE d'Ultralytics -> coin haut-gauche du contrat 3).
+Ultralytics and CUDA cannot be installed everywhere (light CI, dev machine). This test
+injects a fake `ultralytics` module to check what WE control: the arguments passed to
+the training, the copy of the weights, and above all the conversion of the outputs
+(Ultralytics CENTRED bbox -> top-left corner of contract 3).
 
-C'est precisement la partie qui casse silencieusement : une bbox mal convertie donne
-un IoU degrade sans jamais lever d'erreur.
+It is precisely the part that breaks silently: a badly converted bbox gives a degraded
+IoU without ever raising an error.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ def test_fit_and_predict_produce_a_valid_contract(fake_ultralytics, yolo_cfg, pr
     predictions = read_parquet(project.predictions(ctx.run_id, "test", ctx.fold),
                                artifact="predictions", validate=True)
     assert len(predictions) > 0
-    # Conversion centre -> coin haut-gauche : (60, 80, 40, 20) => (40, 70, 40, 20)
+    # Conversion centre -> top-left corner: (60, 80, 40, 20) => (40, 70, 40, 20)
     assert list(predictions["bbox_xywh"].iloc[0]) == pytest.approx([40.0, 70.0, 40.0, 20.0])
     assert predictions["bbox_source"].unique().tolist() == ["predicted"]
     assert predictions["keypoint_schema"].unique().tolist() == ["insect42_v1"]
@@ -44,9 +44,9 @@ def test_training_receives_protocol_parameters(fake_ultralytics, yolo_cfg, proje
     pipeline.cmd_train(yolo_cfg)
     train_call = next(c for c in fake_ultralytics.calls if c["kind"] == "train")
 
-    assert train_call["imgsz"] == 640                 # ADR-0013 : resolution commune
+    assert train_call["imgsz"] == 640                 # ADR-0013: common resolution
     assert train_call["device"] == "cpu"
-    assert train_call["amp"] is False                 # sans effet hors CUDA
+    assert train_call["amp"] is False                 # no effect outside CUDA
     assert train_call["epochs"] == 1
     assert Path(train_call["data"]).name == "data.yaml"
     assert isinstance(train_call["seed"], int)
@@ -54,16 +54,16 @@ def test_training_receives_protocol_parameters(fake_ultralytics, yolo_cfg, proje
 
 
 def test_inference_never_truncates_score_curves(fake_ultralytics, yolo_cfg, project) -> None:  # noqa: ARG001
-    """Un seuil de confiance eleve a l'inference tronquerait les courbes AP (§3.4)."""
+    """A high confidence threshold at inference would truncate the AP curves (§3.4)."""
     pipeline.cmd_split(yolo_cfg)
     pipeline.cmd_train(yolo_cfg)
     predict_call = next(c for c in fake_ultralytics.calls if c["kind"] == "predict")
 
     assert predict_call["conf"] <= 0.01
-    assert predict_call["max_det"] == 1               # ADR-0017 : une image = un insecte
-    assert predict_call["stream"] is True             # inference bornee en memoire
-    assert "half" not in predict_call                 # deprecie depuis Ultralytics 8.4
-    assert "quantize" not in predict_call             # FP32 sur CPU : aucun argument
+    assert predict_call["max_det"] == 1               # ADR-0017: one image = one insect
+    assert predict_call["stream"] is True             # memory-bounded inference
+    assert "half" not in predict_call                 # deprecated since Ultralytics 8.4
+    assert "quantize" not in predict_call             # FP32 on CPU: no argument
 
 
 def test_weights_are_copied_and_reloadable(fake_ultralytics, yolo_cfg, project) -> None:  # noqa: ARG001
@@ -79,7 +79,7 @@ def test_weights_are_copied_and_reloadable(fake_ultralytics, yolo_cfg, project) 
 
 
 def test_cost_metrics_are_recorded(fake_ultralytics, yolo_cfg, project) -> None:  # noqa: ARG001
-    """Les couts sont des metriques de premier ordre (§7.2), pas des annexes."""
+    """The costs are first-order metrics (§7.2), not appendices."""
     from insectpose.utils.io import read_json
 
     pipeline.cmd_split(yolo_cfg)
@@ -93,7 +93,7 @@ def test_cost_metrics_are_recorded(fake_ultralytics, yolo_cfg, project) -> None:
 
 
 def test_yolo_dataset_is_a_derived_artifact(fake_ultralytics, yolo_cfg, project) -> None:  # noqa: ARG001
-    """Les fichiers YOLO vivent dans le run, jamais dans data/processed (§9.1)."""
+    """The YOLO files live in the run, never in data/processed (§9.1)."""
     pipeline.cmd_split(yolo_cfg)
     ctx = pipeline.cmd_train(yolo_cfg)
 
@@ -105,18 +105,18 @@ def test_yolo_dataset_is_a_derived_artifact(fake_ultralytics, yolo_cfg, project)
 
 
 def test_precision_argument_matches_installed_ultralytics() -> None:
-    """`half` est deprecie depuis Ultralytics 8.4 : on interroge la config installee."""
+    """`half` is deprecated since Ultralytics 8.4: the installed config is queried."""
     from insectpose.approaches.yolo_pooled import YoloPooledApproach as A
 
-    assert A._precision_kwargs("cpu", "fp16") == {}       # sans objet sur CPU
-    assert A._precision_kwargs("0", "fp32") == {}         # FP32 = defaut, rien a passer
+    assert A._precision_kwargs("cpu", "fp16") == {}       # not applicable on CPU
+    assert A._precision_kwargs("0", "fp32") == {}         # FP32 = default, nothing to pass
     gpu_fp16 = A._precision_kwargs("0", "fp16")
     assert gpu_fp16 in ({"quantize": 16}, {"half": True})
     assert len(gpu_fp16) == 1
 
 
 def test_inference_is_streamed_over_many_images(fake_ultralytics, yolo_cfg, project) -> None:  # noqa: ARG001
-    """Regression : l'inference doit rester bornee en memoire quel que soit le fold."""
+    """Regression: the inference must stay memory-bounded whatever the fold."""
     pipeline.cmd_split(yolo_cfg)
     ctx = pipeline.cmd_train(yolo_cfg)
     predictions = read_parquet(project.predictions(ctx.run_id, "test", ctx.fold))
@@ -127,10 +127,10 @@ def test_inference_is_streamed_over_many_images(fake_ultralytics, yolo_cfg, proj
 def test_inference_is_chunked_to_bound_memory(
     fake_ultralytics, yolo_cfg, project  # noqa: ARG001
 ) -> None:
-    """ADR-0021 : Ultralytics materialise tout le `source` avant d'inferer.
+    """ADR-0021: Ultralytics materialises the whole `source` before inferring.
 
-    Passer la liste complete d'un fold sature la RAM. On verifie donc qu'aucun appel
-    ne recoit plus d'images que la taille de lot configuree.
+    Passing the full list of a fold saturates the RAM. We therefore check that no call
+    receives more images than the configured batch size.
     """
     from omegaconf import OmegaConf
 
@@ -139,11 +139,11 @@ def test_inference_is_chunked_to_bound_memory(
     ctx = pipeline.cmd_train(yolo_cfg)
 
     predict_calls = [c for c in fake_ultralytics.calls if c["kind"] == "predict"]
-    assert predict_calls, "aucune prediction effectuee"
+    assert predict_calls, "no prediction made"
     assert max(c["n_sources"] for c in predict_calls) <= 4
-    assert len(predict_calls) > 1, "le fold de test doit etre traite en plusieurs lots"
+    assert len(predict_calls) > 1, "the test fold must be processed in several batches"
 
-    # Le decoupage ne doit rien changer au resultat
+    # The chunking must not change the result
     predictions = read_parquet(project.predictions(ctx.run_id, "test", ctx.fold),
                                artifact="predictions", validate=True)
     n_test_images = len(set(predictions["image_id"]))

@@ -1,8 +1,8 @@
-"""Orchestration des cinq etapes (CONVENTIONS.md §5.4).
+"""Orchestration of the five steps (CONVENTIONS.md §5.4).
 
 prepare -> split -> train -> predict -> evaluate (+ tune, report).
-Chaque etape est appelable seule et reprend les artefacts de la precedente : on doit
-pouvoir re-evaluer un run vieux de trois mois sans reentrainer (§1.4).
+Each step can be called on its own and picks up the artefacts of the previous one: it
+must be possible to re-evaluate a three-month-old run without retraining (§1.4).
 """
 
 from __future__ import annotations
@@ -48,13 +48,13 @@ from insectpose.utils.logging import get_logger
 log = get_logger("pipeline")
 
 
-# --- helpers partages -------------------------------------------------------
+# --- shared helpers --------------------------------------------------------------
 def _schema_names(cfg: DictConfig) -> list[str]:
-    """Schemas de keypoints a charger pour le perimetre de donnees courant.
+    """Keypoint schemas to load for the current data scope.
 
-    Cas nominal (ADR-0006) : `data.keypoint_schema` est commun aux 4 datasets. Si un
-    jour un dataset diverge, il suffit de laisser ce champ a null pour retomber sur un
-    schema par dataset, sans toucher au reste du pipeline.
+    Nominal case (ADR-0006): `data.keypoint_schema` is common to the 4 datasets. If one
+    day a dataset diverges, leaving this field at null is enough to fall back on one
+    schema per dataset, without touching the rest of the pipeline.
     """
     shared = cfg.data.get("keypoint_schema")
     names = [str(shared)] if shared else [str(d) for d in cfg.data.datasets]
@@ -65,7 +65,7 @@ def _schema_names(cfg: DictConfig) -> list[str]:
 
 
 def _image_size_guard(cfg: DictConfig) -> None:
-    """Refuse une resolution d'entree divergente entre approches (ADR-0013)."""
+    """Refuse an input resolution diverging between approaches (ADR-0013)."""
     if not bool(cfg.strict.get("enforce_common_image_size", True)):
         return
     common = [int(v) for v in cfg.protocol.image_size]
@@ -73,15 +73,15 @@ def _image_size_guard(cfg: DictConfig) -> None:
     used = [int(used), int(used)] if isinstance(used, int) else [int(v) for v in used]
     if used != common:
         raise ContractError(
-            f"Resolution d'entree {used} != resolution commune du protocole {common}. "
-            "Une approche entrainee a une autre resolution ne compare plus la methode "
-            "mais la resolution (ADR-0013). Passer strict.enforce_common_image_size=false "
-            "pour une exploration hors rapport."
+            f"Input resolution {used} != common resolution of the protocol {common}. "
+            "An approach trained at another resolution no longer compares the method but "
+            "the resolution (ADR-0013). Set strict.enforce_common_image_size=false for an "
+            "exploration outside the report."
         )
 
 
 def _load_context_data(cfg: DictConfig, paths: ProjectPaths) -> tuple[pd.DataFrame, dict[str, Any]]:
-    """Charge annotations + schemas, en appliquant les garde-fous stricts."""
+    """Load annotations + schemas, applying the strict guards."""
     annotations = load_annotations([str(d) for d in cfg.data.datasets], paths)
     schemas = load_schemas(
         _schema_names(cfg), paths.configs, strict=bool(cfg.strict.require_validated_keypoints)
@@ -90,7 +90,7 @@ def _load_context_data(cfg: DictConfig, paths: ProjectPaths) -> tuple[pd.DataFra
 
 
 def _git_guard(cfg: DictConfig, paths: ProjectPaths) -> None:
-    """Refuse un depot modifie si strict.require_clean_git (resultats non tracables)."""
+    """Refuse a modified repository if strict.require_clean_git (untraceable results)."""
     if not bool(cfg.strict.require_clean_git):
         return
     from insectpose.context import _git_state
@@ -98,16 +98,16 @@ def _git_guard(cfg: DictConfig, paths: ProjectPaths) -> None:
     state = _git_state(paths.root)
     if state.get("dirty"):
         raise ContractError(
-            "Depot git modifie et strict.require_clean_git=true : commiter avant de "
-            "produire des resultats citables."
+            "Modified git repository and strict.require_clean_git=true: commit before "
+            "producing quotable results."
         )
 
 
-# --- etapes -----------------------------------------------------------------
+# --- steps ------------------------------------------------------------------------
 def cmd_prepare(cfg: DictConfig) -> list[Path]:
-    """raw -> format canonique (contrat 1), puis rapport de couverture (ADR-0016).
+    """raw -> canonical format (contract 1), then coverage report (ADR-0016).
 
-    Effet de bord : data/processed/<dataset>/annotations.parquet et
+    Side effect: data/processed/<dataset>/annotations.parquet and
     data/processed/coverage_*.{parquet,json}.
     """
     paths = ProjectPaths.from_config(cfg)
@@ -118,14 +118,14 @@ def cmd_prepare(cfg: DictConfig) -> list[Path]:
         options = OmegaConf.to_container(cfg.data.adapter_options, resolve=True) or {}
         assert isinstance(options, dict)
         options.setdefault("keypoint_schema", str(cfg.data.get("keypoint_schema") or dataset))
-        # Racines deja resolues : une option de chemin relative se lit depuis la
-        # racine du projet, pas depuis le repertoire d'ou la commande est lancee.
+        # Roots already resolved: a relative path option is read from the project root,
+        # not from the folder the command is launched from.
         options.setdefault("project_root", str(paths.root))
         options.setdefault("configs_dir", str(paths.configs))
         source = paths.raw_dir(dataset, cfg.data.get("raw_subdir"))
         adapter = adapter_cls(dataset=dataset, source_dir=source, options=options)
         out = adapter.run(paths)
-        log.info("[%s] annotations canoniques ecrites : %s", dataset, out)
+        log.info("[%s] canonical annotations written: %s", dataset, out)
         written.append(out)
 
     annotations = load_annotations([str(d) for d in cfg.data.datasets], paths)
@@ -136,17 +136,17 @@ def cmd_prepare(cfg: DictConfig) -> list[Path]:
 
 
 def _write_coverage(cfg: DictConfig, paths: ProjectPaths) -> None:
-    """Rapport de couverture des keypoints et des mesures (ADR-0016).
+    """Coverage report of the keypoints and measurements (ADR-0016).
 
-    Porte sur TOUS les datasets deja prepares, pas seulement sur celui qui vient de
-    l'etre : sinon `prepare data=<un dataset>` ecraserait le rapport global et la
-    ligne "absent partout" deviendrait fausse.
+    Covers ALL the datasets already prepared, not only the one that just was:
+    otherwise `prepare data=<one dataset>` would overwrite the global report and the
+    "absent everywhere" row would become wrong.
     """
     prepared = [d for d in DATASETS if paths.annotations(d).exists()]
     if not prepared:
         return
     annotations = load_annotations(prepared, paths)
-    log.info("Couverture calculee sur %d dataset(s) prepare(s) : %s", len(prepared), prepared)
+    log.info("Coverage computed on %d prepared dataset(s): %s", len(prepared), prepared)
     schemas = load_schemas(_schema_names(cfg), paths.configs)
     spec = None
     measurements = cfg.eval.get("measurements")
@@ -162,41 +162,41 @@ def _write_coverage(cfg: DictConfig, paths: ProjectPaths) -> None:
 
 
 def cmd_split(cfg: DictConfig) -> Path:
-    """Genere les folds externes ET internes (contrat 2).
+    """Generate the outer AND inner folds (contract 2).
 
-    Les decoupages internes servent a l'HPO nichee : ils ne contiennent que des images
-    du train externe, donc le test externe reste vierge de toute recherche (ADR-0012).
-    Effet de bord : data/splits/<split_id>*.{parquet,json}.
+    The inner splits serve the nested HPO: they only contain images of the outer train,
+    so the outer test stays untouched by any search (ADR-0012).
+    Side effect: data/splits/<split_id>*.{parquet,json}.
     """
     paths = ProjectPaths.from_config(cfg)
     annotations, _ = _load_context_data(cfg, paths)
     table, meta = build_splits(annotations, cfg)
     out = write_splits(table, meta, paths)
-    log.info("Decoupage externe '%s' : %d images, %d groupes, %d folds.",
+    log.info("Outer split '%s': %d images, %d groups, %d folds.",
              meta["split_id"], meta["n_images"], meta["n_groups"], meta["n_folds"])
 
     for outer_fold in range(int(meta["n_folds"])):
         inner_table, inner_meta = build_inner_splits(annotations, table, outer_fold, cfg)
         write_splits(inner_table, inner_meta, paths)
-        log.info("  decoupage interne '%s' : %d images, %d folds.",
+        log.info("  inner split '%s': %d images, %d folds.",
                  inner_meta["split_id"], inner_meta["n_images"], inner_meta["n_folds"])
     return out
 
 
 def _prepare_run(cfg: DictConfig, extra: dict[str, Any] | None = None
                  ) -> tuple[RunContext, Any, Any]:
-    """Assemble contexte, donnees du fold et instance d'approche."""
+    """Assemble the context, the data of the fold and the approach instance."""
     paths = ProjectPaths.from_config(cfg)
     paths.ensure_writable_dirs()
     _git_guard(cfg, paths)
     _image_size_guard(cfg)
 
     annotations, schemas = _load_context_data(cfg, paths)
-    # cfg.split_id permet de pointer un decoupage INTERNE pendant l'HPO (ADR-0012).
+    # cfg.split_id lets the HPO point at an INNER split (ADR-0012).
     split_id = str(cfg.split_id) if cfg.get("split_id") else make_split_id(cfg)
     if not paths.split_file(split_id).exists():
         raise FileNotFoundError(
-            f"Decoupage '{split_id}' absent. Lancer : python -m insectpose.cli split"
+            f"Split '{split_id}' missing. Run: python -m insectpose.cli split"
         )
     table, _ = load_splits(split_id, paths, annotations)
     assignment = fold_assignment(table, int(cfg.fold))
@@ -215,22 +215,22 @@ def _prepare_run(cfg: DictConfig, extra: dict[str, Any] | None = None
 
 def cmd_train(cfg: DictConfig, extra: dict[str, Any] | None = None,
               do_evaluate: bool = True, retain_replace: bool = True) -> RunContext:
-    """Entraine un fold, predit et evalue. Idempotent : un run complet est saute (§8.1).
+    """Train a fold, predict and evaluate. Idempotent: a complete run is skipped (§8.1).
 
-    Termine par l'export des poids vers retained_models/ (`retain.enabled`), d'ou
-    `pipeline/` les charge. L'export est refait sur un run deja complet : il suffit
-    de relancer la meme commande pour regenerer une copie effacee.
-    `retain_replace=True` remplace l'ensemble de retained_models/pose/ par ce seul
-    modele ; `tune` le met a False pour ajouter ses folds les uns aux autres.
+    Ends with the export of the weights to retained_models/ (`retain.enabled`), from
+    where `pipeline/` loads them. The export is redone on an already complete run:
+    running the same command again is enough to regenerate a deleted copy.
+    `retain_replace=True` replaces the ensemble of retained_models/pose/ by this single
+    model; `tune` sets it to False to add its folds to one another.
     """
     ctx, data, approach = _prepare_run(cfg, extra)
     if ctx.is_complete() and not bool(cfg.force):
-        log.info("Run deja complet, saute : %s (force=true pour rejouer).", ctx.run_id)
+        log.info("Run already complete, skipped: %s (force=true to replay).", ctx.run_id)
         retain_context(ctx, replace=retain_replace)
         return ctx
 
     ctx.setup()
-    log.info("Run %s | folds : %s", ctx.run_id, data.summary())
+    log.info("Run %s | folds: %s", ctx.run_id, data.summary())
     approach.fit(data, ctx)
 
     for split in ("val", "test"):
@@ -241,14 +241,61 @@ def cmd_train(cfg: DictConfig, extra: dict[str, Any] | None = None,
         evaluate_run(ctx.run_id, ctx.paths, annotations, schemas, cfg.eval,
                      approach=str(cfg.approach.name), split_id=ctx.split_id)
         _export_qualitative(ctx, data, schemas)
-    ctx.write_manifest()   # ecrit EN DERNIER : marque le run comme complet
-    # apres le manifeste : on n'exporte qu'un run complet (§8.2)
+    ctx.write_manifest()   # written LAST: marks the run as complete
+    # after the manifest: only a complete run is exported (§8.2)
     retain_context(ctx, replace=retain_replace)
     return ctx
 
 
+def selected_folds(cfg: DictConfig, default_all: bool) -> list[int]:
+    """Outer folds a command runs (ADR-0039).
+
+    `folds` if it is set: a list of fold indices, a single index, or "all". Otherwise
+    `fold` alone (`train`, `default_all=False`) or every outer fold (`tune`). Each index
+    is checked against `cv.n_folds`: an unknown fold would silently train nothing.
+    """
+    n_folds = int(cfg.cv.n_folds)
+    raw = cfg.get("folds")
+    if raw is None:
+        return list(range(n_folds)) if default_all else [int(cfg.fold)]
+    if isinstance(raw, str):
+        if raw.strip().lower() != "all":
+            raise ValueError(f"folds={raw!r}: expected a list of fold indices or 'all'.")
+        return list(range(n_folds))
+    values = [raw] if isinstance(raw, int) else list(raw)
+    folds = sorted({int(value) for value in values})
+    if not folds:
+        raise ValueError("folds=[]: at least one outer fold is needed.")
+    outside = [fold for fold in folds if not 0 <= fold < n_folds]
+    if outside:
+        raise ValueError(f"folds {outside} outside 0..{n_folds - 1} (cv.n_folds={n_folds}).")
+    return folds
+
+
+def cmd_train_folds(cfg: DictConfig) -> list[RunContext]:
+    """`train` over one or several outer folds (`folds`), gathered into ONE ensemble.
+
+    The first fold replaces the ensemble of retained_models/pose/, the next ones are
+    added to it, like the final folds of `tune` (ADR-0039). `ensemble.json` then carries
+    the estimate of these folds, each one measured on its own untouched test.
+    """
+    contexts: list[RunContext] = []
+    for position, fold in enumerate(selected_folds(cfg, default_all=False)):
+        fold_cfg = cfg.copy()
+        OmegaConf.update(fold_cfg, "fold", fold)
+        contexts.append(cmd_train(fold_cfg, retain_replace=position == 0))
+
+    if bool(cfg.retain.enabled) and retainable_approach(cfg) and str(cfg.mode) != "smoke":
+        paths = ProjectPaths.from_config(cfg)
+        run_ids = {ctx.fold: ctx.run_id for ctx in contexts}
+        card = write_ensemble_card(paths, {"source": "train", "folds": list(run_ids),
+                                           "cv_estimate": _cv_estimate(cfg, paths, run_ids)})
+        log.info("Retained ensemble: %s (%d fold(s))", card, len(run_ids))
+    return contexts
+
+
 def _export_qualitative(ctx: RunContext, data: Any, schemas: dict[str, Any]) -> None:
-    """Figures pred vs GT du run (§8.4). Effet de bord : runs/<run_id>/figures/."""
+    """Pred vs GT figures of the run (§8.5). Side effect: runs/<run_id>/figures/."""
     cfg = ctx.cfg.eval.qualitative
     if not bool(cfg.enabled):
         return
@@ -264,17 +311,16 @@ def _export_qualitative(ctx: RunContext, data: Any, schemas: dict[str, Any]) -> 
 
 def cmd_fit_full(cfg: DictConfig, extra: dict[str, Any] | None = None,
                  card: dict[str, Any] | None = None) -> RunContext:
-    """Entraine le modele LIVRE : toutes les images, hyperparametres deja retenus.
+    """Train a model on ALL the images, with the hyperparameters already retained.
 
-    Ce run ne predit pas et n'evalue pas : aucun test n'est tenu a l'ecart, donc
-    toute metrique calculee ici serait mesuree sur des images vues a l'entrainement
-    (ADR-0012). Il n'ecrit pas de `metrics.parquet`, ce qui suffit a le tenir hors
-    de `master.parquet` (§8.3), et son manifeste porte `role_in_protocol:
-    final_full`. La performance attendue vient des folds externes et voyage dans la
-    carte du modele (`card`).
+    This run neither predicts nor evaluates: no test is held out, so any metric computed
+    here would be measured on images seen at training time (ADR-0012). It writes no
+    `metrics.parquet`, which is enough to keep it out of `master.parquet` (§8.4), and
+    its manifest carries `role_in_protocol: final_full`. The expected performance comes
+    from the outer folds and travels in the model card (`card`).
 
-    Effet de bord : ecrit data/splits/<split_id>__full.*, runs/<run_id>/ et
-    l'export dans retained_models/.
+    Side effect: writes data/splits/<split_id>__full.*, runs/<run_id>/ and the export
+    to retained_models/.
     """
     paths = ProjectPaths.from_config(cfg)
     paths.ensure_writable_dirs()
@@ -293,14 +339,14 @@ def cmd_fit_full(cfg: DictConfig, extra: dict[str, Any] | None = None,
 
     run_extra = {"role_in_protocol": "final_full", **(extra or {})}
     ctx, data, approach = _prepare_run(full_cfg, run_extra)
-    # Ajoute a l'ensemble des folds externes, jamais a sa place (tuning.final_full_fit).
+    # Added to the ensemble of the outer folds, never in its place (tuning.final_full_fit).
     if ctx.is_complete() and not bool(cfg.force):
-        log.info("Modele final deja entraine, saute : %s (force=true pour rejouer).", ctx.run_id)
+        log.info("Final model already trained, skipped: %s (force=true to replay).", ctx.run_id)
         retain_context(ctx, extra_card=card, replace=False)
         return ctx
 
     ctx.setup()
-    log.info("Modele final %s | %s", ctx.run_id, data.summary())
+    log.info("Final model %s | %s", ctx.run_id, data.summary())
     approach.fit(data, ctx)
     ctx.write_manifest(evaluable=False)
     retain_context(ctx, extra_card=card, replace=False)
@@ -308,37 +354,40 @@ def cmd_fit_full(cfg: DictConfig, extra: dict[str, Any] | None = None,
 
 
 def cmd_predict(cfg: DictConfig, run_id: str, split: str = "test") -> Path:
-    """Recharge un run et regenere ses predictions, sans reentrainement."""
+    """Reload a run and regenerate its predictions, without retraining."""
     ctx, data, _ = _prepare_run(cfg)
     approach = APPROACHES.get(str(cfg.approach.name)).load(ctx.paths.run_dir(run_id), cfg)
     return approach.predict(data.role(split), ctx, split)
 
 
 def cmd_evaluate(cfg: DictConfig, run_id: str) -> Path:
-    """Re-evalue un run existant a partir de ses seules predictions (§7.1).
+    """Re-evaluate an existing run from its predictions only (§7.1).
 
-    Exporte aussi ses poids vers retained_models/ (`retain.enabled`) : c'est la
-    facon de retenir un run vieux de trois mois sans le reentrainer (§1.4). Comme
-    `train`, il remplace l'ensemble en place par ce seul modele.
+    Also exports its weights to retained_models/ (`retain.enabled`): it is the way to
+    retain a three-month-old run without retraining it (§1.4). Like `train`, it
+    replaces the ensemble in place by this single model.
     """
     paths = ProjectPaths.from_config(cfg)
     annotations, schemas = _load_context_data(cfg, paths)
     out = evaluate_run(run_id, paths, annotations, schemas, cfg.eval)
-    log.info("Metriques ecrites : %s", out)
+    log.info("Metrics written: %s", out)
     retain_existing_run(run_id, paths, cfg)
     return out
 
 
 def cmd_tune(cfg: DictConfig) -> dict[str, Any]:
-    """Optimise les hyperparametres, puis reentraine les folds externes (ADR-0012).
+    """Optimise the hyperparameters, then retrain the outer folds (ADR-0012).
 
-    Protocole niche :
-      1. pour chaque fold externe, l'HPO tourne sur les folds INTERNES de son train ;
-      2. les meilleurs hyperparametres sont ensuite appliques au fold externe entier ;
-      3. le fold de test externe n'a jamais servi a choisir un hyperparametre.
+    Nested protocol:
+      1. for each outer fold, the HPO runs on the INNER folds of its train;
+      2. the best hyperparameters are then applied to the whole outer fold;
+      3. the outer test fold has never been used to choose a hyperparameter.
 
-    En mode `tune_once`, l'etape 1 n'est faite que sur `tuning.tuning_outer_fold` et le
-    resultat est reutilise pour tous les folds externes (moins couteux, a documenter).
+    In `tune_once` mode, step 1 is only done on `tuning.tuning_outer_fold` and the
+    result is reused for every outer fold (cheaper, to be documented).
+
+    `folds` restricts the outer folds that are retrained (and, in `nested` mode,
+    searched): all of them by default (ADR-0039).
     """
     from insectpose.tuning.objective import (
         build_study,
@@ -351,8 +400,7 @@ def cmd_tune(cfg: DictConfig) -> dict[str, Any]:
     paths = ProjectPaths.from_config(cfg)
     outer_split_id = make_split_id(cfg)
     mode = str(cfg.tuning.mode)
-    n_outer = int(cfg.cv.n_folds)
-    outer_folds = list(range(n_outer))
+    outer_folds = selected_folds(cfg, default_all=True)
     tuning_folds = outer_folds if mode == "nested" else [int(cfg.tuning.tuning_outer_fold)]
 
     results: dict[str, Any] = {"mode": mode, "outer": {}}
@@ -360,8 +408,8 @@ def cmd_tune(cfg: DictConfig) -> dict[str, Any]:
         inner_id = inner_split_id(outer_split_id, outer_fold)
         if not paths.split_file(inner_id).exists():
             raise FileNotFoundError(
-                f"Decoupage interne '{inner_id}' absent. Relancer 'split' : l'HPO nichee "
-                "exige des folds internes construits sur le seul train externe."
+                f"Inner split '{inner_id}' missing. Run 'split' again: the nested HPO "
+                "requires inner folds built on the outer train only."
             )
         search_cfg = cfg.copy()
         OmegaConf.update(search_cfg, "split_id", inner_id, force_add=True)
@@ -373,12 +421,12 @@ def cmd_tune(cfg: DictConfig) -> dict[str, Any]:
         budget = int(cfg.tuning.n_trials)
         todo = remaining_trials(study, budget)
         if todo == 0:
-            log.info("Fold externe %d : budget deja atteint (%d/%d trials), rien a faire.",
+            log.info("Outer fold %d: budget already reached (%d/%d trials), nothing to do.",
                      outer_fold, completed_trials(study), budget)
         else:
             if completed_trials(study) > 0:
-                log.info("Fold externe %d : reprise, %d trial(s) deja termine(s), %d a faire "
-                         "pour atteindre le budget de %d.",
+                log.info("Outer fold %d: resuming, %d trial(s) already finished, %d to run "
+                         "to reach the budget of %d.",
                          outer_fold, completed_trials(study), todo, budget)
             study.optimize(
                 make_objective(search_cfg, run_fn),
@@ -387,12 +435,12 @@ def cmd_tune(cfg: DictConfig) -> dict[str, Any]:
             )
         best = save_best(study, search_cfg, paths)
         results["outer"][outer_fold] = best
-        log.info("Fold externe %d | meilleur %s interne = %s",
+        log.info("Outer fold %d | best inner %s = %s",
                  outer_fold, cfg.eval.primary_metric, best["best_value"])
 
-    # Reentrainement des folds externes avec les hyperparametres retenus. Chacun est
-    # exporte : ensemble, ils forment le modele livre, que le pipeline moyenne. Le
-    # premier remplace l'ensemble precedent, les suivants s'y ajoutent.
+    # Retraining of the outer folds with the retained hyperparameters. Each one is
+    # exported: together, they form the delivered model, which the pipeline averages.
+    # The first one replaces the previous ensemble, the next ones are added to it.
     final_runs: dict[int, str] = {}
     for outer_fold in outer_folds:
         source = outer_fold if mode == "nested" else int(cfg.tuning.tuning_outer_fold)
@@ -407,10 +455,10 @@ def cmd_tune(cfg: DictConfig) -> dict[str, Any]:
             final_cfg,
             extra={"optuna_study": best["study_name"], "hpo_mode": mode,
                    "hpo_source_fold": source, "hpo_n_trials": best["n_trials_completed"],
-                   # ADR-0012 : chaque fold externe retient LEGITIMEMENT ses propres
-                   # hyperparametres. On les exclut de l'identite du modele, sinon
-                   # chaque fold formerait une variante distincte et la dispersion
-                   # inter-folds disparaitrait des tableaux.
+                   # ADR-0012: each outer fold LEGITIMATELY retains its own
+                   # hyperparameters. They are excluded from the identity of the model,
+                   # otherwise each fold would form a distinct variant and the
+                   # dispersion across folds would disappear from the tables.
                    "hpo_overridden_keys": list(best["best_params"])},
             retain_replace=outer_fold == outer_folds[0],
         )
@@ -420,11 +468,12 @@ def cmd_tune(cfg: DictConfig) -> dict[str, Any]:
     estimate = _cv_estimate(cfg, ProjectPaths.from_config(cfg), final_runs)
     if bool(cfg.retain.enabled) and retainable_approach(cfg) and str(cfg.mode) != "smoke":
         card = write_ensemble_card(paths, {"source": "tune", "hpo_mode": mode,
+                                           "folds": list(final_runs),
                                            "cv_estimate": estimate})
-        log.info("Ensemble retenu : %s | estimation des folds externes : %s", card, estimate)
+        log.info("Retained ensemble: %s | estimate of the outer folds: %s", card, estimate)
 
-    # Optionnel (tuning.final_full_fit) : un modele de plus, entraine sur TOUTES les
-    # images avec les hyperparametres retenus, AJOUTE a l'ensemble des folds.
+    # Optional (tuning.final_full_fit): one more model, trained on ALL the images with
+    # the retained hyperparameters, ADDED to the ensemble of the folds.
     if bool(cfg.tuning.final_full_fit):
         source, best = _best_study(results, cfg)
         full_cfg = cfg.copy()
@@ -439,16 +488,16 @@ def cmd_tune(cfg: DictConfig) -> dict[str, Any]:
                   "cv_estimate": estimate},
         )
         results["full_run"] = ctx.run_id
-        log.info("Modele livre : %s | estimation des folds externes : %s", ctx.run_id, estimate)
+        log.info("Full-data model: %s | estimate of the outer folds: %s", ctx.run_id, estimate)
     return results
 
 
 def _best_study(results: dict[str, Any], cfg: DictConfig) -> tuple[int, dict[str, Any]]:
-    """Etude dont les hyperparametres partent dans le modele final.
+    """Study whose hyperparameters go into the final model.
 
-    En `tune_once` il n'y en a qu'une. En `nested`, chaque fold externe a retenu les
-    siens (ADR-0012) : le modele final ne pouvant en porter qu'un jeu, on prend celui
-    de la meilleure valeur interne, au sens de `eval.primary_direction`.
+    In `tune_once` there is only one. In `nested`, each outer fold retained its own
+    (ADR-0012): the final model can only carry one set, so the one with the best inner
+    value is taken, in the sense of `eval.primary_direction`.
     """
     outer = results["outer"]
     if len(outer) == 1:
@@ -456,17 +505,17 @@ def _best_study(results: dict[str, Any], cfg: DictConfig) -> tuple[int, dict[str
         return source, outer[source]
     better = max if str(cfg.eval.primary_direction) == "maximize" else min
     source = better(outer, key=lambda fold: outer[fold]["best_value"])
-    log.info("Hyperparametres du fold externe %s retenus pour le modele final "
-             "(meilleure valeur interne : %s).", source, outer[source]["best_value"])
+    log.info("Hyperparameters of outer fold %s retained for the final model "
+             "(best inner value: %s).", source, outer[source]["best_value"])
     return source, outer[source]
 
 
 def _cv_estimate(cfg: DictConfig, paths: ProjectPaths, run_ids: dict[int, str]) -> dict[str, Any]:
-    """Performance attendue du modele final : celle, mesuree, de ses folds externes.
+    """Expected performance of the delivered model: the measured one of the outer folds.
 
-    Le modele final ne s'evalue pas lui-meme (aucun test vierge) : c'est la seule
-    estimation honnete qu'on puisse lui attacher, et elle est etiquetee comme telle
-    dans la carte du modele.
+    A model trained on every image cannot evaluate itself (no untouched test): this is
+    the only honest estimate that can be attached to it, and it is labelled as such in
+    the model card.
     """
     values: list[float] = []
     for run_id in run_ids.values():
@@ -475,8 +524,8 @@ def _cv_estimate(cfg: DictConfig, paths: ProjectPaths, run_ids: dict[int, str]) 
             continue
         try:
             values.append(primary_value(read_parquet(path), cfg.eval))
-        except Exception as exc:  # noqa: BLE001 - une carte incomplete vaut mieux qu'un echec
-            log.warning("Metriques illisibles pour %s : %s", run_id, exc)
+        except Exception as exc:  # noqa: BLE001 - an incomplete card is better than a failure
+            log.warning("Metrics unreadable for %s: %s", run_id, exc)
     if not values:
         return {}
     mean = sum(values) / len(values)
@@ -492,9 +541,9 @@ def _cv_estimate(cfg: DictConfig, paths: ProjectPaths, run_ids: dict[int, str]) 
 
 
 def _run_trial_fold(base_cfg: DictConfig, overrides: dict[str, Any]) -> float:
-    """Execute un fold interne d'un trial et retourne la metrique primaire.
+    """Run an inner fold of a trial and return the primary metric.
 
-    Un trial est un run complet, avec run_id et manifeste : il reste auditable (§6.3).
+    A trial is a complete run, with a run_id and a manifest: it stays auditable (§6.3).
     """
     trial_cfg = base_cfg.copy()
     fold = int(overrides.pop("fold"))
@@ -504,7 +553,7 @@ def _run_trial_fold(base_cfg: DictConfig, overrides: dict[str, Any]) -> float:
         OmegaConf.update(trial_cfg, key, value, force_add=True)
     OmegaConf.update(trial_cfg, "fold", fold)
     OmegaConf.update(trial_cfg, "tag", f"{base_cfg.tag}-trial{trial_number}", force_add=True)
-    # Pas d'export qualitatif pour les trials : bruit inutile, cout non nul.
+    # No qualitative export for the trials: useless noise, non-zero cost.
     OmegaConf.update(trial_cfg, "eval.qualitative.enabled", False)
     ctx = cmd_train(trial_cfg, extra={"trial_number": trial_number, "optuna_study": study,
                                       "role_in_protocol": "hpo_trial"})
@@ -513,10 +562,10 @@ def _run_trial_fold(base_cfg: DictConfig, overrides: dict[str, Any]) -> float:
 
 
 def cmd_report(cfg: DictConfig) -> Path:
-    """Agrege tous les runs complets et produit les tableaux du rapport (§8.3)."""
+    """Aggregate every complete run and produce the report tables (§8.4)."""
     from insectpose.reporting.report import write_report
 
     paths = ProjectPaths.from_config(cfg)
     master = write_master(paths)
-    log.info("Agregat ecrit : %s", master)
+    log.info("Aggregate written: %s", master)
     return write_report(paths, cfg)

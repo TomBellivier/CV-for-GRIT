@@ -1,9 +1,9 @@
-"""Mesures à classer : lecture du bloc `measurements` de kp_infos.yaml.
+"""Measurements to classify: reading of the `measurements` block of kp_infos.yaml.
 
-Une mesure est une chaîne de keypoints. Elle est découpée en arêtes (segments
-entre deux keypoints consécutifs) : l'arête est l'unité manipulée par
-l'application, car plusieurs mesures peuvent partager le même segment
-(ex. "femur" et "longueur de patte"), ce qui fait cascader le grisage.
+A measurement is a chain of keypoints. It is split into edges (segments between two
+consecutive keypoints): the edge is the unit handled by the application, because
+several measurements can share the same segment (e.g. "femur" and "leg length"),
+which makes the greying cascade.
 """
 from collections import OrderedDict
 from pathlib import Path
@@ -17,20 +17,20 @@ _CASCADE_KEYWORDS = ("leg", "antenna")
 
 
 def _is_cascade_measurement(measurement_name):
-    """Seules les mesures de pattes et d'antennes propagent leur statut aux mesures
-    voisines qui partagent une arête (voir AppConfig.cascade_edges)."""
+    """Only the leg and antenna measurements propagate their status to the
+    neighbouring measurements that share an edge (see AppConfig.cascade_edges)."""
     name = measurement_name.lower()
     return any(kw in name for kw in _CASCADE_KEYWORDS)
 
 
 class AppConfig:
     def __init__(self, measurements):
-        self.measurements = measurements  # OrderedDict nom -> [kp names]
+        self.measurements = measurements  # OrderedDict name -> [kp names]
 
-        # Arêtes uniques (segments entre kp consécutifs), partagées entre mesures.
-        # edge_key trié (kpA, kpB) -> (kpA, kpB) dans l'ordre de première apparition.
+        # Unique edges (segments between consecutive kp), shared between measurements.
+        # sorted edge_key (kpA, kpB) -> (kpA, kpB) in order of first appearance.
         self.edges = OrderedDict()
-        # nom mesure -> liste ordonnée d'edge_key (triés) qu'elle traverse
+        # measurement name -> ordered list of the (sorted) edge_keys it crosses
         self.measurement_edges = OrderedDict()
         for m_name, kp_list in measurements.items():
             keys = []
@@ -41,10 +41,10 @@ class AppConfig:
                 keys.append(key)
             self.measurement_edges[m_name] = keys
 
-        # edge_key -> liste des mesures qui le traversent (mapping inverse), restreint
-        # aux familles de mesures où la cascade a du sens (pattes, antennes) : une
-        # mesure composite comme "total length" traverse aussi tête/thorax/abdomen et
-        # ne doit pas les lier entre elles pour autant.
+        # edge_key -> list of the measurements crossing it (reverse mapping), restricted
+        # to the measurement families where the cascade makes sense (legs, antennae): a
+        # composite measurement such as "total length" also crosses head/thorax/abdomen
+        # and must not link them together for all that.
         self.edge_measurements = OrderedDict()
         for m_name, keys in self.measurement_edges.items():
             if not _is_cascade_measurement(m_name):
@@ -56,11 +56,11 @@ class AppConfig:
         return list(self.measurements.keys())
 
     def cascade_edges(self, edge_key):
-        """Ferme par transitivité l'ensemble des arêtes qui doivent partager le même
-        statut mesurable/non-mesurable que `edge_key` : toutes les arêtes des mesures
-        auxquelles il appartient (ex. griser le fémur grise toute la mesure "longueur
-        de patte", donc aussi le tibia et le tarse qui la composent), et ainsi de
-        suite tant que de nouvelles mesures/arêtes sont découvertes."""
+        """Transitive closure of the set of edges that must share the same
+        measurable/non-measurable status as `edge_key`: every edge of the measurements
+        it belongs to (e.g. greying the femur greys the whole "leg length"
+        measurement, hence also the tibia and the tarsus that make it up), and so on
+        as long as new measurements/edges are discovered."""
         edges = {edge_key}
         changed = True
         while changed:
@@ -77,18 +77,18 @@ class AppConfig:
 
 
 def load_config(path=None):
-    """Lit le bloc `measurements` de kp_infos.yaml. Retourne un AppConfig."""
+    """Read the `measurements` block of kp_infos.yaml. Returns an AppConfig."""
     path = Path(path) if path else DEFAULT_KP_INFOS
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     measurements = OrderedDict(
         (name, list(kps)) for name, kps in (raw.get("measurements") or {}).items())
 
     if not measurements:
-        raise ValueError(f"aucune mesure trouvée dans {path}")
+        raise ValueError(f"no measurement found in {path}")
     return AppConfig(measurements)
 
 
 if __name__ == "__main__":
     import sys
     cfg = load_config(sys.argv[1] if len(sys.argv) > 1 else None)
-    print(f"{len(cfg.measurements)} mesures, {len(cfg.edges)} arêtes")
+    print(f"{len(cfg.measurements)} measurements, {len(cfg.edges)} edges")
