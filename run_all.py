@@ -397,34 +397,34 @@ def pose_overrides(cfg: dict) -> list[str]:
     return overrides
 
 
-def check_training_images(cfg: dict, run: Runner) -> None:
-    """Fail before training rather than in the middle of it: the YOLO export stops at the
-    first missing image."""
+def check_training_images(cfg: dict, run: Runner) -> bool:
+    """Report the annotated images missing from the training folders. Returns True when
+    some are missing: pose training then goes on without them."""
     wanted = annotated_images(resolve(cfg["annotations"]["table"]))
     missing = {g: [n for n in names if not (training_folder(g) / n).is_file()]
                for g, names in wanted.items()}
     total = sum(len(v) for v in missing.values())
     if total == 0:
-        return
+        return False
     lines = [f"  {g}: {len(v)} of {len(wanted[g])} missing, e.g. {', '.join(sorted(v)[:3])}"
              for g, v in missing.items() if v]
-    message = (f"{total} annotated image(s) missing from {rel(TRAINING_IMAGES_ROOT)}/<group>/images/:\n"
-               + "\n".join(lines)
-               + "\nPut the images in images.database_dir (one folder per group) with "
-                 "images.training_images: link, or fill these folders yourself.")
-    if run.dry_run:
-        run.echo("/!\\ (dry run) " + message)
-        return
-    raise StepFailed(message)
+    run.echo(f"/!\\ {total} annotated image(s) missing from {rel(TRAINING_IMAGES_ROOT)}/<group>/images/:\n"
+             + "\n".join(lines)
+             + "\n    Pose training goes on WITHOUT them (full list in the 'prepare' output below)."
+             + "\n    To include them: put them in images.database_dir (one folder per group) "
+               "with images.training_images: link, or fill these folders yourself.")
+    return True
 
 
 def step_pose(cfg: dict, run: Runner) -> None:
     p = cfg["pose_training"]
     cli = [PYTHON, "-m", "insectpose.cli"]
     common = pose_overrides(cfg)
+    if check_training_images(cfg, run):
+        # Only then: the setting enters the run_id, which stays unchanged when all is there.
+        common.append("+data.adapter_options.skip_missing_images=true")
     run.run([*cli, "prepare", *common], cwd=ARCH_DIR)
     run.run([*cli, "split", *common], cwd=ARCH_DIR)
-    check_training_images(cfg, run)
 
     overrides = [*common, folds_override(p["folds"]),
                  f"train.epochs={int(p['epochs'])}", f"train.device='{p['device']}'"]

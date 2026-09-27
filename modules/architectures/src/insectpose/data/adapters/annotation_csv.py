@@ -10,7 +10,8 @@ The scale and measurement-validity columns of that table do not concern the pose
 they are ignored here, without being modified.
 
 Like any adapter: reads, converts, does not filter and decides nothing. Rows without
-any keypoint are the only ones left out -- they are not pose annotations.
+any keypoint are the only ones left out -- they are not pose annotations -- and, only
+with ``skip_missing_images: true``, the rows whose image file is absent (reported).
 """
 
 from __future__ import annotations
@@ -24,6 +25,9 @@ import pandas as pd
 from insectpose.data.adapters.base import BaseAdapter
 from insectpose.data.keypoints import load_schema
 from insectpose.registry import register_adapter
+from insectpose.utils.logging import get_logger
+
+log = get_logger("adapter")
 
 _EXTENSIONS = (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp")
 
@@ -42,6 +46,10 @@ class AnnotationCsvAdapter(BaseAdapter):
         margin          margin, in pixels, around the keypoints for the bbox when
                         the CSV carries none (default: 10)
         keypoint_schema name of the schema (default: ``insect42_v1``)
+        skip_missing_images
+                        leave out, with a warning, the rows whose image is not in
+                        ``images_subdir`` (default: false; the YOLO export then fails
+                        on the first missing image)
     """
 
     def _schema_points(self) -> list[str]:
@@ -86,9 +94,16 @@ class AnnotationCsvAdapter(BaseAdapter):
         images_subdir = str(self.options.get("images_subdir", f"raw/{self.dataset}/images"))
         margin = float(self.options.get("margin", 10))
         schema_name = str(self.options.get("keypoint_schema", "insect42_v1"))
+        skip_missing = bool(self.options.get("skip_missing_images", False))
+        # images_subdir is relative to paths.data (the parent of paths.raw by default).
+        data_dir = Path(self.options.get("data_dir", self.source_dir.parent.parent))
 
         rows: list[dict[str, Any]] = []
+        skipped: list[str] = []
         for _, record in frame.iterrows():
+            if skip_missing and not (data_dir / images_subdir / str(record["image_name"])).is_file():
+                skipped.append(str(record["image_name"]))
+                continue
             xy = np.array([[record[f"{p}_x"], record[f"{p}_y"]] for p in points], dtype=float)
             vis = np.array([record.get(f"{p}_v", 0) for p in points], dtype=float)
             vis = np.nan_to_num(vis, nan=0.0).astype(int)
@@ -126,6 +141,10 @@ class AnnotationCsvAdapter(BaseAdapter):
                 "split_source": "unknown",
             })
 
+        if skipped:
+            log.warning("[%s] %d annotated image(s) missing from %s, left out of the "
+                        "dataset: %s", self.dataset, len(skipped), data_dir / images_subdir,
+                        ", ".join(sorted(skipped)))
         return pd.DataFrame(rows)
 
     @staticmethod

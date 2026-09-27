@@ -122,6 +122,7 @@ def cmd_prepare(cfg: DictConfig) -> list[Path]:
         # not from the folder the command is launched from.
         options.setdefault("project_root", str(paths.root))
         options.setdefault("configs_dir", str(paths.configs))
+        options.setdefault("data_dir", str(paths.data))
         source = paths.raw_dir(dataset, cfg.data.get("raw_subdir"))
         adapter = adapter_cls(dataset=dataset, source_dir=source, options=options)
         out = adapter.run(paths)

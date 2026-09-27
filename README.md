@@ -111,7 +111,7 @@ The launchers use `.venv` when it exists (else the Python of the PATH) and pass 
 - `--only pose analysis` runs only these steps, `--skip annotations check` all but these;
 - `--config my_run.yaml` reads another settings file (paths relative to the repository root).
 
-Each run writes all its commands and their output to `results/run_logs/run_<date>.log`, and ends with a summary of the steps. The run stops at the first failing step with the reason, e.g. images missing from the training folders, the annotation check finding an error, or the scale-bar detector missing.
+Each run writes all its commands and their output to `results/run_logs/run_<date>.log`, and ends with a summary of the steps. The run stops at the first failing step with the reason, e.g. the annotation check finding an error, or the scale-bar detector missing. Annotated images missing from the training folders do not stop it: they are reported, and pose training goes on without them.
 
 ## Keypoints and measurements
 `kp_infos.yaml`, at the root, is the ONLY definition of the keypoints (order, difficulty, left/right symmetry, colour), the skeleton, the measurements, their left/right pairs, the anatomical parts and the insect groups (`coleoptera`, `diptera`, `hymenoptera`, `lepidoptera`). Every module reads it — directly, or through `kp_infos.py` (`from kp_infos import KEYPOINT_NAMES, MEASUREMENTS, ...`).
