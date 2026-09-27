@@ -33,7 +33,7 @@ annotations:
 images:
   # Image database, one sub-folder per insect group (coleoptera, diptera, hymenoptera,
   # lepidoptera). Also used by the pipeline to find the group of an image.
-  database_dir: all_images/full databases
+  database_dir: annotated_images/full databases
   # How the flat folders read by pose training, modules/architectures/data/raw/<group>/images/,
   # are filled from database_dir (step "images"):
   #   link  hard links: no extra disk space (a copy when the two folders are on different drives)

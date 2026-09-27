@@ -72,7 +72,7 @@ DEFAULTS: dict = {
         "check_report_dir": "results/annotation_check",
     },
     "images": {
-        "database_dir": "all_images/full databases",
+        "database_dir": "annotated_images/full databases",
         "training_images": "link",
     },
     "pose_training": {

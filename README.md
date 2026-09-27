@@ -28,7 +28,7 @@ Unless stated otherwise, every command is run **from the repository root**.
 
 | Step | What | Tool | Output |
 |---|---|---|---|
-| 1 | Organise the images | `all_images/split_image_database.py` | `all_images/full databases/<group>/...` |
+| 1 | Organise the images | `annotated_images/split_image_database.py` | `annotated_images/full databases/<group>/...` |
 | 2 | Annotate the keypoints | Label Studio + `annotation_tools/` | `annotation_data/label_studio_annotations/<group>/*.json` |
 | 3 | Classify each measurement as measurable or not | `annotation_tools/measurement_validation/` | `annotation_data/meas_classifier/*_measurements.csv` |
 | 4 | Annotate the scale | by hand | `annotation_data/scale/scale_annotations.csv` |
@@ -44,7 +44,7 @@ Steps 6 to 9 only need `annotation_data/annotation_data.csv`, which is versioned
 
 - `kp_infos.yaml`, `kp_infos.py` — the single definition of the keypoints, skeleton and measurements (see [below](#keypoints-and-measurements)).
 - `run_config.yaml`, `run_all.py`, `run_windows.bat`, `run_linux.sh`, `run_macos.sh` — the settings and the launchers of the end-to-end run (see [below](#run-everything-with-one-command)).
-- `all_images/` — the image databases (not versioned) and `split_image_database.py`.
+- `annotated_images/` — the image databases (not versioned) and `split_image_database.py`.
 - `annotation_data/` — every annotation:
   - `label_studio_annotations/<group>/` — Label Studio JSON exports, one folder per insect order;
   - `pose/pose_annotations.csv` — those exports converted to CSV;
@@ -84,7 +84,7 @@ Once the annotations exist (steps 1 to 4), one command runs the rest of the proj
 | Step | What it does |
 |---|---|
 | `annotations` | converts the Label Studio exports and rebuilds `annotation_data.csv` (step 5) |
-| `images` | fills the training image folders of the pose module from `all_images/full databases/` |
+| `images` | fills the training image folders of the pose module from `annotated_images/full databases/` |
 | `check` | checks every annotation file and reports the images missing from some of them (step 5) |
 | `pose` | trains the pose models, or optimises them, on one or several folds (step 6) |
 | `classifiers` | trains the measurement-validity classifiers (step 7) — optional |
@@ -126,10 +126,10 @@ Nothing is tied to a machine: every module detects what it runs on (CUDA GPU(s),
 - Measurement-validity classifiers: every CPU (`n_jobs=-1`).
 
 ## Step 1 — Organise the images
-The images live in `all_images/full databases/`, one sub-folder per insect order:
+The images live in `annotated_images/full databases/`, one sub-folder per insect order:
 
 ```
-all_images/full databases/
+annotated_images/full databases/
 ├── coleoptera/...
 ├── diptera/...
 ├── hymenoptera/...
@@ -145,9 +145,9 @@ File names must therefore be unique across the databases.
 To hand a large folder out to annotators in batches, split it into numbered sub-folders of at most N images each:
 
 ```bash
-python all_images/split_image_database.py "all_images/<folder>" <N>             # 01/, 02/, ... with at most N images each
-python all_images/split_image_database.py "all_images/<folder>" <N> --dry-run   # show what would be moved, move nothing
-python all_images/split_image_database.py "all_images/<folder>" --reverse       # move the images back up, delete the empty sub-folders
+python annotated_images/split_image_database.py "annotated_images/<folder>" <N>             # 01/, 02/, ... with at most N images each
+python annotated_images/split_image_database.py "annotated_images/<folder>" <N> --dry-run   # show what would be moved, move nothing
+python annotated_images/split_image_database.py "annotated_images/<folder>" --reverse       # move the images back up, delete the empty sub-folders
 ```
 
 ## Step 2 — Annotate the keypoints in Label Studio
@@ -300,7 +300,7 @@ python modules/meas_classifier/compare_measure_validity_approaches.py
 ## Step 8 — Scale detection
 - **Scale bar:** a YOLO detector (a bar class and, optionally, a text class) followed by an OCR read of the value. The detector is trained outside this repository: put its weights at `retained_models/scale_bar/best.pt`. Check that `SCALE_BAR_BAR_CLASS_ID` / `SCALE_BAR_TEXT_CLASS_ID` in `pipeline/processing/config.py` match its classes (printed at load time). Without this file, run the pipeline with `--scale ruler` (`scale_extraction.method: ruler` in `run_config.yaml`, or `USE_SCALE_BAR = False` in that config): it then uses the ruler only.
 - **Ruler:** Fourier analysis of the pixel rows; nothing to train. Its settings are `RULER_*` in `pipeline/processing/config.py`.
-  - To evaluate it against the ruler bands of `annotation_data.csv`, run `python modules/ruler_detection/ruler_detection_evaluation.py`. It reads the images of `all_images/full databases/`, writes `results/ruler_detection/evaluation.json`, and `modules/ruler_detection/ruler_detection_evaluation.ipynb` plots it.
+  - To evaluate it against the ruler bands of `annotation_data.csv`, run `python modules/ruler_detection/ruler_detection_evaluation.py`. It reads the images of `annotated_images/full databases/`, writes `results/ruler_detection/evaluation.json`, and `modules/ruler_detection/ruler_detection_evaluation.ipynb` plots it.
   - To recalibrate its confidence, run `python modules/ruler_detection/ruler_confidence.py --json <labels>.json --images_root <image folder>`. The JSON maps each image path, relative to `--images_root`, to `"0"` (nothing), `"1"` (scale bar) or `"2"` (ruler). The script prints thresholds to copy into `THRESHOLDS` in `ruler_confidence.py`.
 
 ## Step 9 — Run the pipeline on new images
@@ -324,7 +324,7 @@ python pipeline/process_folder.py --source hf --dataset TomBellivier/all_images 
 - the detected scale and its confidence;
 - the mean and standard deviation of every keypoint coordinate over the pose ensemble (0 with a single model).
 
-The insect order of each image is looked up in `all_images/full databases/<group>/`. If an image is not found there, its `<group>_one_hot` columns are all 0.
+The insect order of each image is looked up in `annotated_images/full databases/<group>/`. If an image is not found there, its `<group>_one_hot` columns are all 0.
 
 **Analyse a run:**
 ```bash
@@ -354,4 +354,4 @@ To measure images on another machine, without the training code, copy:
 - `modules/ruler_detection/` and `modules/scale_bar_detection/`;
 - `retained_models/`.
 
-Optionally, add `all_images/full databases/` for the insect-order columns. Then run `pip install -r requirements.txt` and step 9.
+Optionally, add `annotated_images/full databases/` for the insect-order columns. Then run `pip install -r requirements.txt` and step 9.

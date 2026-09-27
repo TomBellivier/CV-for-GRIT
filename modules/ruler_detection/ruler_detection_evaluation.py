@@ -16,7 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # (see annotation_tools/build_annotation_data.py). The rulers are the rows that carry
 # a ruler_line_min / ruler_line_max range.
 ANNOTATION_DATA = REPO_ROOT / "annotation_data" / "annotation_data.csv"
-ALL_IMAGES_DIR = REPO_ROOT / "all_images" / "full databases"
+ALL_IMAGES_DIR = REPO_ROOT / "annotated_images" / "full databases"
 # Outputs in the shared results/ folder of the repository (see results/README.md); the
 # ruler_detection_evaluation.ipynb notebook reads them back from there.
 RESULTS_DIR = REPO_ROOT / "results" / "ruler_detection"

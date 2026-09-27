@@ -10,7 +10,7 @@ All paths are resolved relative to the PROJECT ROOT (the folder that contains
 `process_folder.py`, i.e. the `pipeline/` folder at the repo root), so the
 pipeline works regardless of where you launch it from. `REPO_ROOT` is one
 level above that, and holds `kp_infos.yaml`, `modules/`, `retained_models/`,
-`annotation_data/` and `all_images/`.
+`annotation_data/` and `annotated_images/`.
 """
 
 from pathlib import Path
@@ -281,7 +281,7 @@ RUN_MEASUREMENT_CLASSIFIER = True
 
 # Where each image's taxonomic group is looked up: DATABASE_DIR/<group>/...
 # Used both as a classifier input and for the '<group>_one_hot' CSV columns.
-DATABASE_DIR = REPO_ROOT / "all_images" / "full databases"
+DATABASE_DIR = REPO_ROOT / "annotated_images" / "full databases"
 
 MEASUREMENT_CLASSIFIER_DIR = RETAINED_MODELS_DIR / "measurement_validity"
 MEASUREMENT_CLASSIFIER_METRICS_CSV = MEASUREMENT_CLASSIFIER_DIR / "metrics.csv"

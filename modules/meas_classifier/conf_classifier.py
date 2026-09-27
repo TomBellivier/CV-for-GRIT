@@ -63,7 +63,7 @@ from insect_anatomy import INSECT_GROUPS, MEASUREMENTS
 LOGGER = logging.getLogger("conf_classifier")
 
 DATA_DIR = Path("../../annotation/conf_classifier")
-DATABASE_DIR = Path("../../all_images/full databases")
+DATABASE_DIR = Path("../../annotated_images/full databases")
 PROCESS_FOLDER_RESULTS = Path("../../pipeline/results_4.csv")
 RESULTS_DIR = Path("./results")
 

@@ -22,7 +22,7 @@ Parallelism (inspired by test_process_hf.py, extended to the whole task):
 Examples
 --------
     # local folder (as before)
-    python process_folder.py --source folder --input "../all_images/full databases"
+    python process_folder.py --source folder --input "../annotated_images/full databases"
 
     # the whole Hugging Face dataset (workers sized to the machine)
     python process_folder.py --source hf --dataset TomBellivier/all_images

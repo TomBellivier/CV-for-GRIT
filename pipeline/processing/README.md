@@ -27,7 +27,7 @@ repo_root/
 │       ├── rf_related_*.joblib   # measurement-validity classifiers
 │       └── metrics.csv           # their thresholds
 ├── images_to_process/            # the images you want to measure
-└── all_images/full databases/    # image database, one folder per insect group:
+└── annotated_images/full databases/    # image database, one folder per insect group:
     └── <group>/...               #   the group of each image is looked up here
 ```
 

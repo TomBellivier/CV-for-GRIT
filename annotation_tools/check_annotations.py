@@ -14,7 +14,7 @@ Sources (defaults: the standard locations, see the README):
     measurements   annotation_data/meas_classifier/*.csv
     scale          annotation_data/scale/scale_annotations.csv
     table          annotation_data/annotation_data.csv   (the merged table)
-    image files    all_images/full databases/<group>/...          (--images-dir)
+    image files    annotated_images/full databases/<group>/...          (--images-dir)
                    modules/architectures/data/raw/<group>/images/ (--training-images)
 
 What is checked
@@ -74,7 +74,7 @@ from kp_infos import INSECT_GROUPS, KEYPOINT_NAMES, MEAS_TO_KP, MEASUREMENTS  # 
 from labelstudio_to_csv import image_name_of, parse_annotation  # noqa: E402
 
 DEFAULT_LABEL_STUDIO = REPO_ROOT / "annotation_data" / "label_studio_annotations"
-DEFAULT_IMAGES_DIR = REPO_ROOT / "all_images" / "full databases"
+DEFAULT_IMAGES_DIR = REPO_ROOT / "annotated_images" / "full databases"
 DEFAULT_TRAINING_IMAGES = REPO_ROOT / "modules" / "architectures" / "data" / "raw"
 DEFAULT_REPORT_DIR = REPO_ROOT / "results" / "annotation_check"
 
