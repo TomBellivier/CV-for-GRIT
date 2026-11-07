@@ -55,7 +55,9 @@ def make_run_id(cfg: DictConfig, content_hash: str) -> str:
     # is trained. Leaving it in would break the idempotence (§8.1) -- `retain.name=x`
     # would retrain every fold instead of skipping them. `folds` only says which folds a
     # command runs (ADR-0039): the fold of THIS run is `fold`, which stays in the id.
-    for volatile in ("force", "paths", "hydra", "retain", "folds"):
+    # `finetune` only drives the `finetune` verb, which copies what matters into
+    # approach.weights, cv.n_folds and train.epochs: keeping it would change every id.
+    for volatile in ("force", "paths", "hydra", "retain", "folds", "finetune"):
         resolved.pop(volatile, None)
     digest = short_hash(stable_hash({"cfg": resolved, "data": content_hash}))
     return "__".join(
@@ -84,7 +86,8 @@ def variant_hash(cfg: DictConfig, ignored_keys: list[str] | None = None) -> str:
     """
     resolved = OmegaConf.to_container(cfg, resolve=True)
     assert isinstance(resolved, dict)
-    for volatile in ("fold", "folds", "force", "paths", "hydra", "split_id", "retain"):
+    for volatile in ("fold", "folds", "force", "paths", "hydra", "split_id", "retain",
+                     "finetune"):
         resolved.pop(volatile, None)
     for key in ignored_keys or []:
         node = resolved

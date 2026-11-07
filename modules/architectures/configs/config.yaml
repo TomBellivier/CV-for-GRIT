@@ -72,6 +72,18 @@ retain:
   name: null
   hpo_trials: false       # true = also export the HPO trials (one model per trial)
 
+# --- fine-tuning (verb `finetune`, src/insectpose/finetune.py) ---
+# python -m insectpose.cli finetune base=<variant_hash>
+# Starts from the fold-0 model of the retained ensemble carrying this variant_hash
+# (retained_models/pose/*/model_card.json), or from the only model carrying it.
+finetune:
+  base: null              # variant_hash of the base ensemble (alias on the CLI: base=...)
+  # One sub-folder per insect order: <order>/*.json (Label Studio exports) + <order>/images/.
+  # Relative to paths.root (modules/architectures/).
+  images_dir: ../../annotated_images/finetune-images
+  n_folds: 10
+  epochs: null            # null = the number of epochs the base model was trained with
+
 # --- report ---
 report:
   figures: true           # false = tables only (faster aggregation)

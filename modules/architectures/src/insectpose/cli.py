@@ -19,7 +19,7 @@ from insectpose.utils.logging import get_logger, setup_logging
 
 log = get_logger("cli")
 
-VERBS = ("prepare", "split", "train", "predict", "evaluate", "tune", "report")
+VERBS = ("prepare", "split", "train", "predict", "evaluate", "tune", "report", "finetune")
 
 
 def load_config(overrides: list[str], config_dir: Path | None = None) -> DictConfig:
@@ -42,6 +42,7 @@ def _split_args(argv: list[str]) -> tuple[str, list[str], dict[str, str]]:
             "  python -m insectpose.cli train experiment=exp_a_yolo_pooled folds=[0,1,2]\n"
             "  python -m insectpose.cli tune experiment=exp_a_yolo_pooled folds=all\n"
             "  python -m insectpose.cli evaluate run_id=<run_id>\n"
+            "  python -m insectpose.cli finetune base=<variant_hash>\n"
         )
     verb, rest = argv[0], argv[1:]
     if verb not in VERBS:
@@ -66,6 +67,12 @@ def main(argv: list[str] | None = None) -> Any:
 
     # `cv.fold=k` is a handy alias of `fold=k` (the current outer fold).
     overrides = [o.replace("cv.fold=", "fold=") for o in overrides]
+    if verb == "finetune":
+        # The base models are yolo_pooled: its approach config is the default here.
+        overrides = [o.replace("base=", "finetune.base=", 1) if o.startswith("base=") else o
+                     for o in overrides]
+        if not any(o.startswith("experiment=") for o in overrides):
+            overrides.insert(0, "experiment=exp_a_yolo_pooled")
     cfg = load_config(overrides)
     log.info("Verb '%s' | approach=%s | data=%s | fold=%s",
              verb, cfg.approach.name, cfg.data.scope, cfg.fold)
@@ -81,6 +88,10 @@ def main(argv: list[str] | None = None) -> Any:
         return pipeline.cmd_tune(cfg)
     if verb == "report":
         return pipeline.cmd_report(cfg)
+    if verb == "finetune":
+        from insectpose.finetune import cmd_finetune
+
+        return cmd_finetune(cfg)
 
     run_id = cli_args.get("run_id")
     if not run_id:

@@ -269,6 +269,13 @@ python -m insectpose.cli report
 - `python -m insectpose.cli evaluate run_id=<run_id>` re-evaluates an existing `yolo_pooled` run and makes it the ensemble, without retraining;
 - `retain.enabled=false` trains without touching the ensemble in place.
 
+**Fine-tuning on new images:** `finetune` adapts an existing ensemble to a small set of new images and measures the gain.
+- Put the images in `annotated_images/finetune-images/<order>/images/` and the Label Studio JSON export(s) of their keypoints in `annotated_images/finetune-images/<order>/` (`<order>` among the 4 groups).
+- `python -m insectpose.cli finetune base=<variant_hash>`: the base model is the fold-0 member of the retained ensemble carrying this `variant_hash` (see `retained_models/pose/*/model_card.json`), or its only member.
+- The images are split into 10 folds (`finetune.n_folds`). On each fold, the base model is evaluated as it is, then fine-tuned on the train of the fold for the number of epochs it was trained with (`finetune.epochs` to force another value), and both are evaluated on the same test images.
+- The comparison goes to `results/pose/finetune/<variant_hash>/`: `comparison_per_fold.csv` (fold, test images, before, after, delta per metric) and `comparison.csv` (mean and std over the folds).
+- Everything else stays in its own folders (`data/finetune/`, `runs/finetune/`): the main annotations, runs, report and `retained_models/` are not touched.
+
 **Other experiments:** `exp_b_yolo_per_dataset`, `exp_c_detect_then_pose`, `exp_d_lora`, `exp_e_group_bn`, `exp_f_yolo_reduced`, `exp_g_head_only`, `exp_h_lora_per_dataset` and `exp_ref_mean_pose` (in `configs/experiment/`). They are study objects: only `yolo_pooled` is exported to the pipeline.
 
 **Analyses** (written to `results/pose/`):
