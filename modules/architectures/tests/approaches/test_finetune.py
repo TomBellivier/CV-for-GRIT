@@ -86,7 +86,16 @@ def test_finetune_runs_10_folds_and_compares(fake_ultralytics, config_factory, p
     assert sorted(per_fold["fold"].unique()) == list(range(10))
     assert {"before", "after", "delta"} <= set(per_fold.columns)
     summary = pd.read_csv(out_dir / "comparison.csv")
-    assert "oks_ap" in set(summary["metric"])
+    assert {"detection_rate", "n_images_detected"} <= set(summary["metric"])
+    # Point metrics only on the images detected before AND after (none with the double,
+    # which never matches the GT); every metric on every image in comparison_all_images.
+    scopes = per_fold.groupby("metric")["evaluated_on"].first()
+    assert scopes["detection_rate"] == "all_test_images"
+    points = per_fold[per_fold["evaluated_on"] == "detected_before_and_after"]
+    detected = per_fold[per_fold["metric"] == "n_images_detected"]
+    assert points.empty == (detected[["before", "after"]].min(axis=1) == 0).all()
+    raw = pd.read_csv(out_dir / "comparison_all_images.csv")
+    assert "oks_ap" in set(raw["metric"])
     # One fine-tuning per fold, all from the base model, for the epochs asked.
     trains = [c for c in fake_ultralytics.calls if c["kind"] == "train"]
     assert len(trains) == 10 and all(c["epochs"] == 1 for c in trains)

@@ -80,6 +80,27 @@ def test_missed_instance_is_counted_as_failure(project, eval_cfg) -> None:
     assert values[("overall", "oks_ar")] == pytest.approx(0.5)
 
 
+def test_finetune_points_only_on_images_detected_before_and_after(project, eval_cfg) -> None:
+    """`finetune`: an image missed before must not lower the "before" point metrics."""
+    from insectpose.finetune import _metrics_on, detected_images
+
+    schema = load_schema(SCHEMA, project.configs)
+    schemas = {SCHEMA: schema}
+    k = schema.n_keypoints
+    kpts = _template(k)
+    gt = pd.DataFrame([_gt_row("coleoptera/a", kpts, k), _gt_row("coleoptera/b", kpts, k)])
+    before = pd.DataFrame([_pred_row("coleoptera/a", kpts, k)])   # b missed
+    after = pd.DataFrame([_pred_row(i, kpts, k) for i in ("coleoptera/a", "coleoptera/b")])
+
+    assert detected_images(before, gt, schemas, eval_cfg) == {"coleoptera/a"}
+    common = (detected_images(before, gt, schemas, eval_cfg)
+              & detected_images(after, gt, schemas, eval_cfg))
+    assert common == {"coleoptera/a"}
+    values = _metrics_on(before, gt, common, schemas, eval_cfg)
+    assert values["pck@0.25_thorax_width"] == pytest.approx(1.0)
+    assert detected_images(before.iloc[0:0], gt, schemas, eval_cfg) == set()
+
+
 def test_average_precision_hand_computed() -> None:
     scores = np.array([0.9, 0.8, 0.7])
     tp = np.array([True, False, True])

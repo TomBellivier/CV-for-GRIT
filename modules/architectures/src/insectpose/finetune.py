@@ -9,7 +9,9 @@ Protocol (pose only):
   3. per fold: the base model is evaluated as it is ("before"), then fine-tuned on the
      train of the fold for the number of epochs it was trained with ("after"); both are
      evaluated on the same untouched test images;
-  4. the before/after comparison is written to results/pose/finetune/<variant_hash>/.
+  4. the before/after comparison is written to results/pose/finetune/<variant_hash>/:
+     detection metrics on every test image, point metrics only on the images detected
+     both before AND after (see `write_comparison`).
 
 Everything this verb writes (canonical annotations, split, runs) lives under its own
 folders: the main datasets, runs and report are never touched, and the fine-tuned
@@ -28,7 +30,7 @@ from omegaconf import DictConfig, OmegaConf
 
 from insectpose.contracts import DATASETS, ContractError
 from insectpose.data.splits import build_splits, write_splits
-from insectpose.evaluation.evaluator import evaluate_run
+from insectpose.evaluation.evaluator import evaluate_predictions, evaluate_run
 from insectpose.paths import ProjectPaths
 from insectpose.registry import ADAPTERS
 from insectpose.utils.io import read_json, read_parquet
@@ -38,7 +40,8 @@ log = get_logger("finetune")
 
 CARD_NAME = "model_card.json"
 # Metrics printed in the console summary (all of them are in the CSV files).
-SUMMARY_METRICS = ("oks_ap", "pck@0.25_thorax_width", "nme", "measurement_mape_median")
+SUMMARY_METRICS = ("detection_rate", "oks_ap", "pck@0.25_thorax_width", "nme",
+                   "measurement_mape_median")
 
 
 # --- base model ------------------------------------------------------------------
@@ -137,31 +140,130 @@ def prepare_images(cfg: DictConfig, paths: ProjectPaths, images_dir: Path) -> li
 
 
 # --- comparison ------------------------------------------------------------------
+# Metrics that measure the DETECTION itself: they keep every test image of the fold.
+# All the others (point placement) are computed only on the images where the insect
+# is detected both before AND after fine-tuning, otherwise the images the base model
+# misses count as point failures and bias the "before" downwards.
+DETECTION_METRICS = ("det_ap@0.5", "det_ap@[.5:.95]", "kpt_coverage", "oks_ar")
+
+
 def _test_metrics(paths: ProjectPaths, run_id: str) -> pd.DataFrame:
     metrics = read_parquet(paths.metrics(run_id))
     return metrics[(metrics["split"] == "test") & (metrics["scope"] == "overall")]
 
 
-def write_comparison(paths: ProjectPaths, runs: dict[int, dict[str, str]],
-                     test_images: dict[int, list[str]], out_dir: Path) -> pd.DataFrame:
-    """Per-fold and mean before/after table. Side effect: two CSVs in `out_dir`."""
-    rows = []
-    for fold, pair in runs.items():
-        before = _test_metrics(paths, pair["before"]).set_index("metric")["value"]
-        after = _test_metrics(paths, pair["after"]).set_index("metric")["value"]
-        for metric in sorted(set(before.index) | set(after.index)):
-            rows.append({"fold": fold, "test_images": " ".join(test_images[fold]),
-                         "metric": metric, "before": before.get(metric),
-                         "after": after.get(metric)})
-    per_fold = pd.DataFrame(rows)
+def _test_predictions(paths: ProjectPaths, run_id: str, fold: int) -> pd.DataFrame:
+    file = paths.run_dir(run_id) / "predictions" / f"test_fold{fold}.parquet"
+    return read_parquet(file, artifact="predictions", validate=True)
+
+
+def _prepared(pred: pd.DataFrame, gt: pd.DataFrame, eval_cfg: Any
+              ) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """GT and predictions filtered exactly as `evaluate_predictions` does."""
+    pred = pred[pred["bbox_score"] >= float(eval_cfg.score_threshold_curves)]
+    return gt.reset_index(drop=True), pred.reset_index(drop=True)
+
+
+def detected_images(pred: pd.DataFrame, gt: pd.DataFrame, schemas: dict[str, Any],
+                    eval_cfg: Any) -> set[str]:
+    """Images where at least one GT insect is matched by a prediction.
+
+    Same matching as the point metrics (score_threshold_pointwise + match_oks_threshold):
+    an image counted here is exactly an image whose points are evaluated.
+    """
+    from insectpose.evaluation.bundle import EvalBundle
+    from insectpose.evaluation.matching import build_pairs
+
+    if pred.empty or gt.empty:
+        return set()
+    gt, pred = _prepared(pred, gt, eval_cfg)
+    pairs = build_pairs(gt, pred, schemas, area_source=str(eval_cfg.oks.area_source))
+    bundle = EvalBundle(gt=gt, pred=pred, pairs=pairs, schemas=schemas, cfg=eval_cfg)
+    return set(bundle.matched_instances()["image_id"])
+
+
+def _metrics_on(pred: pd.DataFrame, gt: pd.DataFrame, images: set[str],
+                schemas: dict[str, Any], eval_cfg: Any) -> pd.Series:
+    """Overall metrics of `pred` restricted to `images` (empty if no image)."""
+    if not images:
+        return pd.Series(dtype=float)
+    metrics = evaluate_predictions(pred[pred["image_id"].isin(images)],
+                                   gt[gt["image_id"].isin(images)], schemas, eval_cfg)
+    return metrics[metrics["scope"] == "overall"].set_index("metric")["value"]
+
+
+def _summarise(per_fold: pd.DataFrame) -> pd.DataFrame:
     per_fold["delta"] = per_fold["after"] - per_fold["before"]
     summary = (per_fold.groupby("metric")[["before", "after", "delta"]]
                .agg(["mean", "std"]).reset_index())
     summary.columns = ["_".join(c).strip("_") for c in summary.columns]
+    return summary
+
+
+def write_comparison(paths: ProjectPaths, runs: dict[int, dict[str, str]],
+                     test_images: dict[int, list[str]], out_dir: Path,
+                     annotations: pd.DataFrame, schemas: dict[str, Any],
+                     eval_cfg: Any) -> pd.DataFrame:
+    """Per-fold and mean before/after table, from the saved predictions only.
+
+    - detection metrics (DETECTION_METRICS + n/rate of detected images): every test image;
+    - every other metric: only the images detected before AND after (`evaluated_on`).
+
+    Side effects in `out_dir`: comparison.csv / comparison_per_fold.csv (corrected) and
+    comparison_all_images*.csv (every metric on every test image, for traceability).
+    """
+    rows, raw_rows = [], []
+    for fold, pair in runs.items():
+        fold_images = set(test_images[fold])
+        gt = annotations[annotations["image_id"].isin(fold_images)]
+        preds = {when: _test_predictions(paths, pair[when], fold) for when in ("before", "after")}
+        detected = {when: detected_images(preds[when], gt, schemas, eval_cfg)
+                    for when in preds}
+        common = detected["before"] & detected["after"]
+
+        full = {when: _test_metrics(paths, pair[when]).set_index("metric")["value"]
+                for when in preds}
+        points = {when: _metrics_on(preds[when], gt, common, schemas, eval_cfg)
+                  for when in preds}
+        base = {"fold": fold, "test_images": " ".join(test_images[fold])}
+
+        for metric in sorted(set(full["before"].index) | set(full["after"].index)):
+            raw_rows.append({**base, "metric": metric, "before": full["before"].get(metric),
+                             "after": full["after"].get(metric)})
+
+        n = len(fold_images)
+        for metric, b, a in [
+            ("n_images_detected", len(detected["before"]), len(detected["after"])),
+            ("detection_rate", len(detected["before"]) / n if n else float("nan"),
+             len(detected["after"]) / n if n else float("nan")),
+        ]:
+            rows.append({**base, "evaluated_on": "all_test_images", "n_images": n,
+                         "metric": metric, "before": b, "after": a})
+        for metric in DETECTION_METRICS:
+            if metric in full["before"].index or metric in full["after"].index:
+                rows.append({**base, "evaluated_on": "all_test_images", "n_images": n,
+                             "metric": metric, "before": full["before"].get(metric),
+                             "after": full["after"].get(metric)})
+        for metric in sorted(set(points["before"].index) | set(points["after"].index)):
+            if metric in DETECTION_METRICS:
+                continue
+            rows.append({**base, "evaluated_on": "detected_before_and_after",
+                         "n_images": len(common), "metric": metric,
+                         "before": points["before"].get(metric),
+                         "after": points["after"].get(metric)})
+        log.info("Fold %d: %d test image(s), detected before %d / after %d / both %d.",
+                 fold, n, len(detected["before"]), len(detected["after"]), len(common))
+
+    per_fold = pd.DataFrame(rows)
+    summary = _summarise(per_fold)
+    raw = pd.DataFrame(raw_rows)
+    raw_summary = _summarise(raw)
 
     out_dir.mkdir(parents=True, exist_ok=True)
     per_fold.to_csv(out_dir / "comparison_per_fold.csv", index=False)
     summary.to_csv(out_dir / "comparison.csv", index=False)
+    raw.to_csv(out_dir / "comparison_all_images_per_fold.csv", index=False)
+    raw_summary.to_csv(out_dir / "comparison_all_images.csv", index=False)
     return summary
 
 
@@ -237,7 +339,8 @@ def cmd_finetune(cfg: DictConfig) -> Path:
         runs[fold] = {"before": ctx.run_id, "after": after.run_id}
 
     out_dir = main_paths.results / "finetune" / variant
-    summary = write_comparison(paths, runs, test_images, out_dir)
+    summary = write_comparison(paths, runs, test_images, out_dir, annotations, schemas,
+                               cfg.eval)
     shown = summary[summary["metric"].isin(SUMMARY_METRICS)]
     log.info("Before / after fine-tuning, mean over %d folds (test):\n%s",
              n_folds, shown.to_string(index=False))
