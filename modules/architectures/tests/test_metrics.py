@@ -101,6 +101,30 @@ def test_finetune_points_only_on_images_detected_before_and_after(project, eval_
     assert detected_images(before.iloc[0:0], gt, schemas, eval_cfg) == set()
 
 
+def test_finetune_detected_means_carries_a_skeleton(project, cfg) -> None:
+    """Box score >= finetune.score_threshold, whatever the OKS: a wrong skeleton counts."""
+    from insectpose.finetune import _metrics_on, analysis_eval_cfg, detected_images
+
+    schema = load_schema(SCHEMA, project.configs)
+    schemas = {SCHEMA: schema}
+    k = schema.n_keypoints
+    kpts = _template(k)
+    far = [v + 40.0 for v in kpts]            # skeleton drawn, but far from the GT
+    gt = pd.DataFrame([_gt_row(i, kpts, k) for i in ("coleoptera/a", "coleoptera/b",
+                                                      "coleoptera/c")])
+    pred = pd.DataFrame([_pred_row("coleoptera/a", kpts, k, score=0.3),
+                         _pred_row("coleoptera/b", far, k, score=0.3),
+                         _pred_row("coleoptera/c", kpts, k, score=0.1)])
+    eval_cfg = analysis_eval_cfg(cfg)
+    assert eval_cfg.score_threshold_pointwise == pytest.approx(0.25)
+    assert cfg.eval.score_threshold_pointwise == pytest.approx(0.5)   # untouched
+
+    detected = detected_images(pred, gt, schemas, eval_cfg)
+    assert detected == {"coleoptera/a", "coleoptera/b"}
+    values = _metrics_on(pred, gt, detected, schemas, eval_cfg)
+    assert values["pck@0.25_thorax_width"] == pytest.approx(0.5)
+
+
 def test_average_precision_hand_computed() -> None:
     scores = np.array([0.9, 0.8, 0.7])
     tp = np.array([True, False, True])

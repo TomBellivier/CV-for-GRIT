@@ -83,6 +83,15 @@ finetune:
   images_dir: ../../annotated_images/finetune-images
   n_folds: 10
   epochs: null            # null = the number of epochs the base model was trained with
+  # Analysis only (enters no run_id: changing it replays no training).
+  # An image is "detected" when it carries a skeleton in the sense of the pipeline: a
+  # prediction with a box score >= this threshold, whatever its distance to the GT
+  # (keep it equal to POSE_CONF_THRESHOLD of pipeline/processing/config.py). The point
+  # metrics are computed on the images detected before AND after, at this threshold.
+  score_threshold: 0.25
+  # One before | after figure per test image, in the style of analyze_results --print:
+  # results/pose/finetune/<variant_hash>/figures/.
+  figures: true
 
 # --- report ---
 report:

@@ -96,6 +96,8 @@ def test_finetune_runs_10_folds_and_compares(fake_ultralytics, config_factory, p
     assert points.empty == (detected[["before", "after"]].min(axis=1) == 0).all()
     raw = pd.read_csv(out_dir / "comparison_all_images.csv")
     assert "oks_ap" in set(raw["metric"])
+    # One before | after figure per annotated image (each is in exactly one test fold).
+    assert len(list((out_dir / "figures").glob("fold*__*.png"))) == N_IMAGES
     # One fine-tuning per fold, all from the base model, for the epochs asked.
     trains = [c for c in fake_ultralytics.calls if c["kind"] == "train"]
     assert len(trains) == 10 and all(c["epochs"] == 1 for c in trains)

@@ -25,6 +25,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 from omegaconf import DictConfig, OmegaConf
 
@@ -140,11 +141,29 @@ def prepare_images(cfg: DictConfig, paths: ProjectPaths, images_dir: Path) -> li
 
 
 # --- comparison ------------------------------------------------------------------
-# Metrics that measure the DETECTION itself: they keep every test image of the fold.
-# All the others (point placement) are computed only on the images where the insect
-# is detected both before AND after fine-tuning, otherwise the images the base model
-# misses count as point failures and bias the "before" downwards.
-DETECTION_METRICS = ("det_ap@0.5", "det_ap@[.5:.95]", "kpt_coverage", "oks_ar")
+# Threshold-free metrics that measure the DETECTION itself: they keep every test image
+# of the fold, as written by the evaluator. All the others (point placement) are
+# recomputed only on the images that carry a skeleton both before AND after
+# fine-tuning, otherwise the images the base model misses count as point failures and
+# bias the "before" downwards. `kpt_coverage` is left out: it depends on the
+# acceptance threshold of the evaluator, replaced here by `detection_rate`.
+DETECTION_METRICS = ("det_ap@0.5", "det_ap@[.5:.95]", "oks_ar")
+SKIPPED_POINT_METRICS = ("kpt_coverage", "pck_normalizer_fallback_rate")
+
+
+def analysis_eval_cfg(cfg: DictConfig) -> DictConfig:
+    """Evaluation config of the comparison: "detected" = carries a skeleton.
+
+    Like the pipeline, a prediction is kept when its box score reaches
+    `finetune.score_threshold`, and its points are then evaluated whatever their
+    distance to the GT (match_oks_threshold = 0): a wrong skeleton lowers the PCK and
+    raises the NME instead of disappearing from the point metrics.
+    """
+    eval_cfg = cfg.eval.copy()
+    OmegaConf.update(eval_cfg, "score_threshold_pointwise",
+                     float(cfg.finetune.get("score_threshold", 0.25)))
+    OmegaConf.update(eval_cfg, "match_oks_threshold", 0.0)
+    return eval_cfg
 
 
 def _test_metrics(paths: ProjectPaths, run_id: str) -> pd.DataFrame:
@@ -169,7 +188,8 @@ def detected_images(pred: pd.DataFrame, gt: pd.DataFrame, schemas: dict[str, Any
     """Images where at least one GT insect is matched by a prediction.
 
     Same matching as the point metrics (score_threshold_pointwise + match_oks_threshold):
-    an image counted here is exactly an image whose points are evaluated.
+    an image counted here is exactly an image whose points are evaluated. With
+    `analysis_eval_cfg`, it is an image that carries a skeleton in the pipeline.
     """
     from insectpose.evaluation.bundle import EvalBundle
     from insectpose.evaluation.matching import build_pairs
@@ -206,6 +226,7 @@ def write_comparison(paths: ProjectPaths, runs: dict[int, dict[str, str]],
                      eval_cfg: Any) -> pd.DataFrame:
     """Per-fold and mean before/after table, from the saved predictions only.
 
+    `eval_cfg` is the one of `analysis_eval_cfg` (a "detected" image carries a skeleton).
     - detection metrics (DETECTION_METRICS + n/rate of detected images): every test image;
     - every other metric: only the images detected before AND after (`evaluated_on`).
 
@@ -245,7 +266,7 @@ def write_comparison(paths: ProjectPaths, runs: dict[int, dict[str, str]],
                              "metric": metric, "before": full["before"].get(metric),
                              "after": full["after"].get(metric)})
         for metric in sorted(set(points["before"].index) | set(points["after"].index)):
-            if metric in DETECTION_METRICS:
+            if metric in DETECTION_METRICS or metric in SKIPPED_POINT_METRICS:
                 continue
             rows.append({**base, "evaluated_on": "detected_before_and_after",
                          "n_images": len(common), "metric": metric,
@@ -265,6 +286,126 @@ def write_comparison(paths: ProjectPaths, runs: dict[int, dict[str, str]],
     raw.to_csv(out_dir / "comparison_all_images_per_fold.csv", index=False)
     raw_summary.to_csv(out_dir / "comparison_all_images.csv", index=False)
     return summary
+
+
+# --- figures ---------------------------------------------------------------------
+_GT_COLOR = (255, 255, 255)
+_SKELETON_COLOR = (40, 40, 40)
+
+
+def _font(size: int) -> Any:
+    from PIL import ImageFont
+
+    try:
+        return ImageFont.load_default(size=size)   # Pillow >= 10.1
+    except TypeError:
+        return ImageFont.load_default()
+
+
+def _conf_rgb(value: float) -> tuple[int, int, int]:
+    """Confidence -> RdYlGn colour, as analyze_results --print (red 0 -> green 1)."""
+    import matplotlib
+
+    r, g, b, _ = matplotlib.colormaps["RdYlGn"](min(max(float(value), 0.0), 1.0))
+    return int(r * 255), int(g * 255), int(b * 255)
+
+
+def _panel(image_path: Path, gt_rows: pd.DataFrame, pred: pd.DataFrame, title: str,
+           schemas: dict[str, Any], eval_cfg: Any, threshold: float) -> Any:
+    """One annotated copy of the image: GT in white, skeleton coloured by confidence.
+
+    The skeleton is drawn only if the box score reaches `threshold`, like the pipeline.
+    """
+    from PIL import Image, ImageDraw
+
+    from insectpose.evaluation.matching import build_pairs
+
+    image = Image.open(image_path).convert("RGB")
+    draw = ImageDraw.Draw(image)
+    width, height = image.size
+    radius = max(2.0, 0.005 * max(width, height))
+    line = max(1, int(radius / 2))
+    schema = schemas[str(gt_rows["keypoint_schema"].iloc[0])]
+
+    for gt in gt_rows.itertuples(index=False):
+        kpts = np.asarray(gt.kpts_xy, dtype=float).reshape(-1, 2)
+        vis = np.asarray(gt.kpts_vis, dtype=int) > 0
+        small = radius * 0.6
+        for (x, y) in kpts[vis]:
+            draw.ellipse([x - small, y - small, x + small, y + small],
+                         outline=_GT_COLOR, width=max(1, line // 2))
+
+    lines = [title]
+    if pred.empty:
+        lines.append("no prediction")
+    else:
+        top = pred.sort_values("bbox_score", ascending=False).head(1).reset_index(drop=True)
+        score = float(top.loc[0, "bbox_score"])
+        pairs = build_pairs(gt_rows.reset_index(drop=True), top, schemas,
+                            area_source=str(eval_cfg.oks.area_source))
+        oks = float(pairs[0].oks.max()) if pairs and pairs[0].oks.size else float("nan")
+        if score >= threshold:
+            kpts = np.asarray(top.loc[0, "kpts_xy"], dtype=float).reshape(-1, 2)
+            conf = np.asarray(top.loc[0, "kpts_score"], dtype=float)
+            for a, b in schema.skeleton:
+                if a < len(kpts) and b < len(kpts):
+                    draw.line([tuple(kpts[a]), tuple(kpts[b])], fill=_SKELETON_COLOR,
+                              width=line)
+            for (x, y), c in zip(kpts, conf):
+                draw.ellipse([x - radius, y - radius, x + radius, y + radius],
+                             fill=_conf_rgb(c), outline=(0, 0, 0))
+            lines.append(f"box score {score:.2f} | OKS {oks:.2f}")
+        else:
+            lines.append(f"box score {score:.2f} < {threshold:g}: no skeleton")
+
+    size = max(12, int(0.025 * max(width, height)))
+    font = _font(size)
+    step = int(size * 1.3)
+    box_w = max(draw.textbbox((0, 0), t, font=font)[2] for t in lines) + size
+    draw.rectangle([0, 0, box_w, step * len(lines) + size // 2], fill=(0, 0, 0))
+    for i, text in enumerate(lines):
+        draw.text((size // 2, size // 4 + i * step), text, fill=(255, 255, 255), font=font)
+    return image
+
+
+def export_figures(paths: ProjectPaths, runs: dict[int, dict[str, str]],
+                   test_images: dict[int, list[str]], annotations: pd.DataFrame,
+                   schemas: dict[str, Any], eval_cfg: Any, out_dir: Path) -> list[Path]:
+    """One `before | after` image per test image, in the style of analyze_results --print.
+
+    White circles: GT points. Coloured points: predicted skeleton, red (confidence 0) to
+    green (1), drawn only when the box score reaches the threshold of the pipeline.
+    Side effect: writes out_dir/fold<k>__<image>.png.
+    """
+    from PIL import Image
+
+    threshold = float(eval_cfg.score_threshold_pointwise)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    written: list[Path] = []
+    for fold, pair in runs.items():
+        preds = {when: _test_predictions(paths, pair[when], fold) for when in ("before", "after")}
+        gt = annotations[annotations["image_id"].isin(set(test_images[fold]))]
+        for image_id, gt_rows in gt.groupby("image_id"):
+            image_path = paths.data / str(gt_rows["image_path"].iloc[0])
+            if not image_path.is_file():
+                log.warning("Image missing, figure skipped: %s", image_path)
+                continue
+            panels = [
+                _panel(image_path, gt_rows, preds[when][preds[when]["image_id"] == image_id],
+                       f"{when} fine-tuning (fold {fold})", schemas, eval_cfg, threshold)
+                for when in ("before", "after")
+            ]
+            gap = max(4, panels[0].width // 100)
+            canvas = Image.new("RGB", (panels[0].width * 2 + gap, panels[0].height),
+                               (255, 255, 255))
+            canvas.paste(panels[0], (0, 0))
+            canvas.paste(panels[1], (panels[0].width + gap, 0))
+            name = str(image_id).replace("/", "_").replace("\\", "_")
+            path = out_dir / f"fold{fold}__{Path(name).stem}.png"
+            canvas.save(path)
+            written.append(path)
+    log.info("%d before | after figure(s) written to %s", len(written), out_dir)
+    return written
 
 
 # --- verb ------------------------------------------------------------------------
@@ -339,8 +480,14 @@ def cmd_finetune(cfg: DictConfig) -> Path:
         runs[fold] = {"before": ctx.run_id, "after": after.run_id}
 
     out_dir = main_paths.results / "finetune" / variant
+    eval_cfg = analysis_eval_cfg(cfg)
+    log.info("Analysis: an image is detected when its box score is >= %g (skeleton drawn).",
+             float(eval_cfg.score_threshold_pointwise))
     summary = write_comparison(paths, runs, test_images, out_dir, annotations, schemas,
-                               cfg.eval)
+                               eval_cfg)
+    if bool(cfg.finetune.get("figures", True)):
+        export_figures(paths, runs, test_images, annotations, schemas, eval_cfg,
+                       out_dir / "figures")
     shown = summary[summary["metric"].isin(SUMMARY_METRICS)]
     log.info("Before / after fine-tuning, mean over %d folds (test):\n%s",
              n_folds, shown.to_string(index=False))
